@@ -43,6 +43,12 @@
 
 В snapshot находятся 26 query operations и 10 mutation operations. Веб-приложение дополнительно использует `getPaginatedCollection(limit, after)` с `paginatedCollection.tracks.items/page.endCursor`; этой операции нет в Python `userTracks` document. Browser и ephemeral terminal ранее подтвердили initial/next cursor pages с `200`; в списке наблюдались повторные IDs и расхождение с collection count. Для полного экспорта нужна дедупликация и reconciliation страниц.
 
+### Независимый legacy cross-check: `oklookat/gozvuk`
+
+Статически просмотрен [MIT snapshot `fc4ed9399d70f599e0d85a133aa663d0a8cbe3fb`](https://github.com/oklookat/gozvuk/tree/fc4ed9399d70f599e0d85a133aa663d0a8cbe3fb), последний commit 2023-08-08. Go 1.20 client отправляет GraphQL JSON в `POST https://zvuk.com/api/v1/graphql` с `X-Auth-Token`; README указывает, что user token берётся из `/api/tiny/profile`. Source содержит `userCollection` (списки ID по категориям), `userTracks(orderBy, orderDirection)`, отдельный `getFullTrack(ids)` и обычный `getTracks(ids)`. `userTracks` выбирает только `id` и `collectionItemData.lastModified`, не содержит page size/cursor. `getFullTrack` запрашивает больше полей и возвращает их через GraphQL field `getTracks`. Отдельная особенность wrapper: outer request `variables` serializes как JSON string вместо JSON object; live compatibility не проверена.
+
+README автора предупреждает, что отдельные сохранённые ID могут вернуть пустые track objects; в миграторе проверять присутствие непустого ID/title и учитывать неразрешённые записи отдельно, не считать размер массива гидратированных карточек числом исходных лайков. Repo также содержит `addItemToCollection`/`removeItemFromCollection` и другие мутации, но ни одна не нужна source-export этапу. Snapshot подтверждает существование старого non-paginated community path, не его работоспособность на текущем backend. В этой среде Go CLI/test suite не запускались; live auth повторно не выполнялся. Это независимая старая сверка к `trudenboy/zvuk-music`, а не замена актуальному `getPaginatedCollection` из веб-клиента.
+
 ### Изменения данных — live mutations не выполнялись
 
 | Mutation | Переменные | Эффект |
