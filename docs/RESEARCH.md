@@ -153,6 +153,7 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 
 - Открыта отдельная Chrome-вкладка `/favorites`; исходную вкладку пользователя не перезагружали. После загрузки UI сделал `POST /api/v1/graphql` для `getPaginatedCollection` (`after`, `limit`), `getCollectionIds` (без variables), `getCollectionCount` (без variables) и `getUnreadNotificationsCount` (`availableTypes`); все четыре ответа — `200 application/graphql-response+json`. `GET /api/tiny/profile` также вернул `200 application/json`, профильное тело не читалось.
 - В рабочие заметки попали только методы, routes, operation names, имена ключей variables и статусы. Authorization/cookie headers и response bodies не читались; значения variables не выводились и не сохранялись; названия треков, IDs, cursor и размер коллекции не записывались. В этой итерации новый authenticated terminal replay не делался; источниковый recheck `trudenboy/zvuk-music` отдельно подтверждает, что его готовый `get_liked_tracks()` не обходит cursor.
+- В следующем read-only проходе cursor-страницы разбирались в памяти и сравнивались set-в- set с `getCollectionIds`; оба уникальных набора совпали после дедупликации повторов, без повторных cursor и GraphQL errors. `getCollectionCount.tracks` разошёлся с уникальным набором и не подходит как checksum. Чистые terminal GET к обоим profile route и safe GraphQL probe снова получили `418 text/html`; тела не сохранялись.
 - Подробная запись: `docs/providers/zvuk-api-inventory.md`.
 
 ## Первичные источники

@@ -153,6 +153,12 @@ Live проверки касались только чтения. Для наш�
 
 Эта трасса независимо подтверждает, что текущий web UI запускает cursor-запрос лайков и ID/count cross-check в открытой Chrome-сессии. В документацию перенесены только operation names, имена variable keys, route, status и MIME type; значения headers/variables, response bodies, трековые названия/ID и cursor не сохранялись. Эта итерация не выполняла terminal replay с browser credentials; свежий чистый unauthenticated terminal probe не запускался. Схема ответов и пагинационная логика остаются подтверждены предыдущими проверками выше.
 
+### Проверка завершения cursor-выгрузки и terminal boundary (27.10.2026)
+
+В отдельной Chrome-вкладке `/favorites` после включения сетевого наблюдения выполнено read-only прокручивание списка. Ответы GraphQL разбирались только внутри процесса: track IDs накапливались в set и сразу сравнивались с `collection.tracks` из `getCollectionIds`; названия, ID, cursor, число треков и тело ответа не записывались. Курсоры продвигались без повторов, GraphQL `errors` не было, body retrieval завершился без ошибок. Уникальный набор из cursor-страниц совпал с ID-only списком `getCollectionIds`; повторные карточки страниц были дедуплицированы. `getCollectionCount.tracks` не совпал с числом уникальных cursor IDs, поэтому count нельзя использовать как checksum. Ответ страницы не содержал `hasNextPage`; проверка завершила чтение по совпадению наборов, а не по серверному флагу конца.
+
+Следом чистый terminal `curl` без cookies/token проверил `GET /api/tiny/profile`, `GET /api/v2/tiny/profile` и безопасный `POST /api/v1/graphql` с `query SafeProbe { __typename }`. Все вернули `418 text/html`; тела ответов не сохранялись. Это повторно доказывает лишь, что прямой unauthenticated CLI path блокируется WAF. Авторизованный terminal replay в этой итерации не выполнялся.
+
 ## Продуктовый вывод
 
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.
