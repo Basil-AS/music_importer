@@ -15,7 +15,7 @@
 
 | Назначение | Запрос | Авторизация и параметры | Подтверждение / ограничения |
 |---|---|---|---|
-| Начать официальный OAuth | `GET https://accounts.spotify.com/authorize` | Authorization Code + PKCE; `client_id`, точный registered `redirect_uri`, `scope=user-library-read`, `state`, `code_challenge_method=S256`, `code_challenge` | Official; параметры изучены, flow не запущен из-за Developer Terms gate |
+| Начать официальный OAuth | `GET https://accounts.spotify.com/authorize` | Authorization Code + PKCE; `client_id`, точный registered `redirect_uri`, `scope=user-library-read`, `state`, `code_challenge_method=S256`, `code_challenge` | Official; параметры изучены, flow не запущен: Developer Terms не приняты, Premium с ошибкой оплаты не подтверждён |
 | Обменять code / обновить токен | `POST https://accounts.spotify.com/api/token` | Form-urlencoded; authorization code включает `client_id`, `code`, `redirect_uri`, `code_verifier`; refresh включает `grant_type=refresh_token`, `refresh_token`, `client_id` | Official; обмен и refresh на пользовательском токене не выполнялись |
 | Читать saved/Liked Songs | `GET https://api.spotify.com/v1/me/tracks?limit=50&offset=0` | `user-library-read`; `limit` максимум 50, `offset`, продолжать по `next` до `null`; ответ содержит `added_at`, track metadata/ISRC | Official; в текущей документации есть маршрут. Чистый запрос без токена дал `401`; authenticated OAuth flow не тестировали |
 | Каталожный поиск | `GET https://api.spotify.com/v1/search` | OAuth; `type=track`, `q`; Development Mode `limit` максимум 10 | Official; без токена проверенный запрос дал `401` |
@@ -67,6 +67,7 @@ Spotify archive — отдельный offline export path, не HTTP API: фа�
 ## Источники и следующие проверки
 
 - Подробные provider notes: [Spotify](providers/spotify.md), [Apple Music](providers/apple-music.md), [Яндекс Музыка](providers/yandex-music.md), [Звук](providers/zvuk.md).
+- Полные machine-readable route inventories: [Spotify official OpenAPI](providers/spotify-openapi-inventory.md), [Yandex community OpenAPI](providers/yandex-openapi-inventory.md).
 - Official Spotify: [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide), [saved tracks](https://developer.spotify.com/documentation/web-api/reference/get-users-saved-tracks), [save to library](https://developer.spotify.com/documentation/web-api/reference/save-library-items).
 - Official Apple: [Apple Music API](https://developer.apple.com/documentation/AppleMusicAPI), [ISRC lookup](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-isrc), [iTunes Search examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/SearchExamples.html).
 - Community Yandex: [OpenAPI](https://ym.marshal.dev/api/), [Device Flow source](https://github.com/MarshalX/yandex-music-api/blob/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/_client/device_auth.py).

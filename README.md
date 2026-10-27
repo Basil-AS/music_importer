@@ -8,6 +8,7 @@
 - [Обзор API, авторизации и ограничений сервисов](docs/RESEARCH.md)
 - [API-заметки: SberZvuk / Звук](docs/providers/zvuk.md)
 - [API-заметки: Spotify](docs/providers/spotify.md)
+- [Полный индекс 96 официальных Spotify OpenAPI операций](docs/providers/spotify-openapi-inventory.md)
 - [API-заметки: Apple Music](docs/providers/apple-music.md)
 - [API-заметки: Яндекс Музыка](docs/providers/yandex-music.md)
 - [Полный индекс 150 community OpenAPI операций Яндекс Музыки](docs/providers/yandex-openapi-inventory.md)
