@@ -28,7 +28,7 @@
   function checkLocalExtension() {
     const button = $('#extensionImportBtn');
     const status = $('#extensionStatus');
-    if (extensionCheckInProgress) return;
+    if (extensionCheckInProgress || state.extensionAvailable) return;
     if (!window.crypto?.randomUUID) {
       status.textContent = 'Этот браузер не поддерживает проверку локального расширения. Используйте Chrome.';
       button.textContent = 'Откройте в Chrome';
@@ -58,9 +58,10 @@
       clearTimeout(timeout);
       window.removeEventListener('message', onMessage);
       state.extensionAvailable = true;
-      status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}.`;
-      button.textContent = 'Сканировать открытые аккаунты';
+      status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}. Начинаю сбор открытых аккаунтов.`;
+      button.textContent = 'Подключаем аккаунты…';
       button.disabled = false;
+      void scanOpenAccounts(true);
     };
     window.addEventListener('message', onMessage);
     window.postMessage({ source: 'music-importer-local-app', type: 'extension-ping', requestId }, location.origin);
@@ -721,15 +722,17 @@
     });
   }
 
-  $('#extensionImportBtn').addEventListener('click', async (event) => {
-    const button = event.currentTarget;
+  async function scanOpenAccounts(automatic = false) {
+    const button = $('#extensionImportBtn');
     if (!state.extensionAvailable) {
       checkLocalExtension();
       return;
     }
     button.disabled = true;
     button.textContent = 'Сканируем аккаунты…';
-    $('#extensionStatus').textContent = 'Проверяем открытые вкладки сервисов и читаем подтверждённые библиотеки…';
+    $('#extensionStatus').textContent = automatic
+      ? 'Расширение подключено. Проверяю открытые вкладки сервисов и читаю библиотеки…'
+      : 'Проверяю открытые вкладки сервисов и читаю подтверждённые библиотеки…';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
     try {
       let response = await requestAllLibraries(true);
@@ -755,16 +758,20 @@
       selectProviderSnapshot(selectedProvider);
       const unavailable = Object.values(response.statuses || {}).filter((status) => status.status === 'unavailable').length;
       $('#extensionStatus').textContent = `Подключено аккаунтов: ${connected.length} из 4${unavailable ? ` · остальные недоступны: ${unavailable}` : ''}. Выберите любой источник выше.`;
-      if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не открыта`);
-      else toast(`Загружены библиотеки всех ${connected.length} аккаунтов`);
+      if (!automatic || connected.length) {
+        if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не открыта`);
+        else toast(`Загружены библиотеки всех ${connected.length} аккаунтов`);
+      }
     } catch (error) {
       $('#extensionStatus').textContent = error.message || 'Не удалось загрузить открытые библиотеки.';
-      toast(error.message || 'Не удалось получить данные из расширения.');
+      if (!automatic) toast(error.message || 'Не удалось получить данные из расширения.');
     } finally {
       button.disabled = false;
       button.textContent = 'Обновить открытые аккаунты';
     }
-  });
+  }
+
+  $('#extensionImportBtn').addEventListener('click', () => scanOpenAccounts(false));
 
   $('#templateBtn').addEventListener('click', () => {
     const blob = new Blob(['title,artist,album,isrc,duration_ms,id\n"Снег","Моя Мишель","Кино",,,\n'], { type: 'text/csv;charset=utf-8' });
