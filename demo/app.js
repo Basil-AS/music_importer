@@ -208,7 +208,22 @@
     }).filter((track) => track.title && track.artist);
   }
 
-  const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+  const appleCatalogAdapter = {
+    id: 'apple-music',
+    maxConcurrentSearches: 3,
+    async searchTracks(track, context = {}) {
+      const params = new URLSearchParams({
+        term: (track.query || `${track.title} ${track.artist}`).trim(),
+        entity: 'song',
+        limit: '15',
+        country: context.storefront || $('#storefront').value,
+      });
+      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`);
+      if (!response.ok) throw new Error(`Каталог ответил ${response.status}`);
+      const payload = await response.json();
+      return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
+    },
+  };
 
   function applySuggestion(track) {
     const suggestion = window.MusicMatcher.suggestBestMatch(track, track.matches);
@@ -243,12 +258,12 @@
     track.match = null;
     track.selected = false;
     renderTracks();
-    const params = new URLSearchParams({ term: (track.query || `${track.title} ${track.artist}`).trim(), entity: 'song', limit: '15', country: $('#storefront').value });
     try {
-      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`);
-      if (!response.ok) throw new Error(`Каталог ответил ${response.status}`);
-      const payload = await response.json();
-      track.matches = (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
+      const [result] = await window.MusicTransferEngine.searchMany(appleCatalogAdapter, [track], {
+        context: { storefront: $('#storefront').value },
+      });
+      if (result?.error) throw result.error;
+      track.matches = result?.candidates || [];
       track.searched = true;
       track.searchError = false;
       applySuggestion(track);
@@ -278,37 +293,32 @@
     updateCounts();
 
     try {
-      const queryKey = (track) => `${$('#storefront').value}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`;
-      const groupsByQuery = new Map();
       pending.forEach((track) => {
-        const key = queryKey(track);
-        if (!groupsByQuery.has(key)) groupsByQuery.set(key, { key, tracks: [] });
-        groupsByQuery.get(key).tracks.push(track);
+        track.searching = true;
+        track.searchError = false;
+        track.matches = [];
+        track.match = null;
+        track.selected = false;
       });
-      const queue = [...groupsByQuery.values()];
-      const workerCount = Math.min(3, queue.length);
-      let queueIndex = 0;
-      await Promise.all(Array.from({ length: workerCount }, async () => {
-        while (queueIndex < queue.length) {
-          const group = queue[queueIndex++];
-          const track = group.tracks[0];
-          await requestTrackMatches(track);
-          group.tracks.slice(1).forEach((duplicate) => {
-            duplicate.matches = track.matches;
-            duplicate.searched = track.searched;
-            duplicate.searchError = track.searchError;
-            duplicate.errorMessage = track.errorMessage;
-            if (duplicate.searched && !duplicate.searchError) applySuggestion(duplicate);
-          });
-          if (track.searchError) {
-            group.tracks.slice(1).forEach((duplicate) => { duplicate.searching = false; });
+      renderTracks();
+      await window.MusicTransferEngine.searchMany(appleCatalogAdapter, pending, {
+        context: { storefront: $('#storefront').value },
+        keyFor: (track) => `${$('#storefront').value}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        onProgress: async (group) => {
+          for (const track of group.tracks) {
+            track.searching = false;
+            track.searchError = Boolean(group.error);
+            track.errorMessage = group.error ? (group.error instanceof TypeError ? 'Каталог недоступен. Проверьте соединение и повторите поиск.' : group.error.message) : '';
+            track.searched = !group.error;
+            track.matches = group.candidates;
+            if (track.searched) applySuggestion(track);
+            else { track.match = null; track.selected = false; }
           }
           completed += group.tracks.length;
           $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
           renderTracks();
-          await wait(160);
-        }
-      }));
+        },
+      });
       const withResults = state.tracks.filter((track) => track.searched && track.matches.length).length;
       const failed = state.tracks.filter((track) => track.searchError).length;
       $('#searchStatus').textContent = failed ? `Найдено: ${withResults} · ошибок: ${failed}` : `Найдено: ${withResults} из ${state.tracks.length}`;
