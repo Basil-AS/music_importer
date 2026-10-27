@@ -37,7 +37,7 @@ Spotify archive — отдельный offline export path, не HTTP API: фа�
 | Прочитать Favorite Songs для read-back | `GET /v1/me/library/playlists` → найти системный Favorite Songs → `GET /v1/me/library/playlists/{id}/tracks` | Official API требует оба токена; web-player в live probe использовал `Authorization` и `Media-User-Token` | Browser/terminal read-only дал `200` на список playlist и один Favorite Songs item; per-account playlist ID не сохранять |
 | Поставить Favorite | `POST https://api.music.apple.com/v1/me/favorites?ids[songs]=<catalog-id>` | Developer Token + Music User Token | Official; Apple указывает `202 Accepted`; ни одной записи в этом проекте не отправляли |
 | Library add или обычный playlist | `POST /v1/me/library?ids[songs]=...`; playlist: `POST /v1/me/library/playlists`, затем `POST /v1/me/library/playlists/{id}/tracks` | Developer Token + Music User Token | Official; это не эквивалент Favorite Songs |
-| Локальный Music.app favorite | AppleScript `set favorited of track ... to true` | macOS Music.app automation; HTTP auth не требуется | Системный SDEF объявляет read/write `favorited`; live write ещё не проверяли. Официальный REST путь и локальный AppleScript — разные интерфейсы |
+| Проверить локальные Favorites | AppleScript `count of (every track whose favorited is true)` | macOS Music.app automation; HTTP auth не требуется | Clean terminal read-only query успешно выполнен; число и записи не сохранялись. Write `set favorited ... to true` ещё не проверяли |
 
 ## Яндекс Музыка
 
@@ -73,4 +73,4 @@ Spotify archive — отдельный offline export path, не HTTP API: фа�
 - Community Yandex: [OpenAPI](https://ym.marshal.dev/api/), [Device Flow source](https://github.com/MarshalX/yandex-music-api/blob/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/_client/device_auth.py).
 - Community Zvuk: [`zvuk-music`](https://github.com/trudenboy/zvuk-music), [`zvuk-swift`](https://github.com/korenskoy/zvuk-swift), user's [`ZvukDownloader`](https://github.com/Basil-AS/ZvukDownloader).
 
-Ключевые оставшиеся runtime checks: независимая сверка полного Yandex likes total/refs; повторная cursor reconciliation Звука и уточнение subscription gate; безопасный отдельный Apple Music.app favorite write/read-back только на выбранной тестовой записи; Spotify official OAuth — после того, как владелец аккаунта ознакомится с Terms и решит принять их. В проекте не выполнялись лайк/unlike и Apple write mutations.
+Ключевые оставшиеся runtime checks: независимая сверка полного Yandex likes total/refs; повторная cursor reconciliation Звука и уточнение subscription gate; безопасный Apple Music.app favorite write/read-back на выбранной тестовой записи; Spotify official OAuth после подтверждения active Premium и принятия Developer Terms через рабочий dashboard. В проекте не выполнялись лайк/unlike и Apple write mutations.
