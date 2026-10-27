@@ -119,6 +119,20 @@ Live проверки касались только чтения. Для наш�
 
 Из сетевой трассы оставлены только operation names, имена переменных, типы/имена полей и HTTP status. Значения cookies, токенов, идентификаторов, названий, количества записей и cursor не выводились и не сохранялись; запросы были read-only.
 
+### Живая трасса `/favorites` и чистая terminal-проверка (27.10.2026)
+
+В той же подключённой Chrome-сессии открыта видимая страница `/favorites`. Пассивная трасса подтвердила эти read-only операции `POST /api/v1/graphql` (все `200 application/graphql-response+json`):
+
+| Operation | Переменные | Форма ответа |
+|---|---|---|
+| `getPaginatedCollection` | `after`, `limit`; начальный вызов: пустой cursor и `limit=30` | `data.paginatedCollection.tracks.{items,page.endCursor}`; `hasNextPage` в наблюдённой форме `page` отсутствовал |
+| `getCollectionIds` | без variables | `data.collection.{artists,bookAuthors,books,chapters,episodes,playlists,podcasts,profiles,releases,tracks}`, категории представлены массивами `{id}` |
+| `getCollectionCount` | без variables | `data.collectionCount.tracks: number` |
+
+Схема короткой track-card в cursor-ответе включает ключи `id`, `title`, `artists`, `release`, `duration`, `availability`, `explicit`, `hasFlac`, `lyrics`, `mark`, `artistTemplate`, `childParam`, `zchan`, `__typename`; сохранены только имена полей и типы. `getCollectionIds` даёт ID-only набор категорий для reconciliation; конкретные ID не записывались. Поскольку observed `page` содержит `endCursor`, но не `hasNextPage`, экспортёр должен обнаруживать завершение аккуратно и сверять собранные уникальные IDs с `getCollectionIds`, не полагаясь на count.
+
+Сразу после browser capture без cookies и любого auth header из terminal отправлен только публичный безопасный GraphQL probe `query SafeProbe { __typename }`; он вернул `418 text/html`. Response body не сохранялся. Это повторно подтверждает различие между browser session и чистым CLI/WAF, не доказывая отсутствие API и не оправдывая обход антибот-защиты. В трассе не читались заголовки авторизации/cookies и не сохранялись значения коллекции; никаких mutations не выполнялось.
+
 ## Продуктовый вывод
 
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.

@@ -121,6 +121,13 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - `getCollectionCount` имеет форму `collectionCount.tracks: number`; фактическое значение не записывалось и прежние live сверки показывают, что count не является надёжным checksum.
 - Для трассы сохранены только route/operation/status, ключи переменных и безопасная схема полей; секреты, записи коллекции, IDs и cursor не выводились и не сохранялись. Никаких мутаций не выполнялось. Подробная запись: `docs/providers/zvuk-api-inventory.md`.
 
+## Zvuk `/favorites` live capture + clean CLI probe (27.10.2026)
+
+- Текущая подключённая вкладка Chrome открыла `/favorites` и отправила `getPaginatedCollection(limit=30, after="")`, `getCollectionIds` и `getCollectionCount` на `/api/v1/graphql`; каждый вернул `200 application/graphql-response+json`.
+- `getPaginatedCollection` вернул форму `paginatedCollection.tracks.{items,page.endCursor}`; observed `page` не содержал `hasNextPage`. `getCollectionIds` содержит ID-only массивы по категориям, в том числе `collection.tracks`; для схемы записи оставлены только названия и типы полей.
+- Сразу после этого чистый terminal probe GraphQL `query SafeProbe { __typename }` без cookies/auth headers получил `418 text/html`; body не сохранялся. Это WAF/session-boundary evidence, не проверка отсутствия endpoint и не основание обходить защиту.
+- Секретные headers и значения данных не читались и не сохранялись; мутаций не было. Полная схема и caveat по cursor termination записаны в `docs/providers/zvuk-api-inventory.md`.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
