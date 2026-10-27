@@ -307,3 +307,10 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Config directory is created `0700`, token/credential JSON is written `0600`. Apple credentials are nevertheless entered as CLI flags or environment variables; those are manual web-player tokens rather than user-consent OAuth. Apple helper retries 429 and all 5xx for both reads and writes, with no idempotency key on playlist-add POST; an ambiguous write response needs a read-back before retrying.
 - Local `make test` was attempted in the cloned source but did not start because this environment has no `go` binary. GitHub API confirmed the pinned commit has a successful upstream `check` workflow on 2026-08-15 (vet, lint, govulncheck, tests, build, curation gate). This is repository CI evidence, not a live provider test.
 - Updated the [project catalog](PROJECTS.md) and [Apple Music endpoint audit](providers/apple-music.md). No OAuth, library writes, or account-specific requests were made.
+
+## Apple Music Transfer UI retry (2026-10-27)
+
+- Opened a fresh visible Chrome tab to Apple Music Library. The page rendered the Library and account menu; the menu included **Transfer Music**.
+- Selecting Transfer Music opened a region confirmation screen with **Continue**. After proceeding, the page returned to Library; selecting Transfer Music again produced the same region prompt. No service-provider list was rendered.
+- No source account was connected and no transfer was started; no Apple library or favorite data was changed. This improves on the earlier Apple tab that was not accessible, but it does **not** identify which providers are offered to this account. Account content and region selection were not retained.
+- Updated [Apple Music provider notes](providers/apple-music.md). Next read-only avenue is the same transfer entry in the native Music app; if it reaches source selection only after user interaction, pause before authorizing a source or confirming a transfer.
