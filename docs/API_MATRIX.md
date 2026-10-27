@@ -27,6 +27,7 @@
 | Яндекс `GET https://api.music.yandex.net/search?text=...&type=track&page=0` | `200 application/json`; `result` содержит `tracks`, `page`, `perPage` | Публичный каталоговый поиск доступен без OAuth в этом probe; это не открывает user likes |
 | Звук profile `GET https://zvuk.com/api/v2/tiny/profile` | `418 text/html` без cookie/auth | Чистый CLI упёрся в anti-bot boundary; этот статус не доказывает отсутствия profile route или API |
 | Звук GraphQL `POST https://zvuk.com/api/v1/graphql`, `query SafeProbe { __typename }` | `418 text/html` | Чистый стандартный HTTP-клиент попал в anti-bot/WAF boundary; это не доказывает отсутствия GraphQL маршрута и не является основанием обходить защиту |
+| ZvukDownloader read routes: `/api/tiny/profile`, `/api/v2/tiny/profile`, `/api/tiny/tracks`, `/api/tiny/releases`, `/api/tiny/playlists`, `/api/tiny/lyrics` | Все `418 text/html` без credentials; collection metadata/lyrics использовали только synthetic `-987654321` | Terminal `urllib` sweep на 27.10.2026; каждый ответ имел одинаковый размер, тела не сохранялись. Общая WAF-страница, не endpoint-specific auth result. Audio stream не запрашивали |
 
 ## Spotify
 

@@ -45,6 +45,20 @@ MIT TypeScript-клиент проверен на HEAD `3c157f8114b236ccc2d15d12
 
 Без cookies/token terminal probes к `/api/tiny/profile`, `/api/v2/tiny/profile` и `/api/v1/graphql` дали `418 text/html`. Это подтверждает антибот-барьер для чистого CLI, а не несуществование endpoint. Ранее authenticated GraphQL terminal replay с ephemeral session context возвращал `200`.
 
+### Clean CLI sweep маршрутов `ZvukDownloader` (27.10.2026)
+
+По pinned HEAD [`922e2587`](https://github.com/Basil-AS/ZvukDownloader/tree/922e2587f52a411a05695fd6454bb6dd40afba5a) из чистого Python `urllib` без cookie, bearer, Chrome headers и сохранения body выполнены безопасные запросы к profile v1/v2, metadata GET с синтетическим несуществующим ID `-987654321`, lyrics с тем же ID и GraphQL `query SafeProbe { __typename }`. Все семь ответов — `418 text/html`, одинаковый размер 4 338 байт. Ровный размер у всех разных маршрутов согласуется с общей WAF/anti-bot страницей, поэтому не интерпретировать эти статусы как endpoint-specific `401/403/404`. Запросов к stream/audio и GraphQL mutations не было.
+
+| Method / path | Clean terminal | Примечание |
+|---|---:|---|
+| `GET /api/tiny/profile` | `418 text/html` | Versionless Tiny profile |
+| `GET /api/v2/tiny/profile` | `418 text/html` | Versioned profile |
+| `GET /api/tiny/tracks?ids=-987654321&include=track` | `418 text/html` | Synthetic ID; response body discarded |
+| `GET /api/tiny/releases?ids=-987654321&include=track` | `418 text/html` | Synthetic ID; response body discarded |
+| `GET /api/tiny/playlists?ids=-987654321` | `418 text/html` | Synthetic ID; response body discarded |
+| `GET /api/tiny/lyrics?track_id=-987654321` | `418 text/html` | Synthetic ID; response body discarded |
+| `POST /api/v1/graphql` (`SafeProbe`) | `418 text/html` | Safe read-only query |
+
 ## GraphQL операции из `trudenboy/zvuk-music`
 
 Проверен snapshot `ed491f61bc7b18c9f327017a8a87d9fe183022a7` от 07.10.2026. Этот список покрывает checked-in GraphQL documents одной библиотеки, но не весь внутренний schema веб-клиента. Всё идёт через `/api/v1/graphql`.
