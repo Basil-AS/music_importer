@@ -94,6 +94,23 @@ GitHub license metadata у репозитория отсутствует, в п�
 - Словарь установленного локального Music.app (`com.apple.Music.sdef`) объявляет свойство `favorited` как read/write для треков; persistent ID доступен только для чтения. Это локальное AppleScript-поверхностное API, отдельное от MusicKit REST. Оно делает локальный сценарий правдоподобным, но полноценную запись избранного ещё надо безопасно проверить на тестовом наборе.
 - Запись через браузерные или REST endpoints не выполнялась; account identifiers, playlist ID и содержимое коллекции в документацию не переносились.
 
+## GitHub cross-check: Yandex Music Transfer → Favorite Songs
+
+В актуальном на 27.10.2026 MIT checkout [`yarikmsu/yandex-music-transfer`](https://github.com/yarikmsu/yandex-music-transfer/tree/eb883666a05594fa76d2e2620aff27b169b1700c) статически прослежен destination flow. Live import не запускался, пользовательский Apple аккаунт не менялся:
+
+| Шаг | Запрос / поведение в проверенном source |
+|---|---|
+| Узнать storefront | `GET https://amp-api.music.apple.com/v1/me/storefront` |
+| Найти кандидатов | `GET https://itunes.apple.com/search?term=…&country={storefront}&media=music&entity=song&limit=10`; без токенов. Результат преобразуется в Apple song-shaped object по `trackId`, title, artist, album и duration; не-streamable записи исключаются. |
+| Создать необязательные плейлисты | `POST /v1/me/library/playlists`, затем `POST /v1/me/library/playlists/{id}/tracks` с пачками до 50 catalog IDs. |
+| Добавить в Favorite Songs | `POST https://amp-api.music.apple.com/v1/me/favorites?ids[songs]={catalog-song-id}`; source отправляет по одному song ID в запросе. |
+
+Apple документирует аналогичный `POST https://api.music.apple.com/v1/me/favorites`, параметр `ids` по типу ресурса, ответ `202 Accepted` без тела и возможность bulk добавления heterogeneous resources. Apple также предупреждает, что ID, которые нельзя добавить в библиотеку, просто игнорируются. Поэтому один ID на запрос в данном importer — решение его реализации, не установленный публичный лимит Apple. Его `state.json` дописывает ID после успешного HTTP-ответа, но код не перечитывает Favorite Songs и не подтверждает каждый каталоговый ID через read-back; после `202` считать перенос доказанным нельзя. Наш importer должен сверять фактический Favorite Songs список с планом.
+
+Авторизация этого кандидата не является входом через официальный third-party OAuth: он вручную принимает web-player `Authorization` bearer и `Media-User-Token` в env-файле, отправляет их на `amp-api.music.apple.com` и предупреждает, что Apple не поддерживает такой сценарий. Это полезная проверка destination route и matching-пайплайна, но не шаблон UX «просто войти». Docker-контейнер ограничен read-only filesystem/privileges и отдельной writable `out/` папкой; токены остаются в локальном env-файле, поэтому этот файл нужно считать отзывным credential и никогда не коммитить.
+
+Из checkout запущен upstream offline unittest suite: `python3 -B -m unittest` — 209 тестов прошли (`OK`) на Python 3.15. Это unit tests с mock-ответами, а не проверка Apple/Yandex endpoints или реализации в Docker. Docker CLI в текущем окружении отсутствует, поэтому задокументированная upstream контейнерная команда здесь не проверена; несколько `ResourceWarning` о закрытии синтетических `HTTPError` появились в тестовом выводе.
+
 ## Ограничения для миграции
 
 Нужен storefront пользователя: каталожные ID региональны, некоторые записи отсутствуют или доступны только в другом storefront. Favorite request может игнорировать неразрешимые ID без подробного результата по каждому элементу, поэтому после пачек требуется повторно перечитать Favorite Songs/библиотеку и сравнить фактический набор. API не переносит исходный аудиофайл и не гарантирует точное соответствие версии/ремастера.
@@ -102,6 +119,7 @@ GitHub license metadata у репозитория отсутствует, в п�
 
 - [Apple Music API overview](https://developer.apple.com/documentation/AppleMusicAPI)
 - Apple [Add resource to favorites](https://developer.apple.com/documentation/applemusicapi/add-resource-to-favorites) и [Add a Personal Song Rating](https://developer.apple.com/documentation/applemusicapi/add-a-personal-content-rating-33dop)
+- Apple [Add resource to favorites: `202 Accepted`, ignored unsupported IDs, bulk additions](https://developer.apple.com/documentation/applemusicapi/add-resource-to-favorites?changes=la)
 - [iTunes Search API overview (архивная документация)](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/)
 - [iTunes Search examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/SearchExamples.html)
 - [iTunes Search response fields](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/UnderstandingSearchResults.html)
