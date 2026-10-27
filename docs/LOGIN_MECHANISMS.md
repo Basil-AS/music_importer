@@ -31,7 +31,7 @@
 
 - Для чтения можно выполнить запрос в контексте сайта и вернуть только библиотеку. Отдельный перенос bearer token увеличивает последствия утечки и усложняет отзыв доступа.
 - Cookie jar всей системы не нужен: он может включать входы в почту, платежи и другие сайты. Разрешение должно охватывать только конкретный музыкальный домен и одну операцию.
-- У Яндекса есть два разных extension-паттерна: `MarshalX/yandex-music-token` — новый OAuth redirect и передача токена Telegram-боту; `vladimir120307-droid/yandex-music-downloader` — чтение Authorization из запросов уже открытой страницы с сохранением в extension storage. Для импортёра не нужны ни постоянное хранение токена, ни передача Telegram-боту: connector может вернуть только список треков.
+- У Яндекса есть три разных паттерна. `MarshalX/yandex-music-token` включает Device Code Flow в статическом web app, но использует общий OAuth app с широкими правами и открытым в публичном JS client secret; его password fallback отправляет введённые credentials напрямую Яндексу, а extension OAuth flow пересылает token Telegram-боту. `vladimir120307-droid/yandex-music-downloader` перехватывает Authorization из запросов уже открытой страницы и сохраняет его в extension storage. Для импортёра не нужны ни эти широкие scopes, ни token extraction/persistence: connector должен вернуть только список треков.
 - Если запросы надо выполнять вне вкладки, переходить на более привилегированный background host access только после подтверждения, что same-origin content script этого не может. Секреты никогда не должны попадать в query string, telemetry, crash logs, history или репозиторий.
 
 ## Статус прототипируемости по провайдерам
