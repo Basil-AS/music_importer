@@ -14,7 +14,11 @@ Host difference: library/OpenAPI snapshot использует `api.music.yandex
 
 Затем библиотека делает `POST https://oauth.yandex.ru/token` с form-urlencoded полями `grant_type=device_code`, `code`, `client_id` и `client_secret`. В проверенном commit вшиты credentials публичного Android-клиента Яндекс Музыки; это не credentials, выданные нашему приложению, и встроенный `client_secret` нельзя считать секретом проекта. Значения самих credentials в документацию не копируем. Polling следует выполнять с интервалом `interval` и до срока `expires_in` из device-code ответа: `authorization_pending` возвращается как `None`, а `expired_token`, `access_denied`, `invalid_client` и другие OAuth ошибки приводят к `DeviceAuthError`. Блокирующий helper также поддерживает timeout и отмену. При успехе он записывает access token в клиент и добавляет `Authorization: OAuth <token>`.
 
-Ответ token-модели содержит `access_token`, `refresh_token`, `expires_in` и `token_type`, но эта библиотека не сохраняет токены и не обновляет access token автоматически. Хранение и срок жизни — ответственность приложения; поведение refresh token этим клиентом не реализовано. Device Flow в пользовательском аккаунте не запускали. Некоторые аккаунты/регионы/режимы могут не пройти этот неофициальный flow.
+Ответ token-модели содержит `access_token`, `refresh_token`, `expires_in` и `token_type`, но эта библиотека не сохраняет токены и не обновляет access token автоматически. Хранение и срок жизни — ответственность приложения; поведение refresh token этим клиентом не реализовано.
+
+### Практическая проверка Device Flow, 27.10.2026
+
+Из pinned source были использованы публичные credentials Android-приложения Яндекс Музыки для read-only auth probe. `POST /device/code` вернул device/user code, verification URL, срок действия и интервал polling. Verification page открылась в уже авторизованном Chrome; после ввода user code Яндекс показал экран согласия для приложения «Яндекс.Музыка». Запрошенные scopes оказались значительно шире чтения музыкальной библиотеки: доступ к личным данным в сервисах Яндекса, профиль/дата рождения/email/имя, чтение и **изменение** плейлистов, чат с поддержкой, платежи/история платежей, DataSync, Яндекс.Диск, умный дом и другие разрешения. Такой grant превышает необходимый объём для экспорта лайков, поэтому согласие отменили и терминальный polling завершили до получения токена. Ни OAuth access/refresh token, ни account/track data из этого Device Flow не получали и не сохраняли; коллекция не менялась. Это практическое подтверждение работы code request и одновременно подтверждение, что встроенный Android OAuth client не годится для least-privilege входа проекта без явного разбора scopes. Некоторые аккаунты/регионы/режимы могут не пройти этот неофициальный flow.
 
 Вход через логин/пароль не нужен для рекомендуемого прототипа. Токен — секрет; не коммитить и не печатать в лог.
 
@@ -64,7 +68,7 @@ Apple API-вариант проверяет `GET /v1/me/library/songs?limit=1`, 
 - По первой записи списка проверен `POST https://api.music.yandex.ru/tracks` с form body `track-ids=<id>` (формат из `_client/_batch.py`), ответ `200`, одна карточка. Вызов сначала был сформирован неверно как JSON-массив и вернул `400`; после сверки с реализацией исправлен на form-encoded `track-ids`. Тела ответов не сохранялись.
 - Из терминала публичный no-auth запрос `GET https://api.music.yandex.net/search?text=...&type=track&page=0` вернул `200 application/json`. Вывод ответа не раскрывался. Это подтверждает доступность поискового каталога без аккаунта в проверенном случае, но ничего не говорит о доступе к лайкам.
 - Новая попытка проверить тот же browser playlist route напрямую из терминала с выбранными cookies `Session_id`, `sessionid2`, `yandex_login` и `yandexuid` завершилась `ConnectionResetError` до получения HTTP-статуса. Cookies были в одноразовом файле `0600`, удалённом в `finally`; не трактовать это как отказ авторизации. Ранее подтверждённый `200` для account status и likes использовал community OAuth bearer token, не этот cookie-only путь.
-- Device Flow описан проектом: `POST https://oauth.yandex.ru/device/code`, затем polling `POST https://oauth.yandex.ru/token`; фактический вход и получение токена в терминале не запускались. Запись/снятие лайков не вызывались.
+- Device Flow частично проверен: terminal `POST /device/code` сгенерировал код, но на consent page встроенный Android client запросил избыточные разрешения; согласие отменено, polling остановлен до выдачи токена. Запись/снятие лайков не вызывались.
 
 ## Оценка
 
@@ -88,4 +92,4 @@ Apple API-вариант проверяет `GET /v1/me/library/songs?limit=1`, 
 - [`ComputerPers/YandexMusic_to_AppleMusic` Chrome token helper at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/extract_tokens.py)
 - [`ComputerPers/YandexMusic_to_AppleMusic` matcher at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/match_apple_music.py)
 
-Изучено по исходникам community-библиотеки, её OpenAPI, браузерному UI и terminal HTTP-пробам с пользовательской сессией. Это не контракт Яндекса; OAuth Device Flow и мутации на аккаунте не запускались.
+Изучено по исходникам community-библиотеки, её OpenAPI, браузерному UI и terminal HTTP-пробам с пользовательской сессией. Device-code request проверен, но token grant отменён из-за избыточных scopes; мутации на аккаунте не запускались. Это не контракт Яндекса.
