@@ -4,7 +4,45 @@
 
 ## OAuth
 
-Для данных пользователя нужен OAuth. Для локального desktop/browser инструмента подходит Authorization Code with PKCE, поскольку секрет приложения нельзя надёжно хранить в клиенте. Поток: создать verifier/challenge S256 и state; открыть `https://accounts.spotify.com/authorize`; проверить state в callback; обменять code через `https://accounts.spotify.com/api/token`; хранить access/refresh token только локально и защищённо. В dev mode Redirect URI должен соответствовать текущим требованиям Spotify (для локальной разработки — loopback IP `127.0.0.1`, не `localhost`). Client Credentials работает только для публичных данных, не для пользовательских лайков.
+Для данных пользователя нужен OAuth. Для локального desktop/browser инструмента подходит Authorization Code with PKCE: приложение не хранит client secret. Официальный поток подробно описан [Spotify PKCE guide](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow).
+
+### Запрос пользователя и обмен кода
+
+1. Сгенерировать криптографически случайные `code_verifier` и `state`; вычислить `code_challenge = BASE64URL(SHA256(code_verifier))` без `=` padding.
+2. Открыть браузер по адресу ниже. `redirect_uri` должен в точности совпасть с зарегистрированным; Spotify требует для loopback явный IP, например `127.0.0.1`, и запрещает `localhost`.
+
+```text
+GET https://accounts.spotify.com/authorize
+  ?response_type=code
+  &client_id=<CLIENT_ID>
+  &redirect_uri=http%3A%2F%2F127.0.0.1%3A8888%2Fcallback
+  &scope=user-library-read
+  &state=<RANDOM_STATE>
+  &code_challenge_method=S256
+  &code_challenge=<BASE64URL_SHA256_VERIFIER>
+```
+
+3. На callback принять `code` только если возвращённый `state` совпадает с исходным, затем одноразово обменять code. PKCE-запрос — `application/x-www-form-urlencoded`, без `Authorization: Basic` и без client secret:
+
+```text
+POST https://accounts.spotify.com/api/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code&client_id=<CLIENT_ID>&code=<CALLBACK_CODE>&redirect_uri=http%3A%2F%2F127.0.0.1%3A8888%2Fcallback&code_verifier=<ORIGINAL_VERIFIER>
+```
+
+Успешный ответ содержит `access_token`, `token_type`, разрешённые `scope`, `expires_in` и `refresh_token`. По текущей документации access token действует 1 час, а refresh token для Dashboard app — 6 месяцев; refresh не продлевает эти 6 месяцев. Новые ответы refresh могут не содержать новый refresh token: если его нет, продолжать хранить старый.
+
+### Обновление access token
+
+```text
+POST https://accounts.spotify.com/api/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
+```
+
+При `invalid_grant` токен отозван/истёк — удалить его локально и заново провести пользователя через authorization. Не писать access/refresh tokens в логи, Git, отчёт миграции или URL. `Client Credentials` предназначен для публичных данных и не даёт доступа к пользовательским лайкам.
 
 Минимальные scopes для чтения лайкнутых песен: `user-library-read`; для записи в библиотеку Spotify — `user-library-modify`. `playlist-read-private`/`playlist-read-collaborative` нужны только при импорте приватных плейлистов.
 
@@ -48,6 +86,8 @@ Spotify позволяет запросить машиночитаемую ко�
 
 - [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization)
 - [PKCE flow](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow)
+- [Refreshing tokens](https://developer.spotify.com/documentation/web-api/tutorials/refreshing-tokens)
+- [Redirect URI requirements](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri)
 - [Scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes)
 - [Get a User's Saved Tracks](https://developer.spotify.com/documentation/web-api/reference/get-users-saved-tracks)
 - [Save Items to Library](https://developer.spotify.com/documentation/web-api/reference/save-library-items)
