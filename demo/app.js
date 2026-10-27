@@ -270,18 +270,24 @@
 
   const appleCatalogAdapter = {
     id: 'apple-music',
-    maxConcurrentSearches: 3,
+    maxConcurrentSearches: 2,
     async searchTracks(track, context = {}) {
-      const params = new URLSearchParams({
-        term: (track.query || `${track.title} ${track.artist}`).trim(),
-        entity: 'song',
-        limit: '15',
-        country: context.storefront || $('#storefront').value,
-      });
-      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`);
-      if (!response.ok) throw new Error(`Каталог ответил ${response.status}`);
-      const payload = await response.json();
-      return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
+      if (context.accountWrite !== true) {
+        const params = new URLSearchParams({
+          term: (track.query || `${track.title} ${track.artist}`).trim(),
+          entity: 'song', limit: '15', country: context.storefront || $('#storefront').value,
+        });
+        const response = await fetch(`https://itunes.apple.com/search?${params}`);
+        if (!response.ok) throw new Error(`Каталог Apple ответил ${response.status}`);
+        const payload = await response.json();
+        return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
+      }
+      const response = await requestExtensionCommand('search-tracks', {
+        query: (track.query || `${track.title} ${track.artist}`).trim(),
+        storefront: context.storefront || $('#storefront').value,
+      }, 'apple');
+      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Apple Music.');
+      return response.results.filter((item) => item.trackId && item.trackViewUrl).slice(0, 25);
     },
   };
 
@@ -301,7 +307,7 @@
     throw new Error('Для выбранного сервиса назначения адаптер ещё не подключён.');
   }
 
-  function requestExtensionCommand(action, details = {}) {
+  function requestExtensionCommand(action, details = {}, provider = 'yandex') {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает защищённый запрос к расширению.'));
     const requestId = window.crypto.randomUUID();
     return new Promise((resolve, reject) => {
@@ -313,7 +319,7 @@
         if (messageEvent.source !== window || messageEvent.origin !== location.origin
           || messageEvent.data?.source !== 'music-importer-local-app'
           || messageEvent.data?.requestId !== requestId) return;
-        if (messageEvent.data?.type === 'yandex-progress') {
+        if (messageEvent.data?.type === `${provider}-progress`) {
           const progress = messageEvent.data.progress;
           if (progress?.message) {
             $('#importBtn').textContent = progress.message;
@@ -321,13 +327,13 @@
           }
           return;
         }
-        if (messageEvent.data?.type !== 'yandex-command-response') return;
+        if (messageEvent.data?.type !== `${provider}-command-response`) return;
         clearTimeout(timeout);
         window.removeEventListener('message', onMessage);
         resolve(messageEvent.data);
       };
       window.addEventListener('message', onMessage);
-      window.postMessage({ source: 'music-importer-local-app', type: 'yandex-command', action, requestId, ...details }, location.origin);
+      window.postMessage({ source: 'music-importer-local-app', type: `${provider}-command`, action, requestId, ...details }, location.origin);
     });
   }
 
@@ -341,7 +347,9 @@
     $('#storefront').previousElementSibling.hidden = state.targetProvider !== 'apple-music';
     $('#importBtn').innerHTML = state.targetProvider === 'yandex-music'
       ? 'Перенести в Яндекс Музыку <span aria-hidden="true">→</span>'
-      : 'Сформировать план <span aria-hidden="true">→</span>';
+      : state.targetProvider === 'apple-music'
+        ? 'Перенести в Apple Music <span aria-hidden="true">→</span>'
+        : 'Сформировать план <span aria-hidden="true">→</span>';
     $('#targetCollection').textContent = state.collectionType === 'library'
       ? 'Лайки и плейлисты'
       : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
@@ -424,7 +432,10 @@
       });
       renderTracks();
       await window.MusicTransferEngine.searchMany(targetAdapter(), pending, {
-        context: { storefront: $('#storefront').value },
+        context: {
+          storefront: $('#storefront').value,
+          accountWrite: state.sourceSnapshot?.completeness?.confirmed === true,
+        },
         keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
         onProgress: async (group) => {
           for (const track of group.tracks) {
@@ -638,16 +649,35 @@
   $('#importBtn').addEventListener('click', async () => {
     try {
       const plan = buildPlan();
-      if (state.targetProvider === 'yandex-music') {
+      const sourceComplete = plan.completeness.source.length > 0
+        && plan.completeness.source.every((status) => status?.confirmed === true);
+      if (state.targetProvider === 'yandex-music' || (state.targetProvider === 'apple-music' && sourceComplete)) {
         if (plan.completeness.source.some((status) => status?.confirmed !== true)) {
           throw new Error('Для записи нужен полный snapshot. Пример и ручной CSV остаются в preview-only режиме.');
         }
         const playlistCount = plan.collectionMappings.length;
-        if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в Яндекс Музыке? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
+        const providerName = state.targetProvider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыка';
+        if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
         $('#importBtn').disabled = true;
         $('#importBtn').textContent = 'Записываем и сверяем…';
-        const response = await requestExtensionCommand('execute-transfer', { plan });
-        if (!response?.ok) throw new Error(response?.error || 'Перенос в Яндекс Музыку не выполнен.');
+        const response = await requestExtensionCommand('execute-transfer', { plan }, state.targetProvider === 'apple-music' ? 'apple' : 'yandex');
+        if (!response?.ok) {
+          if (response?.report) {
+            state.report = { ...plan, mode: 'account-write', execution: response.report };
+            const partialFavorites = Number(response.report?.favorites?.verified || 0);
+            const partialPlaylists = (response.report?.playlists || []).reduce((sum, playlist) => sum + Number(playlist.verified || 0), 0);
+            $('#addedMetric').textContent = String(partialFavorites + partialPlaylists);
+            $('#skippedMetric').textContent = String(plan.skipped.length);
+            $('#report').querySelector('h3').textContent = response.report.status === 'partial_failure'
+              ? 'Перенос остановлен · нужна сверка'
+              : 'Перенос не выполнен';
+            $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(partialFavorites + partialPlaylists);
+            $('#report').querySelector('.report-grid .metric:last-child span').textContent = `проверено в ${providerName}`;
+            $('#report').classList.add('show');
+            setStep(5);
+          }
+          throw new Error(response?.error || `Перенос в ${providerName} не выполнен.`);
+        }
         state.report = { ...plan, mode: 'account-write', execution: response.report || { status: 'complete' } };
         const verifiedFavorites = Number(response.report?.favorites?.verified || 0);
         const verifiedPlaylists = (response.report?.playlists || []).reduce((sum, playlist) => sum + Number(playlist.verified || 0), 0);
@@ -655,10 +685,10 @@
         $('#skippedMetric').textContent = plan.skipped.length;
         $('#report').querySelector('h3').textContent = 'Перенос завершён и сверен';
         $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(verifiedFavorites + verifiedPlaylists);
-        $('#report').querySelector('.report-grid .metric:last-child span').textContent = 'подтверждено в Яндексе';
+        $('#report').querySelector('.report-grid .metric:last-child span').textContent = `подтверждено в ${providerName}`;
         $('#report').classList.add('show');
         setStep(5);
-        toast('Яндекс Музыка подтвердила запись');
+        toast(`${providerName} подтвердила запись`);
       } else {
         state.report = plan;
         $('#addedMetric').textContent = state.report.operations.length;
@@ -666,7 +696,7 @@
         $('#report').querySelector('h3').textContent = 'План готов · без записи';
         $('#report').classList.add('show');
         setStep(5);
-        toast('План сформирован; Apple Music не менялся');
+        toast('План сформирован; аккаунт не менялся');
       }
     } catch (error) {
       toast(error.message || 'Не удалось выполнить перенос.');

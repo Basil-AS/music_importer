@@ -14,15 +14,17 @@ function makePage(fixtures) {
     addEventListener(name, callback) { listeners.set(name, callback); },
     postMessage(data) { messages.push(data); },
     fetch: async (url, init = {}) => {
-      requests.push({ url: String(url), headers: new Headers(init.headers || {}) });
+      requests.push({ url: String(url), method: init.method || 'GET', body: init.body || null, headers: new Headers(init.headers || {}) });
       const key = new URL(String(url)).pathname + new URL(String(url)).search;
-      const payload = fixtures[key];
-      if (!payload) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
-      return { ok: true, status: 200, headers: new Headers(), json: async () => payload };
+      const fixture = fixtures[`${init.method || 'GET'} ${key}`] ?? fixtures[key];
+      if (!fixture) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
+      const response = typeof fixture === 'function' ? fixture({ url: String(url), init, requests }) : fixture;
+      const status = response?.status || 200;
+      return { ok: status >= 200 && status < 300, status, headers: new Headers(), json: async () => response?.payload ?? response };
     },
   };
   const context = {
-    window, location, URL, Headers, Request, Promise, Map, Set, String, Number, Array, Object, Error, JSON, Date,
+    window, location, URL, URLSearchParams, Headers, Request, Promise, Map, Set, String, Number, Array, Object, Error, JSON, Date,
     setTimeout, clearTimeout, console,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/apple-main-world.js'), 'utf8'), context);
@@ -39,6 +41,16 @@ function makePage(fixtures) {
         data: { source: 'music-importer-apple', type: 'start-library-scan' },
       });
       return messages.find((message) => message.type === 'library-snapshot')?.payload;
+    },
+    async command(action, details = {}) {
+      await window.fetch('https://amp-api.music.apple.com/v1/me/storefront', {
+        headers: { authorization: `Bearer ${token}`, 'music-user-token': token },
+      });
+      await listeners.get('message')({
+        source: window, origin: location.origin,
+        data: { source: 'music-importer-apple', type: 'command', requestId: 'fixture-command-0001', action, ...details },
+      });
+      return messages.filter((message) => message.type === 'command-result').at(-1);
     },
     token,
   };
@@ -95,6 +107,87 @@ test('Apple source reader refuses an incomplete library page', async () => {
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
+test('Apple catalog search returns catalog song IDs without exposing session headers', async () => {
+  const page = makePage({
+    'GET /v1/catalog/ae/search?term=One+More+Time+Daft+Punk&types=songs&limit=25': {
+      results: { songs: { data: [{
+        id: 'catalog-song-1',
+        attributes: { name: 'One More Time', artistName: 'Daft Punk', albumName: 'Discovery', url: 'https://music.apple.com/ae/song/one-more-time/1' },
+      }] } },
+    },
+  });
+  const result = await page.command('search-tracks', { query: 'One More Time Daft Punk', storefront: 'AE' });
+
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.result[0].trackId, 'catalog-song-1');
+  assert.equal(result.result[0].trackName, 'One More Time');
+  assert.ok(page.requests[1].url.startsWith('https://amp-api.music.apple.com/v1/catalog/ae/search?'));
+  assert.ok(!JSON.stringify(page.messages).includes(page.token));
+});
+
+test('Apple target writer adds favorites and ordered playlist items, then verifies both', async () => {
+  let favoriteReads = 0;
+  const fixtures = {
+    'GET /v1/me/library/songs?limit=100': () => {
+      favoriteReads += 1;
+      return favoriteReads === 1
+        ? { meta: { total: 0 }, next: null, data: [] }
+        : { meta: { total: 1 }, next: null, data: [{ id: 'library-song-a', attributes: { inFavorites: true, playParams: { id: 'catalog-song-a' } } }] };
+    },
+    'POST /v1/me/favorites?ids%5Bsongs%5D=catalog-song-a': { status: 202, payload: {} },
+    'POST /v1/me/library/playlists': {
+      status: 201,
+      payload: { data: [{ id: 'playlist-created', type: 'library-playlists', attributes: { name: 'Road' } }] },
+    },
+    'POST /v1/me/library/playlists/playlist-created/tracks': { status: 204, payload: {} },
+    'GET /v1/me/library/playlists/playlist-created/tracks?limit=100': {
+      meta: { total: 1 }, next: null,
+      data: [{ id: 'library-song-b', attributes: { playParams: { id: 'catalog-song-b' } } }],
+    },
+  };
+  const page = makePage(fixtures);
+  const result = await page.command('execute-transfer', {
+    plan: {
+      type: 'music-transfer-plan',
+      target: { provider: 'apple-music', collectionType: 'library' },
+      completeness: { source: [{ confirmed: true }] },
+      collectionMappings: [{ sourceId: 'source-playlist', sourceName: 'Road', targetName: 'Road' }],
+      operations: [
+        { operation: 'add_to_favorites', target: { providerId: 'catalog-song-a' } },
+        { operation: 'add_to_playlist', source: { collectionId: 'source-playlist', position: 0 }, target: { providerId: 'catalog-song-b' } },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.result.status, 'complete');
+  assert.equal(result.result.favorites.verified, 1);
+  assert.equal(result.result.playlists[0].verified, 1);
+  assert.deepEqual(JSON.parse(page.requests.find((request) => request.method === 'POST' && request.url.includes('/tracks')).body), {
+    data: [{ id: 'catalog-song-b', type: 'songs' }],
+  });
+  assert.deepEqual(JSON.parse(page.requests.find((request) => request.method === 'POST' && request.url.endsWith('/library/playlists')).body), {
+    attributes: { name: 'Road', description: '', isPublic: false },
+  });
+  assert.ok(!JSON.stringify(page.messages).includes(page.token));
+});
+
+test('Apple target writer refuses an incomplete source before mutating the account', async () => {
+  const page = makePage({});
+  const result = await page.command('execute-transfer', {
+    plan: {
+      type: 'music-transfer-plan',
+      target: { provider: 'apple-music', collectionType: 'favorites' },
+      completeness: { source: [{ confirmed: false }] },
+      operations: [{ operation: 'add_to_favorites', target: { providerId: 'catalog-song-a' } }],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /полнота исходной библиотеки не подтверждена/i);
+  assert.equal(page.requests.filter((request) => request.method === 'POST').length, 0);
+});
+
 test('local app bridge identifies the installed extension without requesting account data', () => {
   const fs = require('node:fs');
   const vm = require('node:vm');
@@ -107,7 +200,7 @@ test('local app bridge identifies the installed extension without requesting acc
   };
   const context = {
     window, location, URL, Set, String, chrome: { runtime: {
-      getManifest: () => ({ version: '0.3.0' }),
+      getManifest: () => ({ version: '0.4.0' }),
       onMessage: { addListener() {} },
     } },
   };
@@ -119,6 +212,6 @@ test('local app bridge identifies the installed extension without requesting acc
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{
-    source: 'music-importer-local-app', type: 'extension-ready', requestId: 'fixture-request-0001', version: '0.3.0',
+    source: 'music-importer-local-app', type: 'extension-ready', requestId: 'fixture-request-0001', version: '0.4.0',
   }]);
 });

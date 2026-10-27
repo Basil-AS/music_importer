@@ -56,34 +56,47 @@
     return `${url.pathname}${url.search}`;
   }
 
-  async function request(path) {
-    const headers = await waitForSession();
+  function apiUrl(path, allowCatalog = false) {
     const url = new URL(path, apiBase);
-    if (url.origin !== apiBase || !url.pathname.startsWith('/v1/me/')) throw new Error('Разрешены только запросы к личной библиотеке Apple Music.');
+    const personal = url.origin === apiBase && url.pathname.startsWith('/v1/me/');
+    const catalog = allowCatalog && url.origin === apiBase && /^\/v1\/catalog\/[a-z]{2}\//i.test(url.pathname);
+    if (!personal && !catalog) throw new Error('Разрешены только запросы Apple Music API к личной библиотеке и каталогу.');
+    return url;
+  }
+
+  async function request(path, options = {}) {
+    const headers = await waitForSession();
+    const url = apiUrl(path, options.allowCatalog === true);
+    const method = String(options.method || 'GET').toUpperCase();
+    const requestHeaders = { ...headers, Accept: 'application/json' };
+    const init = { method, credentials: 'include', headers: requestHeaders };
+    if (options.body !== undefined) {
+      requestHeaders['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(options.body);
+    }
     let response;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    const retryable = method === 'GET';
+    const attempts = retryable ? 4 : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        response = await originalFetch.call(window, url.href, {
-          method: 'GET',
-          credentials: 'include',
-          headers: { ...headers, Accept: 'application/json' },
-        });
+        response = await originalFetch.call(window, url.href, init);
       } catch (error) {
-        if (attempt === 3) throw error;
+        if (attempt === attempts - 1) throw error;
         await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
         continue;
       }
       if (response.ok) break;
-      if (response.status !== 429 && response.status < 500 || attempt === 3) {
-        throw new Error(`Apple Music: HTTP ${response.status} при чтении библиотеки.`);
+      if (!retryable || (response.status !== 429 && response.status < 500) || attempt === attempts - 1) {
+        throw new Error(`Apple Music: HTTP ${response.status} для ${method} ${url.pathname}.`);
       }
       const retryAfter = Number(response.headers.get('retry-after'));
       const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * (2 ** attempt);
       await new Promise((resolve) => setTimeout(resolve, Math.min(delay, 10000)));
     }
     if (!response?.ok) throw new Error('Apple Music не ответил после повторных попыток.');
-    const payload = await response.json();
-    if (!Array.isArray(payload?.data)) throw new Error('Apple Music вернул неожиданный формат библиотеки.');
+    if (response.status === 202 || response.status === 204) return { data: [] };
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error('Apple Music вернул ошибку запроса.');
     return payload;
   }
 
@@ -175,8 +188,210 @@
     return scanPromise;
   }
 
+  function resourceIds(row) {
+    const catalogIds = Array.isArray(row?.relationships?.catalog?.data)
+      ? row.relationships.catalog.data.map((item) => item?.id)
+      : [];
+    const values = [
+      row?.id,
+      row?.attributes?.playParams?.id,
+      row?.attributes?.catalogId,
+      ...catalogIds,
+    ].map((value) => String(value || '').trim()).filter(Boolean);
+    return [...new Set(values)];
+  }
+
+  function normalizeCatalogSong(row) {
+    const attributes = row?.attributes || {};
+    const id = String(row?.id || '').trim();
+    const title = String(attributes.name || '').trim();
+    const artist = String(attributes.artistName || '').trim();
+    if (!id || !title || !artist) throw new Error('Каталог Apple Music вернул песню без ID, названия или исполнителя.');
+    return {
+      trackId: id,
+      trackName: title,
+      artistName: artist,
+      collectionName: String(attributes.albumName || ''),
+      trackViewUrl: String(attributes.url || ''),
+      trackTimeMillis: Number(attributes.durationInMillis) || 0,
+      isrc: String(attributes.isrc || ''),
+    };
+  }
+
+  async function searchCatalog(query, storefront) {
+    const country = String(storefront || '').toLowerCase();
+    const term = String(query || '').trim().slice(0, 400);
+    if (!/^[a-z]{2}$/.test(country)) throw new Error('Укажите двухбуквенный storefront Apple Music.');
+    if (!term) throw new Error('Введите название песни или исполнителя.');
+    const params = new URLSearchParams({ term, types: 'songs', limit: '25' });
+    const result = await request(`/v1/catalog/${country}/search?${params}`, { allowCatalog: true });
+    const songs = result?.results?.songs?.data;
+    if (!Array.isArray(songs)) throw new Error('Каталог Apple Music вернул неожиданный формат поиска.');
+    return songs.map(normalizeCatalogSong);
+  }
+
+  async function readFavoriteRows() {
+    const result = await readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Избранное Apple Music');
+    return result.rows.filter((row) => row?.attributes?.inFavorites === true);
+  }
+
+  async function readPlaylistCatalog() {
+    return readPages(`/v1/me/library/playlists?limit=${pageSize}`, 'Плейлисты Apple Music');
+  }
+
+  async function readPlaylistTracks(playlistId) {
+    return readPages(`/v1/me/library/playlists/${encodeURIComponent(playlistId)}/tracks?limit=${pageSize}`, 'Сверка плейлиста Apple Music');
+  }
+
+  function sourcePlaylistKey(operation) {
+    return String(operation?.source?.collectionId || operation?.source?.collectionName || '');
+  }
+
+  async function addAppleFavorites(operations, progress) {
+    const wanted = [...new Set(operations.map((operation) => String(operation?.target?.providerId || '')).filter(Boolean))];
+    const currentRows = await readFavoriteRows();
+    const currentIds = new Set(currentRows.flatMap(resourceIds));
+    const missing = wanted.filter((id) => !currentIds.has(id));
+    let written = 0;
+    for (let offset = 0; offset < missing.length; offset += 50) {
+      const batch = missing.slice(offset, offset + 50);
+      const params = new URLSearchParams();
+      params.set('ids[songs]', batch.join(','));
+      await request(`/v1/me/favorites?${params}`, { method: 'POST' });
+      written += batch.length;
+      progress({ phase: 'favorites', completed: written, total: missing.length, message: `Добавляем лайки Apple Music: ${written} из ${missing.length}` });
+    }
+    return { wanted, written, alreadyPresent: wanted.length - missing.length };
+  }
+
+  async function createApplePlaylist(name) {
+    const safeName = String(name || 'Перенесённый плейлист').trim().slice(0, 100) || 'Перенесённый плейлист';
+    const response = await request('/v1/me/library/playlists', {
+      method: 'POST',
+      body: { attributes: { name: safeName, description: '', isPublic: false } },
+    });
+    const playlist = response?.data?.[0];
+    if (!playlist?.id || playlist.type !== 'library-playlists') throw new Error(`Apple Music не вернул ID нового плейлиста «${safeName}».`);
+    return { id: String(playlist.id), name: safeName };
+  }
+
+  async function appendApplePlaylistItems(playlistId, operations, progress) {
+    let written = 0;
+    for (let offset = 0; offset < operations.length; offset += 100) {
+      const batch = operations.slice(offset, offset + 100);
+      const data = batch.map((operation) => {
+        const id = String(operation?.target?.providerId || '');
+        if (!id) throw new Error('В плане Apple Music обнаружен трек без целевого ID.');
+        return { id, type: 'songs' };
+      });
+      await request(`/v1/me/library/playlists/${encodeURIComponent(playlistId)}/tracks`, {
+        method: 'POST', body: { data },
+      });
+      written += batch.length;
+      progress({ phase: 'playlist-items', completed: written, total: operations.length, message: `Добавляем треки в Apple Music: ${written} из ${operations.length}` });
+    }
+    return written;
+  }
+
+  async function verifyFavorites(operations) {
+    const rows = await readFavoriteRows();
+    const actual = new Set(rows.flatMap(resourceIds));
+    const expected = [...new Set(operations.map((operation) => String(operation?.target?.providerId || '')).filter(Boolean))];
+    const verified = expected.filter((id) => actual.has(id)).length;
+    return { complete: true, verifiedCount: verified, expectedCount: expected.length, ids: actual };
+  }
+
+  async function verifyPlaylist(playlistId, operations) {
+    const result = await readPlaylistTracks(playlistId);
+    const actual = result.rows.map((row) => resourceIds(row));
+    const expected = operations.map((operation) => String(operation?.target?.providerId || ''));
+    const verifiedCount = expected.filter((id, index) => actual[index]?.includes(id)).length;
+    return {
+      complete: Number.isInteger(result.total) && result.total === actual.length,
+      collectionPresent: true,
+      verifiedCount,
+      items: result.rows.map((row, index) => ({ providerIds: resourceIds(row), position: index })),
+      expectedCount: expected.length,
+    };
+  }
+
+  async function executeTransfer(plan, requestId) {
+    if (!plan || plan.type !== 'music-transfer-plan' || plan.target?.provider !== 'apple-music') throw new Error('Нужен план переноса с целью Apple Music.');
+    if (!['favorites', 'playlists', 'library'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
+    if (!Array.isArray(plan.completeness?.source) || !plan.completeness.source.length || plan.completeness.source.some((status) => status?.confirmed !== true)) {
+      throw new Error('Запись остановлена: полнота исходной библиотеки не подтверждена.');
+    }
+    if (!Array.isArray(plan.operations) || plan.operations.some((operation) => !operation?.target?.providerId)) throw new Error('В плане есть песня без ID Apple Music.');
+    if (!plan.operations.length && !plan.collectionMappings?.length) throw new Error('В плане нет выбранных песен или плейлистов.');
+    const favorites = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || plan.target.collectionType === 'favorites');
+    const playlistItems = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
+    const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+    const report = { status: 'writing', targetProvider: 'apple-music', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
+    let writesStarted = false;
+    const progress = (value) => post('transfer-progress', {
+      requestId,
+      progress: { ...value, message: value.message || `Перенос в Apple Music: ${value.completed || 0} из ${value.total || 0}` },
+    });
+    try {
+      if (favorites.length) {
+        writesStarted = true;
+        const queued = await addAppleFavorites(favorites, progress);
+        let verified = { complete: false, verifiedCount: 0 };
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          verified = await verifyFavorites(favorites);
+          if (verified.verifiedCount === queued.wanted.length) break;
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        report.favorites = { written: queued.written, alreadyPresent: queued.alreadyPresent, verified: verified.verifiedCount, expected: queued.wanted.length };
+        if (verified.verifiedCount !== queued.wanted.length) throw new Error(`Apple Music принял запрос, но обратная сверка подтвердила ${verified.verifiedCount} из ${queued.wanted.length} лайков.`);
+      }
+      for (const [index, mapping] of mappings.entries()) {
+        const key = String(mapping.sourceId || mapping.sourceName || '');
+        const items = playlistItems.filter((operation) => sourcePlaylistKey(operation) === key)
+          .sort((left, right) => Number(left.source?.position || 0) - Number(right.source?.position || 0));
+        writesStarted = true;
+        const playlist = await createApplePlaylist(mapping.targetName || mapping.sourceName);
+        const written = await appendApplePlaylistItems(playlist.id, items, progress);
+        const verified = await verifyPlaylist(playlist.id, items);
+        const expectedIds = items.map((operation) => String(operation.target.providerId));
+        const verifiedOrder = verified.items.length === expectedIds.length
+          && verified.items.every((item, position) => item.providerIds.includes(expectedIds[position]));
+        report.playlists.push({ id: playlist.id, name: playlist.name, written, verified: verified.verifiedCount, expected: items.length });
+        progress({ phase: 'playlists', completed: index + 1, total: mappings.length, message: `Плейлисты Apple Music: ${index + 1} из ${mappings.length}` });
+        if (!verified.complete || verified.verifiedCount !== items.length || !verifiedOrder) {
+          throw new Error(`Плейлист «${playlist.name}» записан, но не прошёл проверку состава и порядка.`);
+        }
+      }
+      report.status = 'complete';
+      report.finishedAt = new Date().toISOString();
+      return report;
+    } catch (error) {
+      report.status = writesStarted || report.favorites?.verified || report.playlists.length ? 'partial_failure' : 'failed';
+      report.error = error instanceof Error ? error.message : 'Apple Music не завершил перенос.';
+      report.finishedAt = new Date().toISOString();
+      throw Object.assign(new Error(report.error), { transferReport: report });
+    }
+  }
+
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
+    if (event.data.type === 'command') {
+      const requestId = String(event.data.requestId || '');
+      try {
+        let result;
+        if (event.data.action === 'search-tracks') result = await searchCatalog(event.data.query, event.data.storefront);
+        else if (event.data.action === 'execute-transfer') result = await executeTransfer(event.data.plan, requestId);
+        else throw new Error('Неизвестная команда Apple Music.');
+        post('command-result', { requestId, ok: true, result });
+      } catch (error) {
+        post('command-result', {
+          requestId, ok: false,
+          error: error instanceof Error ? error.message : 'Не удалось выполнить команду Apple Music.',
+          report: error?.transferReport || null,
+        });
+      }
+      return;
+    }
     if (event.data.type !== 'start-library-scan') return;
     try {
       post('scan-progress', { message: 'Читаем избранное и плейлисты Apple Music…' });

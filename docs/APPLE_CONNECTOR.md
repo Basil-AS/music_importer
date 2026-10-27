@@ -14,7 +14,7 @@ The scan is read-only. If Apple Music has not yet made an authenticated API requ
 ## Limits
 
 - The connector uses the logged-in web player's private runtime headers to call documented personal-library reads. It does not create a MusicKit developer token or store user credentials. Apple's public REST API normally requires a developer token; this browser-session route is specific to the first-party Apple Music web app and may change.
-- Apple is now a source connector as well as the existing catalog matcher. Apple destination writes are not enabled in the MVP. The target writer is still experimental for Yandex Music only.
+- Apple is both a source connector and an experimental target writer. The target writer's documented REST operations pass fixtures; live use through the first-party page session is still unverified. See [`APPLE_TRANSFER.md`](APPLE_TRANSFER.md).
 - Before using the updated unpacked extension, reload it in `chrome://extensions` and refresh both Apple Music and the local app tabs.
 
 ## References

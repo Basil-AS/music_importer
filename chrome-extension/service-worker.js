@@ -252,6 +252,64 @@ function messageMatchesPage(type, kind) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === 'apple:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://music.apple.com') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
+        type: 'music-importer:apple-progress',
+        requestId: String(message.requestId || ''),
+        progress: message.progress,
+      }).catch(() => null)));
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'music-importer:apple-command') {
+      let origin = '';
+      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      const requestId = String(message.requestId || '');
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Некорректная команда Apple Music.' });
+        return;
+      }
+      if (message.action === 'execute-transfer'
+        && (message.plan?.type !== 'music-transfer-plan' || message.plan?.target?.provider !== 'apple-music')) {
+        sendResponse({ ok: false, error: 'План не предназначен для Apple Music.' });
+        return;
+      }
+      const tabs = await chrome.tabs.query({ url: 'https://music.apple.com/*' });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте Apple Music, войдите в аккаунт и дождитесь загрузки библиотеки.' });
+        return;
+      }
+      try {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'apple:command',
+          requestId,
+          action: message.action,
+          query: String(message.query || '').slice(0, 400),
+          storefront: String(message.storefront || '').slice(0, 2),
+          plan: message.action === 'execute-transfer' ? message.plan : undefined,
+        });
+        sendResponse(response || { ok: false, error: 'Apple Music не вернул результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Apple Music. Перезагрузите её и повторите.' });
+      }
+      return;
+    }
+
     if (message?.type === 'yandex:transfer-progress') {
       let origin = '';
       try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }

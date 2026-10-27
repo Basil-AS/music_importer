@@ -5,10 +5,10 @@
   if (!allowedOrigins.has(location.origin) || location.pathname !== '/') return;
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type !== 'music-importer:yandex-progress') return false;
+    if (!['music-importer:yandex-progress', 'music-importer:apple-progress'].includes(message?.type)) return false;
     window.postMessage({
       source: marker,
-      type: 'yandex-progress',
+      type: message.type === 'music-importer:apple-progress' ? 'apple-progress' : 'yandex-progress',
       requestId: String(message.requestId || ''),
       progress: message.progress || null,
     }, location.origin);
@@ -52,6 +52,33 @@
         }, location.origin);
       } catch {
         window.postMessage({ source: marker, type: 'yandex-command-response', requestId, ok: false, error: 'Не удалось связаться с расширением.' }, location.origin);
+      }
+      return;
+    }
+
+    if (event.data.type === 'apple-command') {
+      const action = String(event.data.action || '');
+      if (!['search-tracks', 'execute-transfer'].includes(action)) return;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'music-importer:apple-command',
+          requestId,
+          action,
+          query: String(event.data.query || '').slice(0, 400),
+          storefront: String(event.data.storefront || '').slice(0, 2),
+          plan: action === 'execute-transfer' ? event.data.plan : undefined,
+        });
+        window.postMessage({
+          source: marker,
+          type: 'apple-command-response',
+          requestId,
+          ok: response?.ok === true,
+          error: response?.error || null,
+          results: response?.results || null,
+          report: response?.report || null,
+        }, location.origin);
+      } catch {
+        window.postMessage({ source: marker, type: 'apple-command-response', requestId, ok: false, error: 'Не удалось связаться с расширением Apple Music.' }, location.origin);
       }
       return;
     }
