@@ -108,6 +108,8 @@ Crossfade подтверждает альтернативный browser-session 
 
 Не сохранять HAR, заголовки авторизации, cookies, значения token, GraphQL variables с пользовательскими данными и сырые ответы личной коллекции в репозиторий.
 
+Независимый source cross-check: MIT [`lubaskinc0de/beatstash`](https://github.com/lubaskinc0de/beatstash/tree/2ac4573273fd4b2037a04dcda9c216ea230f1d4d) читает `userCollection` через GraphQL v1 и отдельно гидрирует `getTracks(ids)` пачками по 100; его likes query также не содержит cursor/limit. Приложение проверяет подписку через v2 profile перед своим audio import, но этот прикладной gate сам по себе не доказывает ограничение чтения likes API. Полный разбор auth, лицензии и отличия от мигратора добавлен в [инвентарь API](zvuk-api-inventory.md#независимая-сверка-импорта-коллекции-lubaskinc0debeatstash).
+
 ### Инвентарь GraphQL операций `trudenboy/zvuk-music`
 
 По checkout `ed491f6` библиотека хранит отдельные GraphQL документы. Запросы: `episodes`, `followingCount`, `getAllHiddenCollection`, `getArtists`, `getEpisodes`, `getFullTrack`, `getHiddenTracks`, `getPlaylistTracks`, `getPlaylists`, `getPodcasts`, `getReleases`, `getShortPlaylist`, `getStream`, `getTracks`, `listenedEpisodes`, `listeningHistory`, `notificationsHasUnread`, `profileFollowersCount`, `quickSearch`, `search`, `synthesisPlaylist`, `userCollection`, `userPaginatedPodcasts`, `userPlaylists`, `userTracks`. Мутации: `addItemToCollection`, `addItemToHidden`, `addTracksToPlaylist`, `createPlaylist`, `deletePlaylist`, `removeItemFromCollection`, `removeItemFromHidden`, `renamePlaylist`, `setPlaylistToPublic`, `synthesisPlaylistBuild`, `updataPlaylist` (имя operation в библиотеке с этой орфографией).
