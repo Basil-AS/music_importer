@@ -54,10 +54,10 @@
     $('#trackList').innerHTML = state.tracks.map((track, index) => {
       const title = escapeHTML(track.title);
       const artist = escapeHTML(track.artist);
-      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? 'Не найдено' : track.match ? 'Выбрано' : track.searched ? 'Проверьте' : 'Не искали';
+      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? 'Не найдено' : track.match ? (track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? 'Проверьте' : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : track.searched && track.matches.length ? 'review' : 'pending';
       const options = track.matches.map((match) => `<option value="${match.trackId}" ${track.match?.trackId === match.trackId ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
-      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение Apple Music для ${title}"><option value="">Выберите версию…</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в Apple Music ↗</a>` : '<div class="confidence review">Просмотрите результаты и выберите версию</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
+      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение Apple Music для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в Apple Music ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">♫</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${track.album ? `<div class="track-artist">${escapeHTML(track.album)}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
     }).join('');
 
@@ -65,6 +65,9 @@
       const track = state.tracks[Number(select.dataset.index)];
       track.match = track.matches.find((match) => String(match.trackId) === select.value) || null;
       track.selected = Boolean(track.match);
+      track.autoMatched = false;
+      track.matchReason = track.match ? 'manual_review' : null;
+      track.matchConfidence = track.match ? window.MusicMatcher.scoreCandidate(track, track.match).score : 0;
       state.report = null;
       $('#report').classList.remove('show');
       renderTracks();
@@ -153,8 +156,16 @@
     const titleIndex = column('title', 'track', 'track name', 'name', 'название', 'трек');
     const artistIndex = column('artist', 'artists', 'artist name', 'artist name(s)', 'artist_names', 'исполнитель', 'артист');
     const albumIndex = column('album', 'album name', 'альбом');
+    const isrcIndex = column('isrc', 'recording code');
+    const durationIndex = column('durationms', 'duration_ms', 'duration ms', 'duration');
+    const idIndex = column('id', 'track id', 'track_id', 'uri', 'spotify uri', 'provider id');
     if (titleIndex < 0 || artistIndex < 0) throw new Error('Нужны столбцы title и artist (или название и исполнитель)');
-    return rows.map((values) => ({ title: values[titleIndex]?.trim(), artist: values[artistIndex]?.trim(), album: albumIndex < 0 ? '' : values[albumIndex]?.trim() })).filter((track) => track.title && track.artist);
+    return rows.map((values) => ({ title: values[titleIndex]?.trim(), artist: values[artistIndex]?.trim(), album: albumIndex < 0 ? '' : values[albumIndex]?.trim(), isrc: isrcIndex < 0 ? '' : values[isrcIndex]?.trim(), durationMs: normalizeDuration(values[durationIndex]), sourceId: idIndex < 0 ? '' : values[idIndex]?.trim() })).filter((track) => track.title && track.artist);
+  }
+
+  function normalizeDuration(value) {
+    const duration = Number(value) || 0;
+    return duration > 0 && duration < 10000 ? duration * 1000 : duration;
   }
 
   function normalizeJSON(value) {
@@ -167,11 +178,23 @@
         title: String(track?.title || track?.name || track?.trackName || track?.track_name || ''),
         artist: Array.isArray(artist) ? artist.map((item) => typeof item === 'string' ? item : item?.name).filter(Boolean).join(', ') : String(artist || ''),
         album: String((typeof track?.album === 'object' ? track.album?.name : track?.album) || track?.albumName || track?.album_name || ''),
+        isrc: String(track?.isrc || track?.ISRC || track?.externalIds?.isrc || track?.external_ids?.isrc || ''),
+        durationMs: normalizeDuration(track?.durationMs || track?.duration_ms || track?.duration),
+        sourceId: String(track?.id || track?.trackId || track?.track_id || track?.uri || ''),
       };
     }).filter((track) => track.title && track.artist);
   }
 
   const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  function applySuggestion(track) {
+    const suggestion = window.MusicMatcher.suggestBestMatch(track, track.matches);
+    track.match = suggestion.automatic ? suggestion.best : null;
+    track.matchConfidence = suggestion.confidence;
+    track.matchReason = suggestion.reason;
+    track.autoMatched = suggestion.automatic;
+    track.selected = suggestion.automatic;
+  }
 
   async function searchOne(track) {
     if (state.searching || !track) return;
@@ -193,6 +216,9 @@
   async function requestTrackMatches(track) {
     track.searching = true;
     track.searchError = false;
+    track.matches = [];
+    track.match = null;
+    track.selected = false;
     renderTracks();
     const params = new URLSearchParams({ term: (track.query || `${track.title} ${track.artist}`).trim(), entity: 'song', limit: '15', country: $('#storefront').value });
     try {
@@ -202,11 +228,13 @@
       track.matches = (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
       track.searched = true;
       track.searchError = false;
-      track.match = null;
-      track.selected = false;
+      applySuggestion(track);
     } catch (error) {
       track.searched = false;
       track.searchError = true;
+      track.matches = [];
+      track.match = null;
+      track.selected = false;
       track.errorMessage = error instanceof TypeError ? 'Каталог недоступен. Проверьте соединение и повторите поиск.' : error.message;
     } finally {
       track.searching = false;
@@ -227,13 +255,37 @@
     updateCounts();
 
     try {
-      for (const track of pending) {
-        await requestTrackMatches(track);
-        completed += 1;
-        $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
-        renderTracks();
-        await wait(180);
-      }
+      const queryKey = (track) => `${$('#storefront').value}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`;
+      const groupsByQuery = new Map();
+      pending.forEach((track) => {
+        const key = queryKey(track);
+        if (!groupsByQuery.has(key)) groupsByQuery.set(key, { key, tracks: [] });
+        groupsByQuery.get(key).tracks.push(track);
+      });
+      const queue = [...groupsByQuery.values()];
+      const workerCount = Math.min(3, queue.length);
+      let queueIndex = 0;
+      await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (queueIndex < queue.length) {
+          const group = queue[queueIndex++];
+          const track = group.tracks[0];
+          await requestTrackMatches(track);
+          group.tracks.slice(1).forEach((duplicate) => {
+            duplicate.matches = track.matches;
+            duplicate.searched = track.searched;
+            duplicate.searchError = track.searchError;
+            duplicate.errorMessage = track.errorMessage;
+            if (duplicate.searched && !duplicate.searchError) applySuggestion(duplicate);
+          });
+          if (track.searchError) {
+            group.tracks.slice(1).forEach((duplicate) => { duplicate.searching = false; });
+          }
+          completed += group.tracks.length;
+          $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
+          renderTracks();
+          await wait(160);
+        }
+      }));
       const withResults = state.tracks.filter((track) => track.searched && track.matches.length).length;
       const failed = state.tracks.filter((track) => track.searchError).length;
       $('#searchStatus').textContent = failed ? `Найдено: ${withResults} · ошибок: ${failed}` : `Найдено: ${withResults} из ${state.tracks.length}`;
@@ -258,7 +310,7 @@
       target: { service: 'Apple Music', collection: 'favorite songs', storefront: $('#storefront').value },
       search: { service: 'Apple iTunes Search API', writesPerformed: 0 },
       selected: selected.map((track) => ({
-        source: { title: track.title, artist: track.artist, album: track.album || null },
+        source: { id: track.sourceId || null, isrc: track.isrc || null, title: track.title, artist: track.artist, album: track.album || null, durationMs: track.durationMs || null },
         target: {
           trackId: track.match.trackId,
           title: track.match.trackName,
@@ -269,6 +321,7 @@
           durationMs: track.match.trackTimeMillis || null,
         },
         action: 'favorite',
+        match: { method: track.matchReason || 'manual_review', confidence: track.matchConfidence || null, automatic: Boolean(track.autoMatched) },
       })),
       skipped: skipped.map((track) => ({ title: track.title, artist: track.artist, reason: track.searched && !track.matches.length ? 'no_catalog_match' : 'not_selected' })),
       appleMusicWritesPerformed: 0,
@@ -307,7 +360,7 @@
   });
 
   $('#templateBtn').addEventListener('click', () => {
-    const blob = new Blob(['title,artist,album\n"Снег","Моя Мишель","Кино"\n'], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob(['title,artist,album,isrc,duration_ms,id\n"Снег","Моя Мишель","Кино",,,\n'], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
