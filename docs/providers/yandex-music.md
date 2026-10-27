@@ -39,6 +39,18 @@
 
 Авторизация открывает отдельный Selenium Chrome по implicit URL (`response_type=token`) с client ID публичного Android-приложения, извлекает access token из callback URL и записывает его в `.env` через `python-dotenv`. Источник прямо заявляет, что client ID не является credential нашего приложения; режим прав файла не задаётся, а токен в URL/файле нужно считать секретом. Код просмотрен статически, не запускался. Полезен как CSV-exporter/reference на методы библиотеки, но не как готовый Apple importer или образец безопасной авторизации.
 
+### Прямой pipeline: `ComputerPers/YandexMusic_to_AppleMusic`
+
+В [ComputerPers/YandexMusic_to_AppleMusic](https://github.com/ComputerPers/YandexMusic_to_AppleMusic), проверенный HEAD `41fdd0e` от 07.04.2026 (GitHub не показывает объявленную лицензию), экспорт вызывает `users_likes_tracks()`, затем запрашивает подробности через `POST /tracks` батчами по 100. JSON сохраняет Yandex ID, title, artists, album, duration; CSV опускает внутренний список артистов. ISRC и исходный порядок/позиции лайков не сохраняются. Сам лимит списка лайков не проверен; в используемой библиотеке нет явной cursor-пагинации.
+
+Сопоставление идёт через публичный `GET https://itunes.apple.com/search` (`term`, `media=music`, `entity=song`, `limit`, `country`), ищет в `ru` и `us`, запрашивает до 25 результатов и использует нормализацию плюс substring-проверку title/artist. ISRC-first стратегии нет. Результаты можно проверить по JSON/отчёту несовпадений и продолжить после прерывания; matcher делает несколько поисков на трек с задержкой 3,5 секунды.
+
+Apple API-вариант проверяет `GET /v1/me/library/songs?limit=1`, добавляет catalog song IDs через `POST /v1/me/library?ids[songs]=...` порциями по 25 и может создать playlist через `POST /v1/me/library/playlists`, затем дополнять `POST /v1/me/library/playlists/{id}/tracks`. Принятие в библиотеку считается успешным при HTTP 202. Ни этот writer, ни AppleScript-вариант не вызывают Favorite Songs route `/v1/me/favorites`: они добавляют в Library и отдельный playlist, поэтому сохранённые исходные лайки не становятся Apple Favorites.
+
+Локальный writer открывает `music://` track URL, запускает воспроизведение и дублирует current track в Library и playlist. Поиск для playlist сначала использует название+артиста, затем fallback только по названию; это может выбрать неверную одноимённую запись. Режима установить `track.favorited` в просмотренном коде нет.
+
+Токенный helper не является надёжным Chrome extractor на macOS: он копирует целиком SQLite Cookies database во временный файл, ищет `media-user-token`, а для encrypted value с префиксом `v10` сразу останавливается с инструкцией скопировать cookie вручную; temporary copy удаляется в `finally`. В коде нет вызова Keychain/decryption. Для иных префиксов он пробует UTF-8 decode, что не доказывает успешную расшифровку. Developer token скрейпится из JavaScript bundle `beta.music.apple.com` и частично печатается; при `--save` оба токена записываются открытым текстом без задания ограниченного file mode (файлы лишь перечислены в `.gitignore`). `--dry-run` в API-варианте всё ещё загружает токены и выполняет auth-check до выхода. Это полезный reference на общий экспорт→match→review pipeline, но не готовый import в Favorite Songs и не образец session/token handling.
+
 Дополнительная реализация в [oklookat/synchro](https://github.com/oklookat/synchro), HEAD `ac441f4` от 2024-07-07 (GPL-3.0), использует Go-клиент `goym`: OAuth Device Flow с credentials публичного Android-клиента, чтение `LikedTracks`, загрузку metadata пачками по 30 и методы `LikeTracks`/`UnlikeTracks`. В просмотренной версии `LikedTracks` отбрасывает UGC записи; это означает, что такой экспорт не гарантированно сохраняет весь список лайков. Код старый и хранит auth в SQLite без шифрования, поэтому годится только как reference операций, не как готовое приложение.
 
 ## Практическая проверка
@@ -67,5 +79,9 @@
 - [Request authorization and form-post implementation at `9ca132e`](https://github.com/MarshalX/yandex-music-api/blob/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/utils/request_base.py)
 - [oklookat/synchro Yandex adapter at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/yandexmusic/accountActions.go)
 - [oklookat/synchro Yandex auth at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/yandexmusic/main.go)
+- [`ComputerPers/YandexMusic_to_AppleMusic` exporter at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/export_yandex_favorites.py)
+- [`ComputerPers/YandexMusic_to_AppleMusic` Apple API writer at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/add_to_apple_music_api.py)
+- [`ComputerPers/YandexMusic_to_AppleMusic` Chrome token helper at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/extract_tokens.py)
+- [`ComputerPers/YandexMusic_to_AppleMusic` matcher at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/match_apple_music.py)
 
 Изучено по исходникам community-библиотеки, её OpenAPI, браузерному UI и terminal HTTP-пробам с пользовательской сессией. Это не контракт Яндекса; OAuth Device Flow и мутации на аккаунте не запускались.
