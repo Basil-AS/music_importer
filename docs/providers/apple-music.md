@@ -4,9 +4,9 @@
 
 ## Авторизация
 
-Apple API различает developer token, подписанный разработчиком JWT, и Music User Token, который разрешает пользовательские операции. Запросы каталога используют developer token; запросы к `/v1/me/...` требуют также Music User Token. MusicKit предназначен для получения пользовательского разрешения в поддерживаемой платформе. Запрос доступа должен быть явным и объяснять назначение.
+Apple API различает developer token, подписанный разработчиком JWT, и Music User Token, который разрешает пользовательские операции. Вручную созданный developer token — JWT с ES256 и `kid`, Team ID в `iss` и максимальным сроком `exp` до шести месяцев; Apple указывает, что он предназначен для участника Apple Developer Program. Запросы каталога требуют developer token; `/v1/me/...` дополнительно требует Music User Token. MusicKit на Apple-платформах и в web может автоматически управлять пользовательским токеном после разрешения пользователя. Для API предусмотрены ответы `401`/`403`; превышение частоты даёт временный `429`.
 
-Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Поэтому собственный REST-клиент записи в Favorites нельзя считать бесплатным до практической проверки альтернативного штатного flow. Бесплатная регистрация Apple Developer не равна членству в программе и не даёт подтверждённого здесь права создать ключ MusicKit.
+Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Бесплатная регистрация Apple Developer не равна членству в программе. Поэтому официальный REST-клиент с собственным developer token не подходит под требование «не платить» для индивидуального проекта; локальный Music.app путь ниже остаётся бесплатным кандидатом.
 
 ### Локальный Music.app без MusicKit REST API
 
@@ -36,8 +36,10 @@ Live UI-проверка в текущей авторизованной вкла
 
 ## Каталог, библиотека, избранное
 
-- Поиск: Apple Music API Catalog search по storefront, искать песню/артиста/альбом; затем подтвердить совпадение ISRC/метаданными.
-- Чтение библиотеки: `GET https://api.music.apple.com/v1/me/library/songs`; требует Music User Token, поддерживает пагинацию. Для catalog ID в library response может присутствовать `playParams.catalogId`.
+- ISRC-first поиск: `GET https://api.music.apple.com/v1/catalog/{storefront}/songs?filter[isrc]=<isrc>`; документация задаёт максимум 25 ISRC на запрос, но один ISRC может вернуть несколько каталоговых записей. Результаты надо дополнительно сверять по версии, артисту, альбому и длительности.
+- Обычный текстовый поиск: `GET /v1/catalog/{storefront}/search?term=<query>&types=songs,albums,artists`; доступен `limit`, затем совпадение проверяется по метаданным.
+- Чтение библиотеки: `GET https://api.music.apple.com/v1/me/library/songs`; требует Music User Token вместе с developer token в официальном API, поддерживает `limit`/`offset` и возвращает `next`, который надо читать до отсутствия. Это все library songs по алфавиту, не отдельный список Favorites. Для catalog ID в library response может присутствовать `playParams.catalogId`.
+- Просмотр Favorite Songs: в официальной документации найден write endpoint `POST /v1/me/favorites`, отдельный публичный `GET /v1/me/favorites` не обнаружен. Для read-back используется системный Favorite Songs playlist из `/v1/me/library/playlists` и его relationship `/tracks`; live Chrome/terminal GET этого плейлиста и одного item ранее подтвердил `200`. Account-specific playlist ID не сохранять.
 - Добавление в Favorite Songs: `POST https://api.music.apple.com/v1/me/favorites?ids[songs]=<catalog-id>` с developer + music user authorization. Документация указывает `202 Accepted`; если пользователь favorites song, она добавляется в `favorite songs` playlist. Недоступные IDs могут быть проигнорированы, поэтому успех HTTP сам по себе не равен успешному импорту. API разрешает bulk additions; проверенные сторонние проекты отправляют по одному треку.
 - Создание обычного плейлиста: `POST /v1/me/library/playlists`, добавление элементов в playlist поддерживается отдельно. Это не эквивалент добавлению в favorites.
 - Добавление ресурса в библиотеку `POST /v1/me/library` — отдельная операция от `/me/favorites`; нужно не смешивать понятия «в библиотеке» и «избранное».
@@ -80,6 +82,9 @@ Live UI-проверка в текущей авторизованной вкла
 - [Get a personal song rating](https://developer.apple.com/documentation/applemusicapi/get-a-personal-content-rating-4k9c0)
 - [Delete a personal song rating](https://developer.apple.com/documentation/applemusicapi/delete-a-personal-content-rating-3a3a2)
 - [Get all library songs](https://developer.apple.com/documentation/applemusicapi/get-all-library-songs)
+- [Get multiple catalog songs by ISRC](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-isrc)
+- [Apple Music API pagination](https://developer.apple.com/documentation/applemusicapi/fetching-resources-by-page)
+- [Add a resource to a library](https://developer.apple.com/documentation/applemusicapi/add-a-resource-to-a-library)
 - [Create a library playlist](https://developer.apple.com/documentation/applemusicapi/create-a-new-library-playlist)
 - [Apple Developer Program fee](https://developer.apple.com/help/account/membership/program-enrollment)
 - [Apple Music transfer from other services](https://support.apple.com/en-us/118249)
