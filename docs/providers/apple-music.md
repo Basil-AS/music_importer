@@ -18,6 +18,12 @@ Apple API различает developer token, подписанный разра�
 
 Рабочая гипотеза для бесплатного локального мигратора: выгрузить лайки провайдера → сопоставить с каталогом Apple → добавить найденные записи в Library/временный плейлист через штатное Music.app управление → локальным AppleScript выставить Favorites → сверить результат и отчёт пропусков. Ограничение Apple Developer Program относится к REST API и не автоматически к AppleScript. Сценарий всё равно требует Apple Music subscription и локального Mac; массовую запись, облачную синхронизацию и поведение на уже добавленных/недоступных треках нужно проверить на тестовой небольшой выборке.
 
+### Ещё один Apple Music backup-кандидат: userscript
+
+[pinyht/apple-music-transfer](https://github.com/pinyht/apple-music-transfer), MIT, версия 1.0.4 (commit `296e59e`, 2026-03-09), — Tampermonkey script для экспорта/импорта songs, albums и playlists в JSON/CSV. В исходнике он перехватывает ответы `amp-api.music.apple.com/v1/me/library/songs` и `/albums`, восполняет пропущенные страницы параметрами `offset`/`limit` и экспортирует для песни `id`, `name`, `artistName`, `albumName`. Для библиотечных плейлистов скрипт читает элементы через видимую страницу и скроллинг.
+
+Это backup/restore Apple Library, не мигратор лайков: в экспортируемой структуре песен нет поля `favorited`, а README не заявляет экспорт или восстановление Favorite Songs как флага избранного. Songs API вызывается с `credentials: include` в контексте авторизованного `music.apple.com`; это использует существующую web-сессию, а не отдельный публичный OAuth flow. Скрипт может дополнить наш будущий Apple backup/import path, но перед применением надо вручную ревьюить полный userscript и сначала проверять небольшую выборку.
+
 ### Встроенный перенос в Apple Music
 
 Apple поддерживает отдельный официальный пользовательский transfer flow в приложении и на `music.apple.com`. Apple пишет, что source liked/loved songs попадают в Favorite Songs; пользователю нужно подписаться на Apple Music, включить Sync Library и авторизоваться в source service. Совместимые источники и переносимые типы данных выбираются провайдером и могут различаться. Для вариантов, требующих проверки, Apple даёт 30 дней на разбор; сам перенос выполняется сторонним провайдером. Это первый кандидат для пробного Spotify → Apple переноса, если Spotify есть в списке источников для конкретного аккаунта и региона. Официальная поддержка Apple указывает, что transfer недоступен в материковом Китае, Мьянме и России; в других регионах доступность может отличаться.
@@ -56,6 +62,7 @@ Apple поддерживает отдельный официальный пол�
 - [Transfer in the Music app](https://support.apple.com/en-ca/guide/iphone/iph103c19002/ios)
 - [MIT script: Spotify Liked Songs to Apple Music Favorite Songs](https://gist.github.com/obitech/5e18ec3c8c24f89c96f0cf396cb33e48)
 - [Apple Music MCP (MIT; local Music.app mode)](https://github.com/epheterson/applemusic-mcp)
+- [Apple Music Transfer userscript (MIT)](https://github.com/pinyht/apple-music-transfer)
 
 **Уточнение к найденным сторонним скриптам:** `ComputerPers/YandexMusic_to_AppleMusic` показывает два способа добавления: AppleScript добавляет песню в библиотеку/свой плейлист, API-вариант вызывает `POST /v1/me/library` (добавить в библиотеку). Просмотренный код не вызывает `/v1/me/favorites`, поэтому его успешная работа не означает, что лайки перенесены в Favorite Songs. Его `extract_tokens.py` автоматически читает Chrome/Safari cookie-хранилище и сохраняет приватный Music User Token; это не официальный MusicKit authorization flow. Не использовать извлечение cookie как архитектурный образец.
 
