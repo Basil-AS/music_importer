@@ -64,6 +64,12 @@ Extended Quota Mode снимает allowlist cap и даёт больший rate
 - Для Development Mode приложение требует Premium у владельца и allowlist максимум на 5 пользователей. Лимит Client IDs был поднят до 25 на developer account в июле 2026; quota при этом общая на аккаунт. Это ограничения режима приложения, а не лимит количества треков в аккаунте.
 - API может вернуть 401/403/429; 429 требует учитывать `Retry-After`. Результат пакетной записи следует перепроверять.
 
+### Cross-check свежего GitHub-клиента
+
+[Ruhrkrieger/spotify-account-migrator](https://github.com/Ruhrkrieger/spotify-account-migrator/tree/c7a609eea235c5a1e1ed93a69592fa49ffbb7e1d), MIT, HEAD `c7a609eea235c5a1e1ed93a69592fa49ffbb7e1d` (2026-08-26), — независимый статический reference для февральского API-перехода. Его source по-прежнему читает лайки через `GET /me/tracks?limit=50` и следует `next`; playlist items читает через `/playlists/{id}/items` по 50 штук, проверяет количество против playlist total и записывает library additions через `PUT /me/library` группами до 40 URI. Это подтверждает сохранение read route `/me/tracks` при смене write/playlist endpoints; official reference независимо задаёт `limit` максимум 50 и `next` до `null`.
+
+Этот инструмент не переносит в Apple: `PUT /me/library` назначает Spotify saved items; нет Apple catalog match или `/v1/me/favorites`. Для запуска он просит свой Spotify Client ID **и Client Secret**, использует Spotipy OAuth, требует Premium владельца Development Mode app и allowlist пользователей. `config.json`, token cache, полный экспорт и resume state остаются локально в plaintext; они игнорируются Git, но source не задаёт отдельные restrictive permissions. Offline тестовый suite — mock-only; локальный запуск на этом окружении не стартовал из-за отсутствующего `requests` (и возможно `spotipy`), поэтому ни live API, ни OAuth им не подтверждены.
+
 ## Практическая проверка
 
 - В авторизованном Chrome Web Player список «Любимые треки» открылся через видимую страницу коллекции. После перезагрузки страницы в read-only сетевом журнале наблюдались:
