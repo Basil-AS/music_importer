@@ -1,6 +1,6 @@
 # Звук (бывший СберЗвук): API и авторизация
 
-Статус: исходники нескольких сторонних клиентов просмотрены 27.10.2026. Официальная публичная документация API не найдена. Все перечисленные HTTP/GraphQL интерфейсы следует считать частными и меняющимися.
+Статус: исходники нескольких сторонних клиентов просмотрены 27.10.2026. Официальная публичная документация API не найдена. Все перечисленные HTTP/GraphQL интерфейсы следует считать частными и меняющимися. Сводный маршрутный и operation inventory см. в [zvuk-api-inventory.md](zvuk-api-inventory.md).
 
 ## Что просмотрено
 
@@ -10,11 +10,14 @@
 - [trudenboy/zvuk-music](https://github.com/trudenboy/zvuk-music), исходники, GraphQL operation-файлы, README, MIT license; на дату проверки PyPI показывал версию `0.6.3` (7 октября 2026).
 - [korenskoy/zvuk-swift](https://github.com/korenskoy/zvuk-swift), Swift Package, README, GraphQL документы, transport/auth implementation, MIT; проверенный HEAD `8245d4e` от 20.10.2026.
 - Контрольные checkout исходников на 27.10.2026: `Basil-AS/ZvukDownloader` `922e258` (GitHub metadata не обнаружила license; README заявляет MIT, но в checkout нет `LICENSE`), `Aiving/sberzvuk-api` `3c157f8`, `trudenboy/zvuk-music` `ed491f6`.
+- Дополнительная проверка `trudenboy/zvuk-music`: HEAD `ed491f61bc7b18c9f327017a8a87d9fe183022a7` от 07.10.2026; просмотрены HTTP transport, Tiny routes и все checked-in GraphQL operation documents.
 - Официальная справка Звука о переносе [«Как перенести музыку в Звук?»](https://help.zvuk.com/article/42207), проверена 27.10.2026.
 
 ## Авторизация в найденных клиентах
 
 `ZvukDownloader` просит пользователя взять cookie с именем `auth` из браузера после входа на `zvuk.com`, либо получить токен из `/api/v2/tiny/profile`; затем отправляет cookie `auth=<значение>`. Это bearer-секрет активной сессии. В README/API notes есть команда передать его через CLI или хранить в `config.json`. Для нашего приложения нельзя выводить это значение в консоль/логи или коммитить конфиг. Не просить пароль пользователя и не пытаться извлекать cookie автоматически без отдельного безопасного потока.
+
+**Chrome live-check 27.10.2026:** авторизованная сессия открыла JSON (`200`) на `GET /api/v2/tiny/profile` и `GET /api/tiny/profile`; оба содержат session token, но в разных местах схемы (`result.profile.token` и `result.token`). Значения и профильные поля не копировались в заметки. Чистые no-cookie terminal запросы к обоим путям и безопасный `POST /api/v1/graphql` с `query { __typename }` получили `418 text/html`. Ранее authenticated read-only GraphQL terminal replay с ephemeral session context вернул `200`.
 
 В просмотренном `ZvukDownloader` есть дополнительный риск: `aiohttp.TCPConnector(..., ssl=False)` отключает TLS-проверку сертификата для HTTP-сессии, через которую передаётся cookie `auth`. Его общий обработчик ошибок также логирует текст HTTP-ответа. Поэтому даже для локального чтения профиля не следует использовать этот клиент с реальным токеном без исправления TLS и очистки логов. Репозиторий не содержит файла `LICENSE`, несмотря на формулировку «MIT» в README.
 
