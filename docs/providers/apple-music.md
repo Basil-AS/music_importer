@@ -6,7 +6,7 @@
 
 Apple API различает developer token, подписанный разработчиком JWT, и Music User Token, который разрешает пользовательские операции. Запросы каталога используют developer token; запросы к `/v1/me/...` требуют также Music User Token. MusicKit предназначен для получения пользовательского разрешения в поддерживаемой платформе. Запрос доступа должен быть явным и объяснять назначение.
 
-Создание ключа и developer token нужно проверить для локального личного сценария отдельно. Apple Developer Program сейчас указан как $99 за год; бесплатная регистрация разработчика существует, но наличие бесплатной учётной записи само по себе не доказывает, что можно выпустить нужный MusicKit private key. Не считать бесплатность подтверждённой до практической проверки конкретного token flow.
+Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Поэтому собственный REST-клиент записи в Favorites нельзя считать бесплатным до практической проверки альтернативного штатного flow. Бесплатная регистрация Apple Developer не равна членству в программе и не даёт подтверждённого здесь права создать ключ MusicKit.
 
 ### Встроенный перенос в Apple Music
 
@@ -29,6 +29,8 @@ Apple поддерживает отдельный официальный пол�
 - [Apple Music API overview](https://developer.apple.com/documentation/AppleMusicAPI)
 - [MusicKit](https://developer.apple.com/musickit/)
 - [User authentication / Music User Token](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit)
+- [Generating developer tokens](https://developer.apple.com/documentation/AppleMusicAPI/generating-developer-tokens)
+- [Create a media identifier and private key](https://developer.apple.com/help/account/capabilities/create-a-media-identifier-and-private-key)
 - [Add resource to favorites](https://developer.apple.com/documentation/applemusicapi/add-resource-to-favorites)
 - [Get all library songs](https://developer.apple.com/documentation/applemusicapi/get-all-library-songs)
 - [Create a library playlist](https://developer.apple.com/documentation/applemusicapi/create-a-new-library-playlist)
