@@ -149,6 +149,12 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - A fresh clean-terminal `GET https://api.spotify.com/v1/me/tracks?limit=1` without Authorization returned `401 application/json` with `WWW-Authenticate`; response body was discarded. This matches the official API's OAuth boundary; the earlier authenticated private Pathfinder replay is a separate path documented in `docs/providers/spotify.md`.
 - No session headers or tokens were extracted in this pass. The recheck and its limitations are recorded in `docs/providers/spotify.md`.
 
+## Свежая read-only Chrome-трасса Звука (27.10.2026)
+
+- Открыта отдельная Chrome-вкладка `/favorites`; исходную вкладку пользователя не перезагружали. После загрузки UI сделал `POST /api/v1/graphql` для `getPaginatedCollection` (`after`, `limit`), `getCollectionIds` (без variables), `getCollectionCount` (без variables) и `getUnreadNotificationsCount` (`availableTypes`); все четыре ответа — `200 application/graphql-response+json`. `GET /api/tiny/profile` также вернул `200 application/json`, профильное тело не читалось.
+- В рабочие заметки попали только методы, routes, operation names, имена ключей variables и статусы. Authorization/cookie headers и response bodies не читались; значения variables не выводились и не сохранялись; названия треков, IDs, cursor и размер коллекции не записывались. В этой итерации новый authenticated terminal replay не делался; источниковый recheck `trudenboy/zvuk-music` отдельно подтверждает, что его готовый `get_liked_tracks()` не обходит cursor.
+- Подробная запись: `docs/providers/zvuk-api-inventory.md`.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).

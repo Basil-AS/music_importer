@@ -147,6 +147,12 @@ Live проверки касались только чтения. Для наш�
 
 Сразу после browser capture без cookies и любого auth header из terminal отправлен только публичный безопасный GraphQL probe `query SafeProbe { __typename }`; он вернул `418 text/html`. Response body не сохранялся. Это повторно подтверждает различие между browser session и чистым CLI/WAF, не доказывая отсутствие API и не оправдывая обход антибот-защиты. В трассе не читались заголовки авторизации/cookies и не сохранялись значения коллекции; никаких mutations не выполнялось.
 
+### Свежая Chrome-трасса `/favorites` (27.10.2026)
+
+Для отдельной проверки открыт новый Chrome tab на `/favorites`; исходную вкладку пользователя не перезагружали. После завершения загрузки/гидрации зафиксированы read-only GraphQL operations `getPaginatedCollection` (`after`, `limit`), `getCollectionIds` (без variables), `getCollectionCount` (без variables) и `getUnreadNotificationsCount` (`availableTypes`). Все четыре запроса к `POST /api/v1/graphql` получили `200 application/graphql-response+json`. Дополнительно `GET /api/tiny/profile` ответил `200 application/json`; тело и поля профиля не читались.
+
+Эта трасса независимо подтверждает, что текущий web UI запускает cursor-запрос лайков и ID/count cross-check в открытой Chrome-сессии. В документацию перенесены только operation names, имена variable keys, route, status и MIME type; значения headers/variables, response bodies, трековые названия/ID и cursor не сохранялись. Эта итерация не выполняла terminal replay с browser credentials; свежий чистый unauthenticated terminal probe не запускался. Схема ответов и пагинационная логика остаются подтверждены предыдущими проверками выше.
+
 ## Продуктовый вывод
 
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.
