@@ -187,27 +187,39 @@ async function writeProviderState(state) {
 }
 
 async function requestProviderLibrary(provider, refresh) {
-  if (provider !== 'spotify') return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
+  const providers = {
+    spotify: { tabPattern: 'https://open.spotify.com/*', origin: 'https://open.spotify.com', startMessage: 'spotify:start-library-scan' },
+    'yandex-music': { tabPattern: 'https://music.yandex.ru/*', origin: 'https://music.yandex.ru', startMessage: 'yandex:start-library-scan' },
+  };
+  const providerConfig = providers[provider];
+  if (!providerConfig) return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
   const state = await readProviderState();
-  const scan = state.scans.spotify;
+  let scan = state.scans[provider];
+  const lastUpdate = Date.parse(scan?.updatedAt || scan?.startedAt || '');
+  if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > 45 * 60 * 1000) {
+    scan = { status: 'failed', message: 'Предыдущий сбор остановился без ответа. Запустите его повторно.' };
+    state.scans[provider] = scan;
+    await writeProviderState(state);
+  }
   if (refresh && scan?.status !== 'reading') {
-    const [tab] = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
-    if (!tab?.id) return { error: 'Откройте Spotify Web Player, войдите и дождитесь загрузки библиотеки, затем повторите.' };
-    state.snapshots.spotify = null;
-    state.scans.spotify = { status: 'reading', message: 'Запускаем чтение Spotify…', startedAt: new Date().toISOString() };
+    const [tab] = await chrome.tabs.query({ url: providerConfig.tabPattern });
+    const providerName = provider === 'spotify' ? 'Spotify Web Player' : 'Яндекс Музыку';
+    if (!tab?.id) return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
+    state.snapshots[provider] = null;
+    state.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
     await writeProviderState(state);
     try {
-      await chrome.tabs.sendMessage(tab.id, { type: 'spotify:start-library-scan' });
+      await chrome.tabs.sendMessage(tab.id, { type: providerConfig.startMessage });
     } catch {
-      state.scans.spotify = { status: 'failed', message: 'Расширение не подключено к Spotify. Перезагрузите вкладку сервиса и повторите.' };
+      state.scans[provider] = { status: 'failed', message: `Расширение не подключено к ${providerName}. Перезагрузите вкладку сервиса и повторите.` };
       await writeProviderState(state);
-      return { error: state.scans.spotify.message };
+      return { error: state.scans[provider].message };
     }
-    return { pending: true, progress: state.scans.spotify.message };
+    return { pending: true, progress: state.scans[provider].message };
   }
   if (scan?.status === 'reading') return { pending: true, progress: scan.message || 'Читаем Spotify…' };
-  if (scan?.status === 'failed') return { error: scan.message || 'Не удалось прочитать Spotify.' };
-  const payload = state.snapshots.spotify;
+  if (scan?.status === 'failed') return { error: scan.message || `Не удалось прочитать ${provider}.` };
+  const payload = state.snapshots[provider];
   if (payload?.completeness?.confirmed === true) return { payload };
   return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
 }
@@ -254,33 +266,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    if (message?.type === 'spotify:scan-progress' || message?.type === 'spotify:library-snapshot' || message?.type === 'spotify:scan-error') {
+    const providerMessage = /^(spotify|yandex):(?:scan-progress|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
+    if (providerMessage) {
+      const provider = providerMessage[1] === 'yandex' ? 'yandex-music' : 'spotify';
+      const expectedOrigin = provider === 'spotify' ? 'https://open.spotify.com' : 'https://music.yandex.ru';
       let origin = '';
       try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || origin !== 'https://open.spotify.com') {
+      if (sender.id !== chrome.runtime.id || origin !== expectedOrigin) {
         sendResponse({ ok: false });
         return;
       }
       const state = await readProviderState();
-      if (message.type === 'spotify:scan-progress') {
-        state.scans.spotify = { status: 'reading', message: String(message.message || 'Читаем Spotify…').slice(0, 240), updatedAt: new Date().toISOString() };
-      } else if (message.type === 'spotify:scan-error') {
-        state.scans.spotify = { status: 'failed', message: String(message.error || 'Не удалось прочитать Spotify.').slice(0, 500), updatedAt: new Date().toISOString() };
+      if (message.type.endsWith(':scan-progress')) {
+        state.scans[provider] = { status: 'reading', message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
+      } else if (message.type.endsWith(':scan-error')) {
+        state.scans[provider] = { status: 'failed', message: String(message.error || `Не удалось прочитать ${provider}.`).slice(0, 500), updatedAt: new Date().toISOString() };
       } else {
         const payload = message.payload;
-        const valid = payload?.service === 'spotify'
+        const valid = payload?.service === provider
           && payload?.collection?.type === 'library'
           && payload?.completeness?.confirmed === true
           && payload?.completeness?.favoritesConfirmed === true
+          && payload?.completeness?.catalogConfirmed === true
+          && payload?.completeness?.playlistItemsConfirmed === true
           && Array.isArray(payload?.tracks)
+          && payload?.completeness?.favoritesCount === payload.tracks.length
           && Array.isArray(payload?.playlists)
+          && payload?.completeness?.playlistItemsTotal === payload.playlists.length
           && payload.playlists.every((playlist) => playlist.complete === true && Array.isArray(playlist.tracks)
-            && playlist.trackCount === playlist.tracks.length);
+            && playlist.trackCount === playlist.tracks.length
+            && playlist.tracks.every((track, position) => String(track.id || track.providerId || '') !== ''
+              && (track.position === undefined || track.position === position)));
         if (!valid) {
-          state.scans.spotify = { status: 'failed', message: 'Spotify не подтвердил полноту каталога, лайков и плейлистов.', updatedAt: new Date().toISOString() };
+          state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
         } else {
-          state.snapshots.spotify = payload;
-          state.scans.spotify = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
+          state.snapshots[provider] = payload;
+          state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
         }
       }
       await writeProviderState(state);

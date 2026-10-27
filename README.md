@@ -1,6 +1,6 @@
 # Перенос музыки
 
-Локальный прототип переноса. Цель — лайки и плейлисты в любом направлении между Spotify, Apple Music, Яндекс Музыкой и Звуком. Сейчас есть локальное read-only чтение Звука, экспериментальный Spotify Web Player reader и поиск в каталоге Apple; записи в аккаунты назначения пока нет.
+Локальный прототип переноса. Цель — лайки и плейлисты в любом направлении между Spotify, Apple Music, Яндекс Музыкой и Звуком. Сейчас есть локальное read-only чтение Звука, экспериментальные readers Spotify/Яндекс из браузерных сессий и поиск в каталоге Apple; записи в аккаунты назначения пока нет.
 
 ## Быстрый старт
 
@@ -16,8 +16,8 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 
 Поддерживаемый CSV: обязательные `title,artist`, дополнительные `album,isrc,duration_ms,id` (также понимаются `Track Name,Artist Name(s)` и русские `название,исполнитель`; разделители запятая, точка с запятой или табуляция). JSON — массив объектов с `title`/`artist` либо `tracks`, `items` или `data` с таким массивом. Для объектов с вложенным `track` поля также распознаются. Общая provider-neutral модель snapshot/plan находится в [`demo/transfer-core.js`](demo/transfer-core.js), общий контракт поиска и постраничного чтения — в [`demo/transfer-engine.js`](demo/transfer-engine.js), контракт account adapters — в [`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md). Они принимают ID четырёх сервисов, сохраняют playlist order и различают целевые действия likes/playlists. Apple catalog search подключён; source read-only connectors есть для Звука и экспериментально для Spotify. Yandex/Apple account adapters и любые target writes пока не подключены.
 
-Это не готовый универсальный перенос. Spotify reader использует private Web Player API и экспериментален; Yandex/Apple account source adapters, destination adapters и записи в пользовательские библиотеки отсутствуют. JSON пока является планом, не выполненным переносом. Подробный статус направлений — в [матрице возможностей](https://github.com/Basil-AS/music_importer/blob/feature/music-service-api-research/docs/TRANSFER_CAPABILITY_MATRIX.md).
+Это не готовый универсальный перенос. Spotify и Яндекс readers используют private web API и экспериментальны; live account scan для них ещё не подтверждён. Apple account adapter, все destination adapters и записи в пользовательские библиотеки отсутствуют. JSON пока является планом, не выполненным переносом. Подробный статус направлений — в [матрице возможностей](https://github.com/Basil-AS/music_importer/blob/feature/music-service-api-research/docs/TRANSFER_CAPABILITY_MATRIX.md).
 
 Подробности сценария и границ прототипа: [`docs/MVP.md`](docs/MVP.md). Правила сопоставления и ограничения confidence: [`docs/MATCHING.md`](docs/MATCHING.md).
 
-Локальное расширение находится в [`chrome-extension/`](chrome-extension/). Connector Звука описан в [`docs/ZVUK_CONNECTOR.md`](docs/ZVUK_CONNECTOR.md), экспериментальный Spotify flow — в [`docs/SPOTIFY_CONNECTOR.md`](docs/SPOTIFY_CONNECTOR.md). Spotify live аккаунт не проверен; Apple Music и Яндекс как аккаунтные источники/назначения, и все target writes, остаются работой впереди.
+Локальное расширение находится в [`chrome-extension/`](chrome-extension/). Коннекторы Звука, экспериментальный Spotify flow и экспериментальный Яндекс reader описаны в [`docs/`](docs/): [Zvuk](docs/ZVUK_CONNECTOR.md), [Spotify](docs/SPOTIFY_CONNECTOR.md), [Яндекс](docs/YANDEX_CONNECTOR.md). Spotify/Yandex live account scan не проверялся через установленное расширение; Apple Music как аккаунтный источник/назначение и все target writes остаются впереди.
