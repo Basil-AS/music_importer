@@ -123,7 +123,7 @@
     $('#trackList').innerHTML = visibleTracks.map(({ track, index }) => {
       const title = escapeHTML(track.title);
       const artist = escapeHTML(track.artist);
-      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? 'Не найдено' : track.match ? (track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? 'Проверьте' : 'Не искали';
+      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? (track.cachedResults ? 'Нет совпадений · кэш' : 'Не найдено') : track.match ? (track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? (track.cachedResults ? 'Проверьте · кэш' : 'Проверьте') : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : track.searched && track.matches.length ? 'review' : 'pending';
       const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
@@ -533,7 +533,7 @@
     const status = $('#matchCacheStatus');
     if (!status || !window.MusicMatchCache) return;
     const count = await window.MusicMatchCache.count();
-    status.textContent = `На этом устройстве сохранено автосопоставлений: ${count.toLocaleString('ru-RU')}. Срок хранения — до 180 дней.`;
+    status.textContent = `На этом устройстве сохранено поисковых результатов: ${count.toLocaleString('ru-RU')}. Совпадения хранятся до 30 дней, пустые результаты — 7 дней.`;
   }
 
   async function searchOne(track) {
@@ -556,6 +556,8 @@
   async function requestTrackMatches(track) {
     track.searching = true;
     track.searchError = false;
+    track.cachedMatch = false;
+    track.cachedResults = false;
     track.matches = [];
     track.match = null;
     track.selected = false;
@@ -569,7 +571,7 @@
       track.searched = true;
       track.searchError = false;
       applySuggestion(track);
-      if (track.autoMatched) await window.MusicMatchCache?.putAutomatic([track], state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true);
+      await window.MusicMatchCache?.putSearchResults([track], state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true);
     } catch (error) {
       track.searched = false;
       track.searchError = true;
@@ -600,6 +602,8 @@
       pending.forEach((track) => {
         track.searching = true;
         track.searchError = false;
+        track.cachedMatch = false;
+        track.cachedResults = false;
         track.matches = [];
         track.match = null;
         track.selected = false;
@@ -612,24 +616,18 @@
       for (const track of pending) {
         const key = window.MusicMatchCache?.keyFor(track, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true);
         const cached = key ? cacheHits.get(key) : null;
-        if (!cached?.candidate) { pendingSearch.push(track); continue; }
-        track.matches = [cached.candidate];
+        if (!Array.isArray(cached?.candidates)) { pendingSearch.push(track); continue; }
+        track.matches = cached.candidates;
         track.searched = true;
         track.searching = false;
         track.searchError = false;
+        track.cachedResults = true;
         applySuggestion(track);
-        if (track.autoMatched && String(track.match?.trackId || '') === String(cached.candidate.trackId)) {
+        if (track.autoMatched && track.match) {
           track.cachedMatch = true;
-          completed += 1;
-          cachedCount += 1;
-        } else {
-          track.searching = true;
-          track.searched = false;
-          track.matches = [];
-          track.match = null;
-          track.selected = false;
-          pendingSearch.push(track);
         }
+        completed += 1;
+        cachedCount += 1;
       }
       if (cacheHits.size) {
         $('#searchStatus').textContent = `${completed} из ${state.tracks.length} · из локального кэша ${completed - (state.tracks.length - pending.length)}`;
@@ -647,6 +645,7 @@
           for (const track of group.tracks) {
             track.searching = false;
             track.cachedMatch = false;
+            track.cachedResults = false;
             track.searchError = Boolean(group.error);
             track.errorMessage = group.error ? (group.error instanceof TypeError ? 'Каталог недоступен. Проверьте соединение и повторите поиск.' : group.error.message) : '';
             track.searched = !group.error;
@@ -654,7 +653,7 @@
             if (track.searched) applySuggestion(track);
             else { track.match = null; track.selected = false; }
           }
-          try { await window.MusicMatchCache?.putAutomatic(group.tracks, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true); }
+          try { await window.MusicMatchCache?.putSearchResults(group.tracks, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true); }
           catch { /* Keep catalog matching usable if browser storage is unavailable. */ }
           completed += group.tracks.length;
           $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
@@ -968,7 +967,7 @@
   $('#clearMatchCache').addEventListener('click', async () => {
     await window.MusicMatchCache?.clear();
     await updateMatchCacheStatus();
-    toast('Локальный кэш автосопоставлений очищен');
+    toast('Локальный кэш результатов каталога очищен');
   });
 
   updateCounts();

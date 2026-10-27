@@ -1,11 +1,14 @@
-/* Local, credential-free cache for confident catalog matches only. */
+/* Local, credential-free cache for bounded catalog search results. */
 (() => {
   const databaseName = 'music-importer-local';
-  const databaseVersion = 2;
-  const cacheFormatVersion = 2;
-  const storeName = 'automatic-matches';
-  const expiresAfterMs = 180 * 24 * 60 * 60 * 1000;
+  const databaseVersion = 3;
+  const cacheFormatVersion = 3;
+  const previousStoreName = 'automatic-matches';
+  const storeName = 'catalog-search-results';
+  const expiresAfterMs = 30 * 24 * 60 * 60 * 1000;
+  const noResultExpiresAfterMs = 7 * 24 * 60 * 60 * 1000;
   const maxEntries = 25000;
+  const maxCandidatesPerEntry = 12;
   const memory = new Map();
   let databasePromise;
   let lastPrunedAt = 0;
@@ -39,7 +42,7 @@
       catch { return resolve(null); }
       request.onupgradeneeded = (event) => {
         const db = request.result;
-        if (event.oldVersion < 2 && db.objectStoreNames.contains(storeName)) db.deleteObjectStore(storeName);
+        if (event.oldVersion < 3 && db.objectStoreNames.contains(previousStoreName)) db.deleteObjectStore(previousStoreName);
         if (!db.objectStoreNames.contains(storeName)) {
           const store = db.createObjectStore(storeName, { keyPath: 'key' });
           store.createIndex('expiresAt', 'expiresAt');
@@ -59,6 +62,7 @@
     return {
       trackId,
       providerId: trackId,
+      albumId: String(match.albumId || match.collectionId || '') || null,
       trackName: String(match.trackName || match.title || match.name || ''),
       artistName: String(match.artistName || match.artist || (Array.isArray(match.artists) ? match.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(', ') : '')),
       collectionName: String(match.collectionName || match.album || ''),
@@ -69,20 +73,20 @@
   }
 
   function recordFor(track, targetProvider, storefront, accountCatalog) {
-    if (!track?.autoMatched || !track.match || !Number.isFinite(track.matchConfidence)) return null;
+    if (!track || track.manualQuery || track.searchError || track.searched !== true || !Array.isArray(track.matches)) return null;
     const key = keyFor(track, targetProvider, storefront, accountCatalog);
-    const candidate = candidateFor(track.match);
-    if (!key || !candidate) return null;
+    const candidates = track.matches.slice(0, maxCandidatesPerEntry).map(candidateFor).filter(Boolean);
+    if (!key || (track.matches.length > 0 && !candidates.length)) return null;
     const now = Date.now();
     return {
       key,
       cacheVersion: cacheFormatVersion,
       targetProvider: String(targetProvider),
       storefront: targetProvider === 'apple-music' ? String(storefront || '').toUpperCase() : '',
-      candidate,
-      confidence: track.matchConfidence,
+      candidates,
+      resultKind: candidates.length ? 'candidates' : 'no-results',
       updatedAt: now,
-      expiresAt: now + expiresAfterMs,
+      expiresAt: now + (candidates.length ? expiresAfterMs : noResultExpiresAfterMs),
     };
   }
 
@@ -148,7 +152,7 @@
     } catch { /* Cache pruning must never interrupt matching. */ }
   }
 
-  async function putAutomatic(tracks, targetProvider, storefront = '', accountCatalog = false) {
+  async function putSearchResults(tracks, targetProvider, storefront = '', accountCatalog = false) {
     const records = tracks.map((track) => recordFor(track, targetProvider, storefront, accountCatalog)).filter(Boolean);
     if (!records.length) return 0;
     const db = await openDatabase();
@@ -201,5 +205,5 @@
     });
   }
 
-  window.MusicMatchCache = { keyFor, getMany, putAutomatic, clear, count };
+  window.MusicMatchCache = { keyFor, getMany, putSearchResults, clear, count };
 })();

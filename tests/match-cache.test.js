@@ -18,19 +18,59 @@ test('local match cache keys include target and Apple storefront', () => {
   assert.notEqual(cache.keyFor(track, 'apple-music', 'US'), cache.keyFor(track, 'spotify'));
 });
 
-test('local match cache stores only automatic catalog candidates and can be cleared', async () => {
+test('local catalog cache stores bounded candidates, preserves Yandex album IDs, and can be cleared', async () => {
   const cache = loadCache();
   const track = {
     title: 'Время', artist: 'Моя Мишель', album: 'Кино', durationMs: 210000,
-    autoMatched: true, matchConfidence: 0.98,
-    match: { trackId: 'target-1', trackName: 'Vremya', artistName: 'Moya Mishel', collectionName: 'Kino', trackTimeMillis: 210000, trackViewUrl: 'https://example.test/track/1' },
+    searched: true, matches: [
+      { trackId: 'target-1', albumId: 'album-1', trackName: 'Vremya', artistName: 'Moya Mishel', collectionName: 'Kino', trackTimeMillis: 210000, trackViewUrl: 'https://example.test/track/1' },
+      { trackId: 'target-2', albumId: 'album-2', trackName: 'Время (Live)', artistName: 'Моя Мишель', collectionName: 'Live', trackTimeMillis: 220000 },
+    ],
   };
-  assert.equal(await cache.putAutomatic([track], 'spotify'), 1);
+  assert.equal(await cache.putSearchResults([track], 'yandex-music'), 1);
+  const found = await cache.getMany([track], 'spotify');
+  assert.equal(found.size, 0);
+  const yandexResults = await cache.getMany([track], 'yandex-music');
+  assert.equal(yandexResults.size, 1);
+  assert.equal(yandexResults.get(cache.keyFor(track, 'yandex-music')).candidates.length, 2);
+  assert.equal(yandexResults.get(cache.keyFor(track, 'yandex-music')).candidates[0].albumId, 'album-1');
+  assert.equal(yandexResults.get(cache.keyFor(track, 'yandex-music')).resultKind, 'candidates');
+  assert.equal(yandexResults.get(cache.keyFor(track, 'yandex-music')).expiresAt - yandexResults.get(cache.keyFor(track, 'yandex-music')).updatedAt, 30 * 24 * 60 * 60 * 1000);
+  assert.equal(await cache.putSearchResults([{ ...track, manualQuery: true }], 'yandex-music'), 0);
+  assert.equal(await cache.putSearchResults([{ ...track, searchError: true }], 'yandex-music'), 0);
+  await cache.clear();
+  assert.equal((await cache.getMany([track], 'yandex-music')).size, 0);
+});
+
+test('local catalog cache keeps successful no-result searches briefly', async () => {
+  const cache = loadCache();
+  const track = { title: 'Unknown track', artist: 'Unknown artist', searched: true, matches: [] };
+  assert.equal(await cache.putSearchResults([track], 'spotify'), 1);
   const found = await cache.getMany([track], 'spotify');
   assert.equal(found.size, 1);
-  assert.equal(found.get(cache.keyFor(track, 'spotify')).candidate.trackId, 'target-1');
-  assert.equal(found.get(cache.keyFor(track, 'spotify')).candidate.trackViewUrl, 'https://example.test/track/1');
-  assert.equal(await cache.putAutomatic([{ ...track, autoMatched: false }], 'spotify'), 0);
+  assert.deepEqual(Array.from(found.get(cache.keyFor(track, 'spotify')).candidates), []);
+  assert.equal(found.get(cache.keyFor(track, 'spotify')).resultKind, 'no-results');
+  assert.equal(found.get(cache.keyFor(track, 'spotify')).expiresAt - found.get(cache.keyFor(track, 'spotify')).updatedAt, 7 * 24 * 60 * 60 * 1000);
+});
+
+test('local catalog cache drops failed and manually edited searches', async () => {
+  const cache = loadCache();
+  const track = { title: 'Song', artist: 'Artist', searched: true, matches: [] };
+  assert.equal(await cache.putSearchResults([{ ...track, searchError: true }], 'spotify'), 0);
+  assert.equal(await cache.putSearchResults([{ ...track, manualQuery: true }], 'spotify'), 0);
+});
+
+test('cached result rows keep their original target-scoped identity', async () => {
+  const cache = loadCache();
+  const track = {
+    title: 'Время', artist: 'Моя Мишель', album: 'Кино', durationMs: 210000, searched: true,
+    matches: [{ trackId: 'target-1', albumId: 'album-1', trackName: 'Vremya', artistName: 'Moya Mishel', collectionName: 'Kino', trackTimeMillis: 210000, trackViewUrl: 'https://example.test/track/1' }],
+  };
+  assert.equal(await cache.putSearchResults([track], 'spotify'), 1);
+  const found = await cache.getMany([track], 'spotify');
+  assert.equal(found.size, 1);
+  assert.equal(found.get(cache.keyFor(track, 'spotify')).candidates[0].trackId, 'target-1');
+  assert.equal(found.get(cache.keyFor(track, 'spotify')).candidates[0].trackViewUrl, 'https://example.test/track/1');
   await cache.clear();
   assert.equal((await cache.getMany([track], 'spotify')).size, 0);
 });
@@ -38,10 +78,10 @@ test('local match cache stores only automatic catalog candidates and can be clea
 test('Apple preview cache entries are never reused for account catalog IDs', async () => {
   const cache = loadCache();
   const track = {
-    title: 'Song', artist: 'Artist', album: 'Album', durationMs: 180000,
-    autoMatched: true, matchConfidence: 0.98, match: { trackId: 'preview-id', trackName: 'Song', artistName: 'Artist' },
+    title: 'Song', artist: 'Artist', album: 'Album', durationMs: 180000, searched: true,
+    matches: [{ trackId: 'preview-id', trackName: 'Song', artistName: 'Artist' }],
   };
-  await cache.putAutomatic([track], 'apple-music', 'US', false);
+  await cache.putSearchResults([track], 'apple-music', 'US', false);
   assert.equal((await cache.getMany([track], 'apple-music', 'US', false)).size, 1);
   assert.equal((await cache.getMany([track], 'apple-music', 'US', true)).size, 0);
 });
