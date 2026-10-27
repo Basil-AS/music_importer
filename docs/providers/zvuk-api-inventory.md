@@ -293,6 +293,12 @@ Crossfade демонстрирует желаемый user flow: кнопка п
 
 ## Продуктовый вывод
 
+### Реализация локального browser connector (2026-10-28)
+
+В `feature/interactive-importer-mvp` добавлен experimental MV3 extension `chrome-extension/`: main-world observer фильтрует только ответы page-origin GraphQL `/api/v1/graphql` операций `getPaginatedCollection` и `getCollectionIds` на `/favorites`, затем передаёт ограниченные track metadata и только count в isolated bridge/service worker. В manifest нет `cookies` и `webRequest`; проектный сервер не получает данные. Сбор начинается явным нажатием popup и требует прокрутить страницу до конца. JSON deduplicates по ID и помечает export `confirmed` только при terminal cursor и равном unique count.
+
+Это source-level implementation, не live validation: расширение не устанавливалось и не запускалось на user session. Плейлисты, source order reconciliation/checkpoints, другие сервисы и все target writes отсутствуют. Полное описание UX и data retention: [`ZVUK_CONNECTOR.md`](https://github.com/Basil-AS/music_importer/blob/feature/interactive-importer-mvp/docs/ZVUK_CONNECTOR.md); код в [PR #2](https://github.com/Basil-AS/music_importer/pull/2).
+
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.
 - Это не OAuth и community API не обещает refresh contract; при отзыве/истечении token потребуется повторно пройти вход. Не просить пароль/OTP и не отправлять token на сервер проекта.
 - Чистый внешний CLI блокируется WAF. Не обходить bot detection и не добавлять stealth/anti-bot bypass. Приватные endpoints могут меняться и зависеть от подписки/региона.
