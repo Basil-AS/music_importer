@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Music Importer — local account connector",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Read and transfer signed-in music libraries locally for Music Importer.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
