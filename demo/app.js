@@ -433,7 +433,7 @@
       const provider = item.dataset.provider;
       const sourceStatus = ['spotify', 'yandex-music'].includes(provider)
         ? 'Выбран · экспериментальное чтение'
-        : provider === 'zvuk' ? 'Выбран · локальное расширение' : 'Выбран · импорт из файла';
+        : ['zvuk', 'apple-music'].includes(provider) ? 'Выбран · локальное расширение' : 'Выбран · импорт из файла';
       item.querySelector('.source-status').textContent = active
         ? sourceStatus
         : 'Не выбран';

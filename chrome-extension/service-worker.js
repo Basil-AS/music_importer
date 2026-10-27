@@ -190,6 +190,7 @@ async function requestProviderLibrary(provider, refresh) {
   const providers = {
     spotify: { tabPattern: 'https://open.spotify.com/*', origin: 'https://open.spotify.com', startMessage: 'spotify:start-library-scan' },
     'yandex-music': { tabPattern: 'https://music.yandex.ru/*', origin: 'https://music.yandex.ru', startMessage: 'yandex:start-library-scan' },
+    'apple-music': { tabPattern: 'https://music.apple.com/*', origin: 'https://music.apple.com', startMessage: 'apple:start-library-scan' },
   };
   const providerConfig = providers[provider];
   if (!providerConfig) return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
@@ -203,7 +204,7 @@ async function requestProviderLibrary(provider, refresh) {
   }
   if (refresh && scan?.status !== 'reading') {
     const [tab] = await chrome.tabs.query({ url: providerConfig.tabPattern });
-    const providerName = provider === 'spotify' ? 'Spotify Web Player' : 'Яндекс Музыку';
+    const providerName = provider === 'spotify' ? 'Spotify Web Player' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыку';
     if (!tab?.id) return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
     state.snapshots[provider] = null;
     state.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
@@ -317,10 +318,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    const providerMessage = /^(spotify|yandex):(?:scan-progress|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
+    const providerMessage = /^(spotify|yandex|apple):(?:scan-progress|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
     if (providerMessage) {
-      const provider = providerMessage[1] === 'yandex' ? 'yandex-music' : 'spotify';
-      const expectedOrigin = provider === 'spotify' ? 'https://open.spotify.com' : 'https://music.yandex.ru';
+      const provider = providerMessage[1] === 'yandex' ? 'yandex-music' : providerMessage[1] === 'apple' ? 'apple-music' : 'spotify';
+      const expectedOrigin = provider === 'spotify' ? 'https://open.spotify.com' : provider === 'apple-music' ? 'https://music.apple.com' : 'https://music.yandex.ru';
       let origin = '';
       try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
       if (sender.id !== chrome.runtime.id || origin !== expectedOrigin) {
@@ -339,6 +340,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           && payload?.completeness?.confirmed === true
           && payload?.completeness?.favoritesConfirmed === true
           && payload?.completeness?.catalogConfirmed === true
+          && (provider !== 'apple-music' || payload?.completeness?.librarySongsConfirmed === true)
           && (provider !== 'yandex-music' || payload?.completeness?.playlistCatalogKindsConfirmed === true)
           && payload?.completeness?.playlistItemsConfirmed === true
           && Array.isArray(payload?.tracks)

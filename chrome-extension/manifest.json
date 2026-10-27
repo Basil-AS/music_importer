@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Music Importer — local account connector",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read signed-in music libraries locally for Music Importer.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
-  "host_permissions": ["https://zvuk.com/*", "https://open.spotify.com/*", "https://music.yandex.ru/*", "https://api.music.yandex.ru/*", "http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": ["https://zvuk.com/*", "https://open.spotify.com/*", "https://music.yandex.ru/*", "https://api.music.yandex.ru/*", "https://music.apple.com/*", "http://127.0.0.1/*", "http://localhost/*"],
   "action": {
     "default_title": "Music Importer",
     "default_popup": "popup.html"
@@ -48,6 +48,18 @@
     {
       "matches": ["https://music.yandex.ru/*"],
       "js": ["yandex-bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://music.apple.com/*"],
+      "js": ["apple-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://music.apple.com/*"],
+      "js": ["apple-bridge.js"],
       "run_at": "document_start",
       "world": "ISOLATED"
     },
