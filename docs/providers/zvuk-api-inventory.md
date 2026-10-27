@@ -9,6 +9,20 @@
 3. Community-клиенты передают token в `X-Auth-Token`; веб-клиент использует same-origin cookie-сессию. Это bearer-секрет: хранить только локально в системном хранилище; не помещать в URL, логи, shell history или Git.
 4. Анонимный token упоминается в README `zvuk-music` и `sberzvuk-api`, но его получение из чистого CLI здесь не подтвердилось: без cookies три проверки получили `418 text/html` от защиты. Не трактовать WAF `418` как отсутствие API.
 
+### Email/password login route из `nikolaykindness/zvukplugin` (static only)
+
+В Lyrion-плагине [`nikolaykindness/zvukplugin`](https://github.com/nikolaykindness/zvukplugin/tree/2237230a4967d0b6bb66faf1882e3833da4a291c), HEAD `2237230a4967d0b6bb66faf1882e3833da4a291c` (v0.1.6, 08.07.2026), обнаружен third-party login flow:
+
+| Метод и путь | Тело/ответ по исходнику | Следующий шаг |
+|---|---|---|
+| `POST https://zvuk.com/api/tiny/login/email` | `application/x-www-form-urlencoded`: `email`, `password`; токен ищется в `result.token`, `user.token`, `result.profile.token` или корневом `token` | Плагин сохраняет token и email в Lyrion preferences, затем проверяет профиль |
+| `GET https://zvuk.com/api/tiny/profile` | Профиль; одновременно передаются `X-Auth-Token` и `Cookie: auth=<token>` | При token-поле вход считается успешным |
+| `POST https://zvuk.com/api/v1/graphql` | JSON `{query, operationName, variables}` с `X-Auth-Token` и тем же `auth` cookie | Чтение favorites/catalog |
+
+Это только контракт из исходников, не проверенный здесь live route. Исходник не показывает сохранение пароля в preferences, но password вводится в чужую LMS форму и передаётся route-у Звука; MFA/SSO/refresh поведение не установлено. Защищённость хранения token средствами Lyrion не проверялась. Для собственного продукта это UX/endpoint reference, а не основание собирать пароль у пользователя.
+
+`getFavoriteTracks()` вызывает `userTracks(orderBy: dateAdded, orderDirection: desc)` с `collection.tracks { id }`, без cursor/limit, затем одним `getTracks(ids)` гидрирует карточки. В плагине нет page loop или reconciliation с `getCollectionIds`/count — полнота больших коллекций не доказана. `getPlaylistTracks()` задаёт `limit=100, offset=0` и тоже не обходит следующую страницу.
+
 ## Точки входа и REST
 
 | Назначение | Метод и путь | Параметры | Авторизация / состояние |

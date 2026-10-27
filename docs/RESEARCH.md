@@ -135,6 +135,13 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Rechecked `Lincoln-Continental/SberZvuk_API` at `e1f78193e5a50f3e06d46915886a6e24dcff0cb5`: its Python client posts HTTPS GraphQL using `X-Auth-Token`, with query methods for search, tracks, releases, playlists, and stream metadata. The checked-in client/operation map has no user collection/likes query or like mutation; its `get_anonymous_token()` calls `/api/tiny/profile`, but no fresh terminal run was made. GitHub license metadata is absent although `setup.py` says MIT.
 - Added these reviewed candidates, pinned commits, and limitations to `docs/PROJECTS.md`; no account data or secrets were used.
 
+## Zvuk Lyrion login + Favorites plugin audit (27.10.2026)
+
+- Статически просмотрен `nikolaykindness/zvukplugin`, HEAD `2237230a4967d0b6bb66faf1882e3833da4a291c` (v0.1.6, 2026-07-08). Plugin form submits email/password to `POST /api/tiny/login/email`; parsed token is stored in Lyrion preferences and checked with `/api/tiny/profile`. GraphQL reads use `X-Auth-Token` plus `Cookie: auth=…`.
+- Favorites path is `userTracks(orderBy: dateAdded, orderDirection: desc)` → ID list → one `getTracks(ids)` hydration request. Neither favorites nor playlist track path paginates (`getPlaylistTracks` is fixed `limit=100, offset=0`); completeness for large collections is unproven.
+- Useful for mapping a convenient sign-in UX and a third-party private auth route, but not run/live-tested. The repo has no declared license, takes the user password in its own login form, and token storage protection is unknown. Do not copy the password-based UI into the importer without a separate security decision.
+- Added pinned source and findings to Zvuk API and project inventories; no credentials or user data were used.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
