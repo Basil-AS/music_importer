@@ -142,6 +142,13 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Useful for mapping a convenient sign-in UX and a third-party private auth route, but not run/live-tested. The repo has no declared license, takes the user password in its own login form, and token storage protection is unknown. Do not copy the password-based UI into the importer without a separate security decision.
 - Added pinned source and findings to Zvuk API and project inventories; no credentials or user data were used.
 
+## Spotify current browser probe + official API unauthenticated boundary (27.10.2026)
+
+- Existing Spotify Chrome session was signed in. Current passive CDP trace of `/collection/tracks` captured only the route's document `GET` with HTTP 200 and no Pathfinder operation; click on the already-open collection also yielded no useful API operation. This capture is inconclusive about API presence, rather than evidence that the private API is absent.
+- The page reload and repeat navigation again emitted two first-party `DELETE` calls on Connect/device and track-playback/device paths, each HTTP 204. Their precise effect on playback/device state is unknown. No playback command or direct library mutation was sent. Future Spotify page navigation is avoided during this API audit because opening the player itself is not reliably read-only.
+- A fresh clean-terminal `GET https://api.spotify.com/v1/me/tracks?limit=1` without Authorization returned `401 application/json` with `WWW-Authenticate`; response body was discarded. This matches the official API's OAuth boundary; the earlier authenticated private Pathfinder replay is a separate path documented in `docs/providers/spotify.md`.
+- No session headers or tokens were extracted in this pass. The recheck and its limitations are recorded in `docs/providers/spotify.md`.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
