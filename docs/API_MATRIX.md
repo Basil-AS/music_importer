@@ -13,7 +13,7 @@
 
 ## Clean terminal probes без авторизации (27.10.2026)
 
-Только публичный поиск или безопасный GraphQL `__typename`; без cookies, bearer, custom User-Agent, аккаунтных данных и mutations.
+Публичный поиск и безопасный GraphQL `__typename` были проверены без cookies, bearer и аккаунтных данных. Отдельные GET-пробы synthetic playlist IDs 27.10.2026 использовали generic `MusicImporterResearch/1.0` User-Agent; user session и реальные playlist IDs не использовались.
 
 | Сервис / запрос | Результат | Что подтверждает |
 |---|---|---|
@@ -76,6 +76,8 @@ Apple также предлагает user-facing `Transfer Music` в Apple Musi
 | Публичный поиск каталога | `GET https://api.music.yandex.net/search?text=...&type=track&page=0` | Без OAuth в проверенном случае | Terminal no-auth probe 27.10.2026 дал `200 application/json` на `.net` и `.ru`; это не подтверждает host equivalence для private routes |
 | Поставить/снять like | `POST /users/{user_id}/likes/tracks/add-multiple` или `/remove` | `Authorization: OAuth <token>`; Community OpenAPI указывает form-urlencoded `track-ids` | Статически подтверждено библиотекой/OpenAPI; live mutation не выполнялась, размер пачки неизвестен |
 | Экспорт playlist metadata | `GET /users/{uid}/playlists/list`, затем `GET /users/{uid}/playlists/{kind}` | OAuth bearer; concrete community exporter uses API host | Статически просмотрено; полный список всех операций pinned spec см. [Yandex OpenAPI inventory](providers/yandex-openapi-inventory.md) |
+| Прочитать `Мне нравится` из web page preload | `GET https://music.yandex.ru/playlists/lk.<uuid>` → Next.js RSC `preloadedPlaylistByUuid` | Уже вошедшая user session нужна для private page; без переноса токена в приложение | Новый MIT yt-dlp reference утверждает, что preload содержит весь массив; его audit проверял 1,515 tracks, а `pager.total` включал удалённые позиции. Не является API SLA; наша свежая проверка подтвердила UI page, но не разобрала RSC payload |
+| API fallback для полной liked playlist | `GET https://api.music.yandex.ru/playlist/lk.<uuid>?resumeStream=false&richTracks=false`; также `GET /users/{uid}/playlists/{kind}` | В reference используются web headers и browser cookie session для private playlist | В pinned yt-dlp source/research заявлен полный ответ >1,500 items без pagination; наши no-auth запросы к синтетическим IDs получили `404` (`/playlist/lk.<uuid>`) и `410` (`/users/1/playlists/3`), что не подтверждает auth-поведение или отсутствие route. См. [project audit](providers/yandex-music.md#свежий-independent-клиент-yt-dlp-yandex-music-plugin) |
 
 ## Звук / SberZvuk
 
