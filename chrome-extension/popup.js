@@ -52,6 +52,8 @@ $('#stopBtn').addEventListener('click', async () => {
 $('#clearBtn').addEventListener('click', async () => {
   if (!confirm('Удалить сохранённый локальный список избранного?')) return;
   await send('clear');
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) chrome.tabs.sendMessage(tab.id, { type: 'zvuk:stop' }).catch(() => {});
   await render();
 });
 

@@ -1,5 +1,7 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 
+void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
+
 async function readState() {
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   return stored[STORAGE_KEY] || {
@@ -60,6 +62,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.receivedCount = 0;
       state.expectedCount = null;
       state.hasMore = null;
+      state.captureEnabled = false;
       state.updatedAt = null;
       state.error = null;
       await writeState(state);
