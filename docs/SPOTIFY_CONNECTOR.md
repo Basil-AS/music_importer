@@ -1,0 +1,33 @@
+# Spotify Web Player connector
+
+## Назначение и статус
+
+Chrome MV3 connector читает персональную библиотеку из уже открытого Spotify Web Player: Liked Songs и каталог пользовательских плейлистов с их треками. Подключение локальное и read-only. У Spotify используется внутренний Pathfinder/GraphQL контракт Web Player, поэтому это исследовательский источник без публичного API SLA; код не является проверенным production adapter. До live проверки на аккаунте не обещаем полноту или стабильность.
+
+## Поток данных
+
+1. Пользователь открывает Spotify Web Player и входит обычным способом.
+2. В локальном приложении выбирает Spotify и нажимает «Подтянуть из расширения».
+3. Extension bridge просит уже открытую вкладку прочитать текущую библиотеку. Вкладка не открывается и не перезагружается автоматически.
+4. Main-world observer получает только нужные request headers из fetch вызовов самой страницы Spotify. Заголовки остаются в closure страницы и не отправляются в Chrome storage, popup, app, журнал или локальный HTTP сервер.
+5. Page connector постранично читает Liked Songs (`fetchLibraryTracks`), список playlists (`libraryV3`) и содержимое каждого playlist (`fetchPlaylistContents`). Изолированный bridge передаёт только нормализованный snapshot.
+6. Service worker принимает сообщения только от extension content script с origin `https://open.spotify.com`, проверяет полноту каталога, избранного и каждого playlist, хранит последний snapshot локально и отдает его локальному приложению по запросу. Кнопка запускает новое чтение; опрос статуса во время обхода не запускает повторное чтение.
+
+## Полнота и сохранение данных
+
+- Все страницы читаются до provider `totalCount`, без собственного лимита на размер библиотеки; запросы ограничены паузой, а HTTP 429 обрабатывается с `Retry-After` и backoff.
+- При несовпадении totals, пустой ранней странице, повторном изменении totals или неполном playlist scan snapshot не подтверждается и импорт блокируется.
+- Favorites проверяются на уникальность Spotify track URI. Playlist items сохраняются по порядку и с повторениями, пустые playlists сохраняются.
+- PathFinder persisted-query hashes сначала обновляются по наблюдаемым запросам Player, затем сверяются с доступными Web Player bundle; если Spotify явно вернул `PersistedQueryNotFound`, выполняется одна попытка обновить hash.
+- В snapshot передаются Spotify URI, title, artists, album, ISRC если есть, duration и playlist positions. OAuth tokens, cookies, session headers и raw request bodies в app не попадают.
+
+## Ограничения
+
+- Это private Web Player API, который Spotify может менять в любой момент. HTTP 401/403, GraphQL errors и неизвестная схема завершают сбор явной ошибкой.
+- Для первого запроса Web Player должен уже выполнить запрос Pathfinder в текущей вкладке. Если заголовки ещё не наблюдались, откройте Spotify раздел с вашей библиотекой и повторите.
+- Комплект проверен только статически и mock/syntax проверками; пользовательский Spotify аккаунт и live endpoints в этой итерации не вызывались. В README и UI этот путь следует считать экспериментальным до live read-only sweep.
+- Connector только читает Spotify как источник. Он не пишет в Spotify и не закрывает остальные направления проекта. Yandex и Apple account adapters, writers во все назначения, автоматический matcher на тысячах треков и end-to-end read-back остаются отдельной работой.
+
+## Локальный запуск
+
+Установите unpacked extension из `chrome-extension/` в Chrome Developer Mode. После изменения extension нажмите Reload на странице `chrome://extensions`, затем перезагрузите открытую вкладку Spotify и локальную страницу Music Importer. На локальной странице выберите Spotify и нажмите «Подтянуть из расширения». Данные остаются локально; если пользовательский snapshot не подтверждён, его не передаём в matcher.

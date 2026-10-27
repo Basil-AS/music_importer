@@ -10,13 +10,19 @@
     if (!/^[a-z0-9-]{16,80}$/i.test(requestId)) return;
 
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'music-importer:get-library' });
+      const response = await chrome.runtime.sendMessage({
+        type: 'music-importer:get-library',
+        provider: String(event.data.provider || 'zvuk'),
+        refresh: event.data.refresh === true,
+      });
       window.postMessage({
         source: marker,
         type: 'library-response',
         requestId,
         payload: response?.payload || null,
         error: response?.error || null,
+        pending: response?.pending === true,
+        progress: response?.progress || null,
       }, location.origin);
     } catch {
       window.postMessage({

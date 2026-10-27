@@ -367,13 +367,19 @@
     $$('.source').forEach((item) => {
       const active = item === card;
       item.classList.toggle('selected', active);
-      item.querySelector('.source-status').textContent = active ? 'Выбран · импорт из файла' : 'Не выбран';
+      const provider = item.dataset.provider;
+      const sourceStatus = provider === 'spotify'
+        ? 'Выбран · экспериментальное чтение'
+        : provider === 'zvuk' ? 'Выбран · локальное расширение' : 'Выбран · импорт из файла';
+      item.querySelector('.source-status').textContent = active
+        ? sourceStatus
+        : 'Не выбран';
       item.querySelector('.source-status').classList.toggle('connected', active);
       item.querySelector('.connect').disabled = active;
       item.querySelector('.connect').textContent = active ? '✓ Выбрано' : 'Выбрать';
     });
     $('.count').textContent = `1 из ${$$('.source').length}`;
-    toast(`${state.source}: выбран как подпись источника`);
+    toast(`${state.source}: выбран как источник`);
   }));
 
   $('#loadBtn').addEventListener('click', () => loadTracks(demoTracks, `${state.source} · пример`));
@@ -416,13 +422,15 @@
       return;
     }
     const requestId = window.crypto.randomUUID();
+    const provider = state.sourceProvider || 'zvuk';
+    const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
     button.disabled = true;
-    button.textContent = 'Запрашиваем локальную библиотеку…';
+    button.textContent = `Подключаем ${sourceLabels[provider] || provider}…`;
     try {
-      const response = await new Promise((resolve, reject) => {
+      const requestLibrary = (refresh = false) => new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           window.removeEventListener('message', onMessage);
-          reject(new Error('Ответа от расширения нет. Установите/перезагрузите его и повторите.'));
+          reject(new Error('Расширение не ответило. Перезагрузите его и локальную страницу.'));
         }, 8000);
         const onMessage = (messageEvent) => {
           if (messageEvent.source !== window || messageEvent.origin !== location.origin
@@ -434,12 +442,20 @@
           resolve(messageEvent.data);
         };
         window.addEventListener('message', onMessage);
-        window.postMessage({ source: 'music-importer-local-app', type: 'get-library', requestId }, location.origin);
+        window.postMessage({ source: 'music-importer-local-app', type: 'get-library', requestId, provider, refresh }, location.origin);
       });
+      let response = await requestLibrary(true);
+      const deadline = Date.now() + 30 * 60 * 1000;
+      while (response.pending && Date.now() < deadline) {
+        button.textContent = response.progress || `Читаем библиотеку ${sourceLabels[provider] || provider}…`;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        response = await requestLibrary(false);
+      }
+      if (response.pending) throw new Error('Сбор библиотеки ещё не завершился. Повторите запрос чуть позже.');
       if (response.error) throw new Error(response.error);
       if (!response.payload?.completeness?.confirmed) throw new Error('Расширение не подтвердило полноту собранной библиотеки.');
       const tracks = normalizeJSON(response.payload);
-      loadTracks(tracks, 'Звук · библиотека из расширения', {
+      loadTracks(tracks, `${sourceLabels[response.payload.service] || response.payload.service} · библиотека из расширения`, {
         provider: response.payload.service,
         collectionName: response.payload.collection?.name,
         collectionType: response.payload.collection?.type,

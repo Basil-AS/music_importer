@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
+const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 
@@ -173,6 +174,44 @@ async function writeState(state) {
   await chrome.storage.local.set({ [STORAGE_KEY]: state });
 }
 
+async function readProviderState() {
+  const stored = await chrome.storage.local.get(PROVIDER_STORAGE_KEY);
+  return {
+    snapshots: stored[PROVIDER_STORAGE_KEY]?.snapshots || {},
+    scans: stored[PROVIDER_STORAGE_KEY]?.scans || {},
+  };
+}
+
+async function writeProviderState(state) {
+  await chrome.storage.local.set({ [PROVIDER_STORAGE_KEY]: state });
+}
+
+async function requestProviderLibrary(provider, refresh) {
+  if (provider !== 'spotify') return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
+  const state = await readProviderState();
+  const scan = state.scans.spotify;
+  if (refresh && scan?.status !== 'reading') {
+    const [tab] = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
+    if (!tab?.id) return { error: 'Откройте Spotify Web Player, войдите и дождитесь загрузки библиотеки, затем повторите.' };
+    state.snapshots.spotify = null;
+    state.scans.spotify = { status: 'reading', message: 'Запускаем чтение Spotify…', startedAt: new Date().toISOString() };
+    await writeProviderState(state);
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: 'spotify:start-library-scan' });
+    } catch {
+      state.scans.spotify = { status: 'failed', message: 'Расширение не подключено к Spotify. Перезагрузите вкладку сервиса и повторите.' };
+      await writeProviderState(state);
+      return { error: state.scans.spotify.message };
+    }
+    return { pending: true, progress: state.scans.spotify.message };
+  }
+  if (scan?.status === 'reading') return { pending: true, progress: scan.message || 'Читаем Spotify…' };
+  if (scan?.status === 'failed') return { error: scan.message || 'Не удалось прочитать Spotify.' };
+  const payload = state.snapshots.spotify;
+  if (payload?.completeness?.confirmed === true) return { payload };
+  return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
+}
+
 function pageKind(url) {
   try {
     const parsed = new URL(url);
@@ -201,6 +240,10 @@ function messageMatchesPage(type, kind) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message?.type === 'music-importer:get-library') {
+      if (message.provider && message.provider !== 'zvuk') {
+        sendResponse(await requestProviderLibrary(message.provider, message.refresh === true));
+        return;
+      }
       const state = await readState();
       const payload = createLibraryPayload(state);
       if (!payload.completeness.confirmed) {
@@ -208,6 +251,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       sendResponse({ payload });
+      return;
+    }
+
+    if (message?.type === 'spotify:scan-progress' || message?.type === 'spotify:library-snapshot' || message?.type === 'spotify:scan-error') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://open.spotify.com') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const state = await readProviderState();
+      if (message.type === 'spotify:scan-progress') {
+        state.scans.spotify = { status: 'reading', message: String(message.message || 'Читаем Spotify…').slice(0, 240), updatedAt: new Date().toISOString() };
+      } else if (message.type === 'spotify:scan-error') {
+        state.scans.spotify = { status: 'failed', message: String(message.error || 'Не удалось прочитать Spotify.').slice(0, 500), updatedAt: new Date().toISOString() };
+      } else {
+        const payload = message.payload;
+        const valid = payload?.service === 'spotify'
+          && payload?.collection?.type === 'library'
+          && payload?.completeness?.confirmed === true
+          && payload?.completeness?.favoritesConfirmed === true
+          && Array.isArray(payload?.tracks)
+          && Array.isArray(payload?.playlists)
+          && payload.playlists.every((playlist) => playlist.complete === true && Array.isArray(playlist.tracks)
+            && playlist.trackCount === playlist.tracks.length);
+        if (!valid) {
+          state.scans.spotify = { status: 'failed', message: 'Spotify не подтвердил полноту каталога, лайков и плейлистов.', updatedAt: new Date().toISOString() };
+        } else {
+          state.snapshots.spotify = payload;
+          state.scans.spotify = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
+        }
+      }
+      await writeProviderState(state);
+      sendResponse({ ok: true });
       return;
     }
 
