@@ -163,7 +163,7 @@
     trackPage = 0;
     state.tracks = list.map((track) => ({
       ...track,
-      query: `${track.title} ${track.artist}`.trim(),
+      query: [track.title, track.artist, track.album].filter(Boolean).join(' ').trim(),
       manualQuery: false,
       matches: [],
       match: null,
@@ -363,14 +363,20 @@
     return window.MusicMatcher.normalizeISRC(candidate?.isrc || candidate?.ISRC || candidate?.externalIds?.isrc || '') === isrc;
   }
 
+  async function searchWithMetadataFallback(track, search) {
+    const queries = window.MusicMatcher.buildSearchQueries(track);
+    const candidates = await search(queries.primary);
+    if (candidates.length || !queries.fallback) return candidates;
+    return search(queries.fallback);
+  }
+
   async function searchWithExactIsrc(track, provider, search) {
     const isrcQuery = exactIsrcQuery(track, provider);
-    const metadataQuery = (track.query || `${track.title} ${track.artist}`).trim();
-    if (!isrcQuery) return search(metadataQuery);
+    if (!isrcQuery) return searchWithMetadataFallback(track, search);
     const isrc = isrcQuery.slice('isrc:'.length);
     const exactCandidates = await search(isrcQuery);
     if (exactCandidates.some((candidate) => candidateHasIsrc(candidate, isrc))) return exactCandidates;
-    return search(metadataQuery);
+    return searchWithMetadataFallback(track, search);
   }
 
   const appleCatalogAdapter = {
@@ -396,14 +402,16 @@
     },
     async searchTracks(track, context = {}) {
       if (context.accountWrite !== true) {
-        const params = new URLSearchParams({
-          term: (track.query || `${track.title} ${track.artist}`).trim(),
-          entity: 'song', limit: '15', country: context.storefront || $('#storefront').value,
+        return searchWithMetadataFallback(track, async (query) => {
+          const params = new URLSearchParams({
+            term: query,
+            entity: 'song', limit: '15', country: context.storefront || $('#storefront').value,
+          });
+          const response = await fetch(`https://itunes.apple.com/search?${params}`);
+          if (!response.ok) throw new Error(`Каталог Apple ответил ${response.status}`);
+          const payload = await response.json();
+          return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
         });
-        const response = await fetch(`https://itunes.apple.com/search?${params}`);
-        if (!response.ok) throw new Error(`Каталог Apple ответил ${response.status}`);
-        const payload = await response.json();
-        return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
       }
       return searchWithExactIsrc(track, 'apple-music', async (query) => {
         const response = await requestExtensionCommand('search-tracks', {
@@ -420,9 +428,11 @@
     id: 'yandex-music',
     maxConcurrentSearches: 2,
     async searchTracks(track) {
-      const response = await requestExtensionCommand('search-tracks', { query: (track.query || `${track.title} ${track.artist}`).trim() });
-      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Яндекс Музыки.');
-      return response.results;
+      return searchWithMetadataFallback(track, async (query) => {
+        const response = await requestExtensionCommand('search-tracks', { query });
+        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Яндекс Музыки.');
+        return response.results;
+      });
     },
   };
 
@@ -430,9 +440,11 @@
     id: 'zvuk',
     maxConcurrentSearches: 2,
     async searchTracks(track) {
-      const response = await requestExtensionCommand('search-tracks', { query: (track.query || `${track.title} ${track.artist}`).trim() }, 'zvuk');
-      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Звука.');
-      return response.results;
+      return searchWithMetadataFallback(track, async (query) => {
+        const response = await requestExtensionCommand('search-tracks', { query }, 'zvuk');
+        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Звука.');
+        return response.results;
+      });
     },
   };
 
@@ -586,7 +598,7 @@
           storefront: $('#storefront').value,
           accountWrite: state.sourceSnapshot?.completeness?.confirmed === true,
         },
-        keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${exactIsrcQuery(track, state.targetProvider) || String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${exactIsrcQuery(track, state.targetProvider) || window.MusicMatcher.buildSearchQueries(track).primary.toLowerCase().replace(/\s+/g, ' ').trim()}`,
         onProgress: async (group) => {
           for (const track of group.tracks) {
             track.searching = false;

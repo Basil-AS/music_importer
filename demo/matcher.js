@@ -12,6 +12,20 @@
 
   const normalizeISRC = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+  function buildSearchQueries(track) {
+    const artists = Array.isArray(track.artists)
+      ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(', ')
+      : String(track.artist || '');
+    const title = String(track.title || track.name || '').trim();
+    const album = String(track.album || track.collectionName || '').trim();
+    const broad = [title, artists].filter(Boolean).join(' ').trim();
+    const primary = String(track.query || [title, artists, album].filter(Boolean).join(' ')).trim();
+    return {
+      primary,
+      fallback: !track.manualQuery && primary !== broad ? broad : '',
+    };
+  }
+
   const versionMarkers = [
     'live', 'remix', 'remaster', 'remastered', 'acoustic', 'instrumental',
     'karaoke', 'radio edit', 'extended mix', 'sped up', 'slowed', 'mono',
@@ -112,5 +126,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();
