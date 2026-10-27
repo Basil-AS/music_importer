@@ -54,4 +54,6 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 
 Все 12 source/target combinations теперь подключены на уровне readers, search adapters и writers, но ни одно из 12 направлений не прошло live end-to-end проверку. Четыре target adapters имеют fixture coverage, но не live-verified.
 
+Общий catalog search повторяет временные сетевые ошибки, HTTP 408, 429 и 5xx максимум три раза с backoff; постоянные 4xx не повторяются, отмена прерывает ожидание. Полный Node fixture suite сейчас: 21/21 passed. Этот результат покрывает изолированные reader/writer/search fixtures, но не заменяет live-проверку и не доказывает пропускную способность для тысяч треков.
+
 Подробности Yandex reader и неопровергнутые runtime/CORS ограничения: [`YANDEX_CONNECTOR.md`](YANDEX_CONNECTOR.md).

@@ -18,6 +18,52 @@
     return `${norm(track.title)}|${norm(artists)}|${norm(track.album)}|${Number(track.durationMs) || ''}`;
   }
 
+  function searchStatus(error) {
+    if (Number.isInteger(error?.status)) return error.status;
+    const message = String(error?.message || error || '');
+    const match = /\bHTTP\s*(\d{3})\b|ответил\s+(\d{3})\b/i.exec(message);
+    return Number(match?.[1] || match?.[2]) || null;
+  }
+
+  function retryableSearchError(error) {
+    const status = searchStatus(error);
+    if (status !== null) return status === 408 || status === 429 || status >= 500;
+    return error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(error?.message || error || ''));
+  }
+
+  function waitForRetry(delayMs, signal) {
+    if (signal?.aborted) return Promise.reject(new DOMException('Поиск отменён', 'AbortError'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, delayMs);
+      const onAbort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        reject(new DOMException('Поиск отменён', 'AbortError'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+  }
+
+  async function searchWithRetry(adapter, track, options) {
+    const maxRetries = Math.max(0, Math.min(5, Math.floor(options.maxRetries ?? 3)));
+    for (let attempt = 0; ; attempt += 1) {
+      if (options.signal?.aborted) throw new DOMException('Поиск отменён', 'AbortError');
+      try {
+        return await adapter.searchTracks(track, options.context || {});
+      } catch (error) {
+        if (attempt >= maxRetries || !retryableSearchError(error)) throw error;
+        const status = searchStatus(error);
+        const baseDelay = status === 429 ? 2500 : 500;
+        const delayMs = Math.min(30000, baseDelay * (2 ** attempt));
+        await waitForRetry(delayMs, options.signal);
+      }
+    }
+  }
+
   async function searchMany(adapter, tracks, options = {}) {
     if (!adapter || typeof adapter.searchTracks !== 'function') throw new Error('У адаптера назначения нет searchTracks()');
     const concurrency = Math.max(1, Math.floor(options.concurrency || adapter.maxConcurrentSearches || 3));
@@ -40,9 +86,10 @@
         if (index >= queue.length) return;
         const group = queue[index];
         try {
-          const candidates = await adapter.searchTracks(group.tracks[0], options.context || {});
+          const candidates = await searchWithRetry(adapter, group.tracks[0], options);
           results[index] = { key: group.key, tracks: group.tracks, candidates: Array.isArray(candidates) ? candidates : [], error: null };
         } catch (error) {
+          if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
           results[index] = { key: group.key, tracks: group.tracks, candidates: [], error };
         }
         completed += 1;
