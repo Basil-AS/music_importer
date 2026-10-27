@@ -315,3 +315,10 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - No source account was connected and no transfer was started; no Apple library or favorite data was changed. This improves on the earlier Apple tab that was not accessible, but it does **not** identify which providers are offered to this account. Account content and region selection were not retained.
 - Updated [Apple Music provider notes](providers/apple-music.md). Next read-only avenue is the same transfer entry in the native Music app; if it reaches source selection only after user interaction, pause before authorizing a source or confirming a transfer.
 - A fresh region-scoped Apple Music tab then displayed **Sign In**. It was closed without reading session data or trying to bypass authentication. To inspect this account-specific source list, Apple Music must first be signed in in the Chrome page used for the transfer.
+
+## Yandex official transfer/archive fallback (2026-10-27)
+
+- Read current official [Yandex Music transfer instructions](https://www.yandex.ru/support/music/ru/collection/sync-and-transfer): the product supports importing collections from other services **into Yandex Music** after logging into Yandex and authorizing the source; results appear in its Collection/playlists. It does not provide the reverse Yandex → Apple transfer or a public API for our source connector.
+- The same official guide describes moving a «Мне нравится» list between Yandex accounts by making the playlist public and liking its shared link. This copies/subscribes to an ordinary playlist, not Apple Favorite Songs, and requires changing source-list privacy.
+- Yandex's [personal-data archive guide](https://yandex.com/support/m-yandex/en/privacy/clear-data) confirms a password-protected account archive, but does not specify a complete Music likes export or data schema. Archive support therefore remains unverified; do not treat it as a no-auth Yandex Music exporter without examining a user-requested archive locally.
+- Updated the [Yandex provider notes](providers/yandex-music.md). The support pages were read-only; no export request or account action was made.
