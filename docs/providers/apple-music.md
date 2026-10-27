@@ -8,6 +8,8 @@
 
 Apple API различает developer token, подписанный разработчиком JWT, и Music User Token, который разрешает пользовательские операции. Вручную созданный developer token — JWT с ES256 и `kid`, Team ID в `iss` и максимальным сроком `exp` до шести месяцев; Apple указывает, что он предназначен для участника Apple Developer Program. Запросы каталога требуют developer token; `/v1/me/...` дополнительно требует Music User Token. MusicKit на Apple-платформах и в web может автоматически управлять пользовательским токеном после разрешения пользователя. Для API предусмотрены ответы `401`/`403`; превышение частоты даёт временный `429`.
 
+Для MusicKit on the Web официальный вход выглядит как настройка приложения с developer token → `MusicKit.authorize()` и согласие пользователя → MusicKit сам прикрепляет Music User Token к персональным запросам. Автоматическое управление Music User Token убирает ручное копирование пользовательского токена, но не developer token: Apple требует для собственного ключа участника Apple Developer Program и Media Services private key. См. [Apple: user authentication](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit), [developer tokens](https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens) и [создание Media Services ID/private key](https://developer.apple.com/help/account/capabilities/create-a-media-identifier-and-private-key).
+
 Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Бесплатная регистрация Apple Developer не равна членству в программе. Поэтому официальный REST-клиент с собственным developer token не подходит под требование «не платить» для индивидуального проекта; локальный Music.app путь ниже остаётся бесплатным кандидатом.
 
 ### Публичный iTunes Search API как no-auth matcher fallback
@@ -127,6 +129,12 @@ Apple документирует аналогичный `POST https://api.music.
 
 Нужен storefront пользователя: каталожные ID региональны, некоторые записи отсутствуют или доступны только в другом storefront. Favorite request может игнорировать неразрешимые ID без подробного результата по каждому элементу, поэтому после пачек требуется повторно перечитать Favorite Songs/библиотеку и сравнить фактический набор. API не переносит исходный аудиофайл и не гарантирует точное соответствие версии/ремастера.
 
+### Встроенный Apple Music Transfer — самый простой пользовательский путь
+
+По актуальной [инструкции Apple Support для AE](https://support.apple.com/en-ae/118249), перенос доступен в Apple Music app и на `music.apple.com`, требует действующей подписки Apple Music и входа пользователя в выбранный исходный сервис. Apple заявляет, что liked/loved songs из поддерживаемого источника попадают в Favorite Songs, а песни/альбомы/плейлисты можно выбрать и проверить; несовпавшие версии предлагаются на ручную проверку в течение 30 дней. Плейлисты, созданные самим исходным сервисом, перенести нельзя — только созданные пользователем.
+
+Apple описывает эту услугу как предоставляемую третьей стороной, а доступные источники зависят от сервиса. В опубликованной статье нет постоянного списка поставщиков, поэтому наличие Spotify, Яндекс Музыки или Звука нужно смотреть в меню конкретного Apple Account. Перенос недоступен в материковом Китае, Мьянме и России; UAE в этом списке исключений не указан. Это готовый no-author-key путь для поддерживаемого источника и лучший первый вариант для пользователя; собственный сервис нужен, если источник отсутствует или нужны контроль сопоставления/полноты и повторяемые отчёты.
+
 ## Источники
 
 - [Apple Music API overview](https://developer.apple.com/documentation/AppleMusicAPI)
@@ -150,6 +158,7 @@ Apple документирует аналогичный `POST https://api.music.
 - [Create a library playlist](https://developer.apple.com/documentation/applemusicapi/create-a-new-library-playlist)
 - [Apple Developer Program fee](https://developer.apple.com/help/account/membership/program-enrollment)
 - [Apple Music transfer from other services](https://support.apple.com/en-us/118249)
+- [Apple Music transfer guide for UAE](https://support.apple.com/en-ae/118249) (опубликовано 31.03.2026: source login, Favorite Songs, ручной review, региональные ограничения)
 - [Transfer in the Music app](https://support.apple.com/en-ca/guide/iphone/iph103c19002/ios)
 - [MIT script: Spotify Liked Songs to Apple Music Favorite Songs](https://gist.github.com/obitech/5e18ec3c8c24f89c96f0cf396cb33e48)
 - [Apple Music MCP (MIT; local Music.app mode)](https://github.com/epheterson/applemusic-mcp)

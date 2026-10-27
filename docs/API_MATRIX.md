@@ -48,7 +48,7 @@ Spotify archive — отдельный offline export path, не HTTP API: фа�
 
 ## Apple Music
 
-Apple также предлагает user-facing `Transfer Music` в Apple Music app/web. Это не опубликованный API route: Apple описывает сторонний transfer provider, вход пользователя в source service и source-dependent scope. Apple утверждает, что source liked/loved tracks идут в Favorite Songs, но цена, лимиты и список sources не опубликованы общей инструкцией; они должны быть проверены в аккаунтном UI. См. [актуальную поддержку Apple для AE](https://support.apple.com/en-ae/118249).
+Apple также предлагает user-facing `Transfer Music` в Apple Music app/web. Это не опубликованный API route: пользователю нужна подписка Apple Music и вход в выбранный source account через интеграцию третьей стороны. Apple говорит, что поддерживаемые liked/loved songs идут в Favorite Songs; альтернативные совпадения доступны на review 30 дней, но сервисные плейлисты источника не переносятся. Список поддерживаемых providers зависит от аккаунта и не опубликован в статье, его надо проверить в UI. См. [инструкцию Apple Support AE](https://support.apple.com/en-ae/118249), опубликованную 31.03.2026.
 
 | Назначение | Запрос / действие | Авторизация и параметры | Подтверждение / ограничения |
 |---|---|---|---|
