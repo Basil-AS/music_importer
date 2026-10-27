@@ -5,12 +5,18 @@
 Полный индекс официальной Apple Music REST API построен из текущего Apple Developer DocC каталога: [138 операций, 119 уникальных method/path пар](apple-openapi-inventory.md). Ниже оставлены детали, относящиеся к миграции и практической проверке.
 
 ## Авторизация
-
 Apple API различает developer token, подписанный разработчиком JWT, и Music User Token, который разрешает пользовательские операции. Вручную созданный developer token — JWT с ES256 и `kid`, Team ID в `iss` и максимальным сроком `exp` до шести месяцев; Apple указывает, что он предназначен для участника Apple Developer Program. Запросы каталога требуют developer token; `/v1/me/...` дополнительно требует Music User Token. MusicKit на Apple-платформах и в web может автоматически управлять пользовательским токеном после разрешения пользователя. Для API предусмотрены ответы `401`/`403`; превышение частоты даёт временный `429`.
 
 Для MusicKit on the Web официальный вход выглядит как настройка приложения с developer token → `MusicKit.authorize()` и согласие пользователя → MusicKit сам прикрепляет Music User Token к персональным запросам. Автоматическое управление Music User Token убирает ручное копирование пользовательского токена, но не developer token: Apple требует для собственного ключа участника Apple Developer Program и Media Services private key. См. [Apple: user authentication](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit), [developer tokens](https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens) и [создание Media Services ID/private key](https://developer.apple.com/help/account/capabilities/create-a-media-identifier-and-private-key).
 
 Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Бесплатная регистрация Apple Developer не равна членству в программе. Поэтому официальный REST-клиент с собственным developer token не подходит под требование «не платить» для индивидуального проекта; локальный Music.app путь ниже остаётся бесплатным кандидатом.
+
+## Локальный source reader в MVP
+
+PR #2 (`feature/interactive-importer-mvp`) добавляет экспериментальный source connector для открытой авторизованной вкладки `music.apple.com`. Вкладка должна сама отправить запрос к `amp-api.music.apple.com`; reader удерживает `Authorization` и `Music-User-Token` только в closure страницы, вызывает пагinated personal-library reads и передаёт приложению только нормализованные записи. Ключевые endpoints — `GET /v1/me/library/songs` (поле `inFavorites`), `GET /v1/me/library/playlists` и `GET /v1/me/library/playlists/{id}/tracks`. Connector сверяет `meta.total`, страницы, playlist order и повторы.
+
+Fixture tests проверяют разделение liked/unliked songs, cursor pagination, повторные элементы и отказ от неполного ответа. Live account scan в установленном Chrome extension пока не проверен. Этот путь использует first-party web player session, а не обещанный Apple внешний OAuth; он может перестать работать после изменений Apple Music Web. Никакие cookies, browser storage или token files не читаются/сохраняются.
+
 
 ### Публичный iTunes Search API как no-auth matcher fallback
 
