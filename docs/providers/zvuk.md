@@ -5,6 +5,7 @@
 ## Что просмотрено
 
 - [Basil-AS/ZvukDownloader](https://github.com/Basil-AS/ZvukDownloader), файлы `zvuk_multibot.py`, `API_DOCUMENTATION.md`, README.
+- [oklookat/synchro](https://github.com/oklookat/synchro) и его Go-зависимость [oklookat/gozvuk](https://github.com/oklookat/gozvuk), snapshot исходников 2024/2023 годов.
 - [Aiving/sberzvuk-api](https://github.com/Aiving/sberzvuk-api), исходники TypeScript и docs.
 - [trudenboy/zvuk-music](https://github.com/trudenboy/zvuk-music), исходники, GraphQL operation-файлы, README, MIT license; на дату проверки PyPI показывал версию `0.6.3` (7 октября 2026).
 - Контрольные checkout исходников на 27.10.2026: `Basil-AS/ZvukDownloader` `922e258`, `trudenboy/zvuk-music` `ed491f6`.
@@ -80,6 +81,12 @@
 
 Для главного сценария `userTracks` выбирает `collection.tracks` с `id` и `collectionItemData.lastModified`; клиент отдельно предупреждает, что на этой операции возвращаются только ID, затем для метаданных вызывает `get_tracks`. Соседний `userCollection` перечисляет типы коллекций: artists, episodes, podcasts, playlists, synthesisPlaylists, profiles, releases и tracks. Эти документы описывают API-контракт сторонней реализации, а не гарантированный официальный контракт Звука.
 
+### Перекрёстная сверка в `oklookat/synchro`
+
+В Go-проекте [oklookat/synchro](https://github.com/oklookat/synchro), HEAD `ac441f4` (2024-07-07, GPL-3.0), есть независимый Zvuk-адаптер через библиотеку [oklookat/gozvuk](https://github.com/oklookat/gozvuk), последний просмотренный commit `fc4ed93` (2023-08-08). Он подтверждает private GraphQL-путь: `POST https://zvuk.com/api/v1/graphql`, `userTracks` для списка ID/дат лайков и `getFullTrack` для метаданных; данные для карточек в адаптере разбиваются на пачки по 10. В отличие от нового cursor `getPaginatedCollection`, `gozvuk.UserTracks` не принимает cursor/page size и выгружает набор одним GraphQL запросом, поэтому его нельзя считать проверкой полной пагинации больших аккаунтов.
+
+Запись/снятие лайка в этой реализации — GraphQL `addItemToCollection`/`removeItemFromCollection` по одному ID с типом `TRACK`. Авторизация: токен из `https://zvuk.com/api/tiny/profile`, затем `X-Auth-Token`; refresh token библиотека не хранит. Клиент проверяет его через `Profile()` и ограничивает запросы до 10 в секунду. Это подтверждает имена операций из другого клиента, но старый код и его хранение секретов в открытом SQLite использовать как готовую интеграцию нельзя.
+
 ## Риски и вывод
 
 - Неформальный cookie-flow может сломаться, отозваться или раскрыть аккаунт при утечке.
@@ -101,3 +108,5 @@
 - [Справка Звука: перенос музыки в Звук](https://help.zvuk.com/article/42207)
 - [Справка Звука: коллекция и лайкнутые треки](https://help.zvuk.com/article/48259)
 - [Справка Звука: плейлисты и «Любимое»](https://help.zvuk.com/article/48272)
+- [Synchro Zvuk adapter at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/zvuk/accountActions.go)
+- [gozvuk GraphQL client at `fc4ed93`](https://github.com/oklookat/gozvuk/tree/fc4ed9399d70f599e0d85a133aa663d0a8cbe3fb)

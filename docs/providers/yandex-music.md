@@ -29,6 +29,8 @@
 
 Из этого проекта стоит взять формат полного offline экспорта/ручной сверки. Не перенимать implicit-token URL и постоянное хранение access token в `.env` как основную auth-архитектуру; предпочтительнее Device Flow с локальным защищённым token store и ясным revoke path.
 
+Дополнительная реализация в [oklookat/synchro](https://github.com/oklookat/synchro), HEAD `ac441f4` от 2024-07-07 (GPL-3.0), использует Go-клиент `goym`: OAuth Device Flow с credentials публичного Android-клиента, чтение `LikedTracks`, загрузку metadata пачками по 30 и методы `LikeTracks`/`UnlikeTracks`. В просмотренной версии `LikedTracks` отбрасывает UGC записи; это означает, что такой экспорт не гарантированно сохраняет весь список лайков. Код старый и хранит auth в SQLite без шифрования, поэтому годится только как reference операций, не как готовое приложение.
+
 ## Практическая проверка
 
 - В авторизованной вкладке Chrome видимый раздел коллекции «Мне нравится» открылся. Наблюдались `GET https://api.music.yandex.ru/playlist/lk.:liked-id` и `POST https://api.music.yandex.ru/tracks`, оба `200`. ID приватного плейлиста заменён шаблоном; параметры и тела с содержимым пользовательской коллекции не сохранялись.
@@ -48,5 +50,7 @@
 - [Client method reference](https://ym.marshal.dev/client/)
 - [OpenAPI reference](https://ym.marshal.dev/api/)
 - [Device auth docs](https://ym.marshal.dev/token)
+- [oklookat/synchro Yandex adapter at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/yandexmusic/accountActions.go)
+- [oklookat/synchro Yandex auth at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/yandexmusic/main.go)
 
 Изучено по исходникам community-библиотеки, её OpenAPI, браузерному UI и terminal HTTP-пробам с пользовательской сессией. Это не контракт Яндекса; OAuth Device Flow и мутации на аккаунте не запускались.
