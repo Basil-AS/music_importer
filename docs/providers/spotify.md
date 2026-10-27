@@ -94,6 +94,8 @@ grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
 
 Дополнительный legal gate: при read-only переходе в авторизованном Chrome на Developer Dashboard вместо списка приложений отобразилась страница Spotify Developer Terms v10 (effective 15 May 2025). Её §I.3 говорит, что использование **или доступ** к Spotify Platform означает принятие Developer Agreement как юридически обязывающего договора; официальный текст — [developer.spotify.com/terms](https://developer.spotify.com/terms). Checkbox/кнопку согласия не нажимали и приложение не создавали. Остановили официальный Web API эксперимент до отдельного решения владельца аккаунта после ознакомления с условиями; PKCE параметры остаются изученными по документации, но flow не запущен.
 
+В той же редакции официальный [Spotify Developer Policy](https://developer.spotify.com/policy), §I.9, прямо разрешает SDA передавать данные в другой сервис, если цель — дать пользователю перенести **свои персональные данные** или метаданные его плейлистов. Это поддерживает проектный сценарий пользовательского экспорта как предусмотренное исключение, но само по себе не подтверждает соответствие конкретной реализации условиям Spotify. Сохраняются и другие требования Terms: запрашивать только нужные данные, получить явное согласие на иное использование персональных данных, не передавать Spotify Content третьим лицам за пределами предусмотренных исключений, обеспечить отключение интеграции и удаление данных, иметь privacy policy и обязательные пользовательские условия (§III.5, V.3–V.11). Практический дизайн должен держать перенос локально и передавать в Apple только выбранные пользователем записи; точный охват исключения для конкретного приложения требует чтения полных условий. Этот пункт относится к официальной Spotify Platform, не легализует private Web Player API или обход Developer Mode.
+
 ## Бесплатный архив аккаунта как запасной источник
 
 Spotify позволяет запросить машиночитаемую копию личных данных из Account Privacy. В официальном описании `Your Library` включает сохранённые songs, episodes, shows, artists и albums; там же указано наличие имён сущностей, исполнителей/альбомов и Spotify URI. Это полезный offline backup и fallback, если Web API Development Mode не подходит, без регистрации Web API app и её Premium-ограничения. Архив не пишет ничего в Apple Music, может содержать другие чувствительные данные аккаунта и требует времени на подготовку; будущий parser должен локально читать только нужный JSON, не сохранять исходный ZIP в проекте и удалять его по завершении.
@@ -144,6 +146,8 @@ Spotify позволяет запросить машиночитаемую ко�
 - [Save Items to Library](https://developer.spotify.com/documentation/web-api/reference/save-library-items)
 - [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
 - [February 2026 Web API changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)
+- [Developer Terms v10](https://developer.spotify.com/terms)
+- [Developer Policy, effective 15 May 2025](https://developer.spotify.com/policy)
 - [Spotify data rights and export](https://support.spotify.com/us/article/data-rights-and-privacy-settings/)
 - [Understanding your Spotify data](https://support.spotify.com/mt/article/understanding-your-data/)
 - [Spotify Development Mode quota rules](https://developer.spotify.com/documentation/web-api/concepts/quota-modes)
