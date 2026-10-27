@@ -10,6 +10,15 @@
 
 Host difference: library/OpenAPI snapshot использует `api.music.yandex.net`, а ранее наблюдавшийся Chrome и authenticated terminal traffic для account/likes/details шёл на `api.music.yandex.ru` и отвечал `200`. No-auth `/search` отдельно ответил `200 application/json` на обоих доменах 27.10.2026. Это не доказывает, что все routes взаимозаменяемы; сохранять фактический host как часть проверенного request profile и перепроверять перед реализацией.
 
+### Public playlist routes из `YandexMusicExport`
+
+Статически просмотрен [YMusicExport/YandexMusicExport](https://github.com/YMusicExport/YandexMusicExport/tree/c80db0a54db7f1e67646695f1247292ab57e100b), HEAD `c80db0a54db7` от 16.05.2026, без declared license. В коде без auth headers используются два GET:
+
+- `https://music.yandex.ru/handlers/playlist.jsx?owner={owner}&kinds={kind}` — legacy route, читает `playlist.title` и `playlist.tracks`.
+- `https://api.music.yandex.ru/playlist/{playlist_uuid}` — route для новых ссылок, читает `result.title` и `result.tracks[].track`.
+
+Это только статическая проверка кода, endpoints этим проектом здесь не запрашивались. README ограничивает сценарий публичными плейлистами; private «Мне нравится» не поддерживается. Скрипт теряет provider IDs в текстовом output. Community OpenAPI отдельно индексирует `/playlist/{playlist_uuid}`; live no-auth доступность и pagination/лимиты требуют отдельной проверки, поэтому не считать route доказанным источником полного лайк-списка.
+
 В библиотеке есть OAuth Device Flow. `POST https://oauth.yandex.ru/device/code` передаёт form-urlencoded `client_id`, `device_id` и `device_name`; по умолчанию библиотека генерирует `device_id` из 10 символов, а имя задаёт `YandexMusicAPI`. Ответная модель описана полями `device_code`, `user_code`, `verification_url`, `expires_in` и `interval`. Пользователь открывает verification URL и подтверждает код на домене Яндекса.
 
 Затем библиотека делает `POST https://oauth.yandex.ru/token` с form-urlencoded полями `grant_type=device_code`, `code`, `client_id` и `client_secret`. В проверенном commit вшиты credentials публичного Android-клиента Яндекс Музыки; это не credentials, выданные нашему приложению, и встроенный `client_secret` нельзя считать секретом проекта. Значения самих credentials в документацию не копируем. Polling следует выполнять с интервалом `interval` и до срока `expires_in` из device-code ответа: `authorization_pending` возвращается как `None`, а `expired_token`, `access_denied`, `invalid_client` и другие OAuth ошибки приводят к `DeviceAuthError`. Блокирующий helper также поддерживает timeout и отмену. При успехе он записывает access token в клиент и добавляет `Authorization: OAuth <token>`.

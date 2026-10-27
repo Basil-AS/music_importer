@@ -128,6 +128,13 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Сразу после этого чистый terminal probe GraphQL `query SafeProbe { __typename }` без cookies/auth headers получил `418 text/html`; body не сохранялся. Это WAF/session-boundary evidence, не проверка отсутствия endpoint и не основание обходить защиту.
 - Секретные headers и значения данных не читались и не сохранялись; мутаций не было. Полная схема и caveat по cursor termination записаны в `docs/providers/zvuk-api-inventory.md`.
 
+## GitHub sweep: Yandex browser exporters + Zvuk client (27.10.2026)
+
+- GitHub repository search found two recently touched Yandex Music DevTools exporters: MIT `idaniil24/ym-track-collector` at `da25166df01e4cc99ba3947a75ce227ce8b68729` and MIT `AlexAlexWorld/yandex-music-playlist-export` at `f1d01b2be0b19365f642f02b69ebcb52a7bab8e6`. Both scrape the already-rendered virtualized DOM and require manual scrolling; neither uses provider APIs or exports server-side total/revision. The first CSV omits provider track IDs; the second uses one hashed CSS class and also places the captured records in `window.__ym_tracks_full`. They are local UX/fallback references, not complete import sources.
+- Reviewed `YMusicExport/YandexMusicExport` at `c80db0a54db7f1e67646695f1247292ab57e100b`: public-playlist-only, unauthenticated routes `/handlers/playlist.jsx?owner=…&kinds=…` and `/playlist/{uuid}`, title/artist text output, no declared license. Static only; private liked collection and route runtime were not tested.
+- Rechecked `Lincoln-Continental/SberZvuk_API` at `e1f78193e5a50f3e06d46915886a6e24dcff0cb5`: its Python client posts HTTPS GraphQL using `X-Auth-Token`, with query methods for search, tracks, releases, playlists, and stream metadata. The checked-in client/operation map has no user collection/likes query or like mutation; its `get_anonymous_token()` calls `/api/tiny/profile`, but no fresh terminal run was made. GitHub license metadata is absent although `setup.py` says MIT.
+- Added these reviewed candidates, pinned commits, and limitations to `docs/PROJECTS.md`; no account data or secrets were used.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
