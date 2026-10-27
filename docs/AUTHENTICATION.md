@@ -31,7 +31,7 @@
 
 Apple различает developer token приложения и Music User Token пользователя. MusicKit может автоматически получить/обновлять пользовательский токен на поддерживаемых Apple/Web платформах после явного разрешения, но REST API всё равно требует developer token. Apple описывает выпуск developer token через MusicKit identifier и private key участника Apple Developer Program. Поэтому пользовательский логин сам по себе не даёт стороннему локальному CLI право вызывать API.
 
-На macOS отдельный нативный путь — управлять локальной медиатекой через Music.app, если её API/автоматизация позволяют изменять именно Favorite Songs. До read-back проверки на тестовой записи это только гипотеза для бесплатного режима, не подтверждённая замена Apple Music API. Старые поля «Loved» нельзя автоматически считать теми же Favorites.
+На macOS отдельный нативный путь — управлять локальной медиатекой через Music.app, если её API/автоматизация позволяют изменять именно Favorite Songs. Новый статически проверенный reference [`Skalas/music-sync`](https://github.com/Skalas/music-sync/tree/9f961d9e439885eaff6dff6da125e238f278da6e) реализует `favorited=true` с fallback на legacy `loved` и read-back после Shortcut import; это подтверждает наличие такого code path, но не live write/read-back на нашем Mac и не облачную синхронизацию. Старые поля «Loved» нельзя автоматически считать теми же Favorites.
 
 ### Яндекс Музыка
 
