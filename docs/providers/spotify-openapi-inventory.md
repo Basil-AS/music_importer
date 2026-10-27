@@ -120,7 +120,7 @@
 
 - В авторизованном Chrome Account Overview показывает план Premium Family, но также сообщение `Payment failed` и предупреждение о скорой потере доступа. Это не доказывает, что подписка удовлетворяет требованию активного Premium у владельца приложения.
 - Spotify Developer Dashboard показал Developer Terms v10 (15.05.2025) и обязательный флажок принятия. Пользователь дал разрешение принять условия и создать минимальное приложение при Premium; стандартное взаимодействие с флажком не изменило его состояние и кнопка осталась выключена. Условия не приняты, приложение и OAuth client не созданы.
-- Согласно официальному [Development Mode migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide), владелец Development Mode app должен иметь active Premium; также действует предел один Client ID на разработчика и пять пользователей приложения. С учётом ошибки оплаты условие Premium пока нельзя считать подтверждённым.
+- Согласно официальным Development Mode правилам, владелец app должен иметь active Premium и allowlist ограничен пятью пользователями на приложение. Февральский migration guide изначально указывал один Client ID на разработчика, но [апдейт 23.07.2026](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates) поднял лимит до 25 на developer account; все эти app IDs расходуют общую quota. С учётом ошибки оплаты условие Premium у владельца пока нельзя считать подтверждённым.
 - Токены, cookies, идентификаторы аккаунта, track IDs и содержимое коллекции в этот inventory не включались. Официальный OAuth runtime test не выполнялся.
 
 ## Ссылки

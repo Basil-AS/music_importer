@@ -48,13 +48,19 @@ grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
 
 Минимальные scopes для чтения лайкнутых песен: `user-library-read`; для записи в библиотеку Spotify — `user-library-modify`. `playlist-read-private`/`playlist-read-collaborative` нужны только при импорте приватных плейлистов.
 
+### Текущие ограничения Developer Mode (сверено 27.10.2026)
+
+Официальная [Quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes) требует активную Spotify Premium подписку у владельца Development Mode app; каждое подключаемое лицо должно быть в allowlist, максимум — 5 пользователей на app. Spotify подняла лимит до **25 Client IDs на developer account** 23.07.2026, но запросная quota теперь общая для всех этих app IDs на одном аккаунте — создание дополнительных приложений не умножает бюджет. При исчерпании quota приходит `429` с JSON `error.reason = QUOTA_EXCEEDED`, отдельно от обычного rate-limit `429`.
+
+Extended Quota Mode снимает allowlist cap и даёт больший rate limit, но с 15.05.2025 Spotify принимает новые заявки только от организаций; в опубликованных требованиях — зарегистрированная организация, уже запущенный сервис, минимум 250k MAU, ключевые рынки и коммерческая жизнеспособность. Поэтому official PKCE остаётся хорошим локальным входом для личного/малого теста, но общий Client ID автора не подходит для открытого сервиса без зависимости от автора и массового запуска. В феврале 2026 migration guide ещё показывает старый лимит «1 Client ID»; его следует читать вместе с более поздним июльским quota update.
+
 ## Лайки и запись библиотеки
 
 - Читать: `GET https://api.spotify.com/v1/me/tracks?limit=50&offset=0`, scope `user-library-read`. Текущий reference указывает максимум 50, `offset`/`next`, `total`, `added_at` и track object. Следовать `next` до `null`, не полагаться только на счётчик.
 - Сохранять/удалять: `PUT`/`DELETE https://api.spotify.com/v1/me/library?uris=spotify:track:<id>,...`, scope `user-library-modify`, максимум 40 URI. В новых Development Mode приложениях заменяет type-specific write routes вроде `PUT /me/tracks`; старые маршруты ещё могут отображаться в reference для совместимости/Extended Quota Mode.
 - Искать: `GET /v1/search` по track/title/artist; с февраля 2026 `limit` не больше 10 (по умолчанию 5). Пакетный `GET /v1/tracks?ids=...` в Development Mode удалён — читать metadata через `GET /v1/tracks/{id}` по одному ID.
 - Плейлисты: новые маршруты используют `/v1/playlists/{id}/items` (старые `/tracks` заменены); полный список items доступен не для всех чужих плейлистов. Сохранять `added_at` и исходный порядок отдельно.
-- Для новых Development Mode приложений миграция также указывает Premium у владельца, один Client ID на разработчика и максимум 5 пользователей. Это ограничения режима приложения, а не лимит количества треков в аккаунте.
+- Для Development Mode приложение требует Premium у владельца и allowlist максимум на 5 пользователей. Лимит Client IDs был поднят до 25 на developer account в июле 2026; quota при этом общая на аккаунт. Это ограничения режима приложения, а не лимит количества треков в аккаунте.
 - API может вернуть 401/403/429; 429 требует учитывать `Retry-After`. Результат пакетной записи следует перепроверять.
 
 ## Практическая проверка
@@ -166,7 +172,7 @@ Spotify позволяет запросить машиночитаемую ко�
 - [Developer Policy, effective 15 May 2025](https://developer.spotify.com/policy)
 - [Spotify data rights and export](https://support.spotify.com/us/article/data-rights-and-privacy-settings/)
 - [Understanding your Spotify data](https://support.spotify.com/mt/article/understanding-your-data/)
-- [Spotify Development Mode quota rules](https://developer.spotify.com/documentation/web-api/concepts/quota-modes)
+- [Spotify Development Mode quota rules](https://developer.spotify.com/documentation/web-api/concepts/quota-modes), [July 2026 account quota update](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates)
 - [SongMirror Web Player adapter](https://github.com/ahnafnafee/songmirror/tree/main/songmirror/engine)
 - [SongMirror first-party request reference](https://github.com/ahnafnafee/songmirror/blob/main/docs/spotify-web-postman.md)
 - [Melomaniac Spotify libraryV3 and loader](https://github.com/Brimx/Melomaniac/blob/a6f81cbb675315a93f93bcf74d14667692ecb09a/services/api_service.py)
