@@ -8,6 +8,16 @@ Apple API различает developer token, подписанный разра�
 
 Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Поэтому собственный REST-клиент записи в Favorites нельзя считать бесплатным до практической проверки альтернативного штатного flow. Бесплатная регистрация Apple Developer не равна членству в программе и не даёт подтверждённого здесь права создать ключ MusicKit.
 
+### Локальный Music.app без MusicKit REST API
+
+Для macOS есть отдельный путь без MusicKit developer token: локальное приложение Music управляется AppleScript. В открытом проекте `ComputerPers/YandexMusic_to_AppleMusic` вариант `add_to_apple_music.py` добавляет предварительно найденные записи через Music.app/AppleScript; README указывает подписку Apple Music и авторизацию в приложении, но не developer key для этого варианта.
+
+Для собственно Favorites опубликован [MIT AppleScript](https://gist.github.com/obitech/5e18ec3c8c24f89c96f0cf396cb33e48): он проходит по трекам уже созданного в Music.app плейлиста и выставляет `favorited` в true, пропуская уже избранные. Скрипт ждёт 1 секунду между треками; автор пишет, что ему нужен macOS и Apple Music subscription. Это готовый минимальный прототип назначения лайков, но не полный переносчик и не проверка надёжности на больших/смешанных коллекциях.
+
+Ещё один актуальный референс — [epheterson/applemusic-mcp](https://github.com/epheterson/applemusic-mcp), MIT. В его README локальный уровень `music` ограничивает доступ только приложением Music.app и заявляет Favorites, добавление записей в Library, управление плейлистами и рейтингами. Для этой задачи интересен именно локальный AppleScript-уровень; у проекта есть также web/API режимы с иной моделью авторизации, которые не входят в выбранный бесплатный flow.
+
+Рабочая гипотеза для бесплатного локального мигратора: выгрузить лайки провайдера → сопоставить с каталогом Apple → добавить найденные записи в Library/временный плейлист через штатное Music.app управление → локальным AppleScript выставить Favorites → сверить результат и отчёт пропусков. Ограничение Apple Developer Program относится к REST API и не автоматически к AppleScript. Сценарий всё равно требует Apple Music subscription и локального Mac; массовую запись, облачную синхронизацию и поведение на уже добавленных/недоступных треках нужно проверить на тестовой небольшой выборке.
+
 ### Встроенный перенос в Apple Music
 
 Apple поддерживает отдельный официальный пользовательский transfer flow в приложении и на `music.apple.com`. Apple пишет, что source liked/loved songs попадают в Favorite Songs; пользователю нужно подписаться на Apple Music, включить Sync Library и авторизоваться в source service. Совместимые источники и переносимые типы данных выбираются провайдером и могут различаться. Для вариантов, требующих проверки, Apple даёт 30 дней на разбор; сам перенос выполняется сторонним провайдером. Это первый кандидат для пробного Spotify → Apple переноса, если Spotify есть в списке источников для конкретного аккаунта и региона. Официальная поддержка Apple указывает, что transfer недоступен в материковом Китае, Мьянме и России; в других регионах доступность может отличаться.
@@ -37,6 +47,8 @@ Apple поддерживает отдельный официальный пол�
 - [Apple Developer Program fee](https://developer.apple.com/help/account/membership/program-enrollment)
 - [Apple Music transfer from other services](https://support.apple.com/en-us/118249)
 - [Transfer in the Music app](https://support.apple.com/en-ca/guide/iphone/iph103c19002/ios)
+- [MIT script: Spotify Liked Songs to Apple Music Favorite Songs](https://gist.github.com/obitech/5e18ec3c8c24f89c96f0cf396cb33e48)
+- [Apple Music MCP (MIT; local Music.app mode)](https://github.com/epheterson/applemusic-mcp)
 
 **Уточнение к найденным сторонним скриптам:** `ComputerPers/YandexMusic_to_AppleMusic` показывает два способа добавления: AppleScript добавляет песню в библиотеку/свой плейлист, API-вариант вызывает `POST /v1/me/library` (добавить в библиотеку). Просмотренный код не вызывает `/v1/me/favorites`, поэтому его успешная работа не означает, что лайки перенесены в Favorite Songs. Его `extract_tokens.py` автоматически читает Chrome/Safari cookie-хранилище и сохраняет приватный Music User Token; это не официальный MusicKit authorization flow. Не использовать извлечение cookie как архитектурный образец.
 
