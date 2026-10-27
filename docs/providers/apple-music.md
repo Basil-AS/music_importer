@@ -41,6 +41,8 @@ Live UI-проверка в текущей авторизованной вкла
 - Добавление в Favorite Songs: `POST https://api.music.apple.com/v1/me/favorites?ids[songs]=<catalog-id>` с developer + music user authorization. Документация указывает `202 Accepted`; если пользователь favorites song, она добавляется в `favorite songs` playlist. Недоступные IDs могут быть проигнорированы, поэтому успех HTTP сам по себе не равен успешному импорту. API разрешает bulk additions; проверенные сторонние проекты отправляют по одному треку.
 - Создание обычного плейлиста: `POST /v1/me/library/playlists`, добавление элементов в playlist поддерживается отдельно. Это не эквивалент добавлению в favorites.
 - Добавление ресурса в библиотеку `POST /v1/me/library` — отдельная операция от `/me/favorites`; нужно не смешивать понятия «в библиотеке» и «избранное».
+- Отдельный personal rating API: `PUT /v1/me/ratings/songs/{catalog-id}` с `{ "type": "rating", "attributes": { "value": 1 } }` устанавливает оценку «нравится» (`1`; dislike `-1`); `GET` читает, `DELETE` убирает эту оценку. Документация описывает это как song rating, а не добавление в Favorite Songs. Не считать `rating=1` эквивалентом `favorited=true` без отдельного read-back через Favorites.
+- Это различие встретилось в свежем `nedu-m/spotify-to-apple-music`: команда называется `favourite`, но вызывает `PUT /me/ratings/songs/{id}`. Apple официально описывает отдельный `POST /v1/me/favorites?ids[songs]=...`, который добавляет песню в `favorite songs` playlist. Music.app SDEF также объявляет независимые свойства `rating` и boolean `favorited`.
 
 ### Наблюдаемая авторизация Apple Music web player
 
@@ -74,6 +76,9 @@ Live UI-проверка в текущей авторизованной вкла
 - [Generating developer tokens](https://developer.apple.com/documentation/AppleMusicAPI/generating-developer-tokens)
 - [Create a media identifier and private key](https://developer.apple.com/help/account/capabilities/create-a-media-identifier-and-private-key)
 - [Add resource to favorites](https://developer.apple.com/documentation/applemusicapi/add-resource-to-favorites)
+- [Add a personal song rating](https://developer.apple.com/documentation/applemusicapi/add-a-personal-content-rating-33dop)
+- [Get a personal song rating](https://developer.apple.com/documentation/applemusicapi/get-a-personal-content-rating-4k9c0)
+- [Delete a personal song rating](https://developer.apple.com/documentation/applemusicapi/delete-a-personal-content-rating-3a3a2)
 - [Get all library songs](https://developer.apple.com/documentation/applemusicapi/get-all-library-songs)
 - [Create a library playlist](https://developer.apple.com/documentation/applemusicapi/create-a-new-library-playlist)
 - [Apple Developer Program fee](https://developer.apple.com/help/account/membership/program-enrollment)
