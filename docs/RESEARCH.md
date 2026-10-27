@@ -331,3 +331,9 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - README обещает отсутствие сохранения данных, однако frontend сохраняет Spotify token, Apple developer token и Apple Music User Token в browser `localStorage`. Это и старые Spotify routes, и пустые Apple handlers подтверждают, что проект не готов даже для целевого playlist flow, не говоря о переносе лайков в Apple Favorites.
 - Практическая проверка без аккаунтов: upstream unit tests не запускались; клонирование и поиск/чтение исходников выполнялись локально. Живые OAuth, API-вызовы и изменения библиотек не выполнялись.
 - Это отрицательный, но полезный результат GitHub sweep; добавлен в [каталог проектов](PROJECTS.md). Для исследования использованы только публичные GitHub-метаданные и исходники; сессии Chrome и секреты не читались.
+
+## ZvukApp desktop shell: API-клиента нет (2026-10-27)
+
+- Проверен GitHub-кандидат [`Bassbarlow/Desktop-ZvukApp`](https://github.com/Bassbarlow/Desktop-ZvukApp/tree/e5d134d093f982d3676fd5f948ee65a83a70f7c4), HEAD `e5d134d093f982d3676fd5f948ee65a83a70f7c4` (последний push 2025-11-22). `package.json` указывает ISC, GitHub не смог классифицировать лицензию.
+- `main.js` создаёт Electron `BrowserWindow`, задаёт Android User-Agent и открывает `https://zvuk.com/`. Source scan не нашёл Zvuk API routes, GraphQL operations, user token handling или reader избранного. Это оболочка сайта, не независимая проверка API.
+- Репозиторий не запускался; тестовый скрипт npm заранее определён как заглушка `exit 1`. Запись добавлена в [каталог проектов](PROJECTS.md), чтобы отделять embedded website shell от пригодного API-коннектора.
