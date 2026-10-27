@@ -9,7 +9,7 @@
     { title: 'Blinding Lights', artist: 'The Weeknd', album: '' },
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
-  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, extensionAvailable: false };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, extensionAvailable: false };
   let extensionCheckInProgress = false;
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -57,7 +57,7 @@
       window.removeEventListener('message', onMessage);
       state.extensionAvailable = true;
       status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}.`;
-      button.textContent = 'Подтянуть из расширения';
+      button.textContent = 'Сканировать открытые аккаунты';
       button.disabled = false;
     };
     window.addEventListener('message', onMessage);
@@ -167,6 +167,63 @@
     setStep(2);
     $('#reviewCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     toast(`Загружено треков: ${list.length}`);
+  }
+
+  const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+
+  function renderSourceAvailability(statuses = {}) {
+    $$('.source').forEach((card) => {
+      const provider = card.dataset.provider;
+      const snapshot = state.librarySnapshots[provider];
+      const status = statuses[provider];
+      const label = card.querySelector('.source-status');
+      const button = card.querySelector('.connect');
+      if (snapshot) {
+        const playlistCount = snapshot.playlists.length;
+        const count = `${snapshot.tracks.length} лайков · ${playlistCount} плейлистов`;
+        label.textContent = card.classList.contains('selected') ? `Выбран · ${count}` : `Подключено · ${count}`;
+        label.classList.add('connected');
+        button.disabled = false;
+        button.textContent = card.classList.contains('selected') ? '✓ Источник' : 'Выбрать источник';
+      } else if (status?.status === 'scanning') {
+        label.textContent = status.message || 'Сканируем открытую сессию…';
+        label.classList.remove('connected');
+        button.disabled = true;
+        button.textContent = 'Сканируем…';
+      } else if (status?.status === 'unavailable') {
+        label.textContent = 'Войдите и откройте сервис в Chrome';
+        label.classList.remove('connected');
+        button.disabled = true;
+        button.textContent = 'Нет подключения';
+        button.title = status.message || '';
+      }
+    });
+  }
+
+  function selectProviderSnapshot(provider) {
+    const payload = state.librarySnapshots[provider];
+    if (!payload) {
+      toast(`Сначала откройте ${sourceLabels[provider] || provider} в Chrome и нажмите «Сканировать открытые аккаунты»`);
+      return;
+    }
+    state.sourceProvider = provider;
+    state.source = sourceLabels[provider] || provider;
+    $$('.source').forEach((card) => {
+      const active = card.dataset.provider === provider;
+      card.classList.toggle('selected', active);
+      const button = card.querySelector('.connect');
+      button.disabled = false;
+      button.textContent = active ? '✓ Источник' : 'Выбрать источник';
+    });
+    const tracks = normalizeJSON(payload);
+    loadTracks(tracks, `${state.source} · библиотека из расширения`, {
+      provider,
+      collectionName: payload.collection?.name,
+      collectionType: payload.collection?.type,
+      completeness: payload.completeness,
+      playlists: payload.playlists,
+    });
+    renderSourceAvailability();
   }
 
   function parseCSV(text) {
@@ -502,8 +559,13 @@
 
   $$('.source .connect').forEach((button) => button.addEventListener('click', () => {
     const card = button.closest('.source');
+    const provider = card.dataset.provider;
+    if (provider && state.librarySnapshots[provider]) {
+      selectProviderSnapshot(provider);
+      return;
+    }
     state.source = card.dataset.source;
-    state.sourceProvider = card.dataset.provider || 'file';
+    state.sourceProvider = provider || 'file';
     $$('.source').forEach((item) => {
       const active = item === card;
       item.classList.toggle('selected', active);
@@ -555,66 +617,70 @@
     }
   });
 
+  function requestAllLibraries(refresh = false) {
+    if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает запрос к локальному расширению.'));
+    const requestId = window.crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        reject(new Error('Расширение не ответило. Обновите его и локальную страницу.'));
+      }, 20000);
+      const onMessage = (event) => {
+        if (event.source !== window || event.origin !== location.origin
+          || event.data?.source !== 'music-importer-local-app'
+          || event.data?.type !== 'all-libraries-response'
+          || event.data?.requestId !== requestId) return;
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        resolve(event.data);
+      };
+      window.addEventListener('message', onMessage);
+      window.postMessage({ source: 'music-importer-local-app', type: 'get-all-libraries', requestId, refresh }, location.origin);
+    });
+  }
+
   $('#extensionImportBtn').addEventListener('click', async (event) => {
     const button = event.currentTarget;
     if (!state.extensionAvailable) {
       checkLocalExtension();
       return;
     }
-    if (!window.crypto?.randomUUID) {
-      toast('Этот браузер не поддерживает защищённый запрос к расширению.');
-      return;
-    }
-    const requestId = window.crypto.randomUUID();
-    const provider = state.sourceProvider || 'zvuk';
-    const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
     button.disabled = true;
-    button.textContent = `Подключаем ${sourceLabels[provider] || provider}…`;
+    button.textContent = 'Сканируем аккаунты…';
+    $('#extensionStatus').textContent = 'Проверяем открытые вкладки сервисов и читаем подтверждённые библиотеки…';
+    const deadline = Date.now() + 2 * 60 * 60 * 1000;
     try {
-      const requestLibrary = (refresh = false) => new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          window.removeEventListener('message', onMessage);
-          reject(new Error('Расширение не ответило. Перезагрузите его и локальную страницу.'));
-        }, 8000);
-        const onMessage = (messageEvent) => {
-          if (messageEvent.source !== window || messageEvent.origin !== location.origin
-            || messageEvent.data?.source !== 'music-importer-local-app'
-            || messageEvent.data?.type !== 'library-response'
-            || messageEvent.data?.requestId !== requestId) return;
-          clearTimeout(timeout);
-          window.removeEventListener('message', onMessage);
-          resolve(messageEvent.data);
-        };
-        window.addEventListener('message', onMessage);
-        window.postMessage({ source: 'music-importer-local-app', type: 'get-library', requestId, provider, refresh }, location.origin);
-      });
-      let response = await requestLibrary(true);
-      const deadline = Date.now() + 30 * 60 * 1000;
+      let response = await requestAllLibraries(true);
       while (response.pending && Date.now() < deadline) {
-        button.textContent = response.progress || `Читаем библиотеку ${sourceLabels[provider] || provider}…`;
+        state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+        renderSourceAvailability(response.statuses || {});
+        const running = Object.values(response.statuses || {}).filter((status) => status.status === 'scanning').map((status) => status.message);
+        button.textContent = running[0] || 'Сканируем библиотеки…';
+        $('#extensionStatus').textContent = running.length ? running.join(' · ') : 'Читаем оставшиеся открытые сессии…';
         await new Promise((resolve) => setTimeout(resolve, 2000));
-        response = await requestLibrary(false);
+        response = await requestAllLibraries(false);
       }
-      if (response.pending) throw new Error('Сбор библиотеки ещё не завершился. Повторите запрос чуть позже.');
+      if (response.pending) throw new Error('Сбор ещё выполняется. Библиотеки можно будет выбрать после завершения.');
       if (response.error) throw new Error(response.error);
-      if (!response.payload?.completeness?.confirmed) throw new Error('Расширение не подтвердило полноту собранной библиотеки.');
-      const tracks = normalizeJSON(response.payload);
-      loadTracks(tracks, `${sourceLabels[response.payload.service] || response.payload.service} · библиотека из расширения`, {
-        provider: response.payload.service,
-        collectionName: response.payload.collection?.name,
-        collectionType: response.payload.collection?.type,
-        completeness: response.payload.completeness,
-        playlists: response.payload.playlists,
-      });
-    } catch (error) {
-      if (/Расширение не ответило|Расширение недоступно|Расширение не подключено/i.test(error.message || '')) {
-        state.extensionAvailable = false;
-        $('#extensionStatus').textContent = 'Chrome открыт, но Music Importer не ответил. Обновите расширение и вкладку сервиса, затем нажмите «Повторить проверку».';
+      state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+      renderSourceAvailability(response.statuses || {});
+      const connected = Object.keys(state.librarySnapshots).filter((provider) => response.libraries?.[provider] || response.statuses?.[provider]?.status === 'ready');
+      if (!connected.length) {
+        const details = Object.entries(response.statuses || {}).map(([provider, status]) => `${sourceLabels[provider]}: ${status.message || 'недоступен'}`).join(' · ');
+        throw new Error(details || 'Не нашёл открытых библиотек. Войдите в музыкальные сервисы в Chrome и повторите.');
       }
+      const selectedProvider = connected.includes(state.sourceProvider) ? state.sourceProvider : connected[0];
+      selectProviderSnapshot(selectedProvider);
+      const unavailable = Object.values(response.statuses || {}).filter((status) => status.status === 'unavailable').length;
+      $('#extensionStatus').textContent = `Подключено аккаунтов: ${connected.length} из 4${unavailable ? ` · остальные недоступны: ${unavailable}` : ''}. Выберите любой источник выше.`;
+      if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не открыта`);
+      else toast(`Загружены библиотеки всех ${connected.length} аккаунтов`);
+    } catch (error) {
+      $('#extensionStatus').textContent = error.message || 'Не удалось загрузить открытые библиотеки.';
       toast(error.message || 'Не удалось получить данные из расширения.');
     } finally {
       button.disabled = false;
-      button.textContent = state.extensionAvailable ? 'Подтянуть из расширения' : 'Повторить проверку';
+      button.textContent = 'Обновить открытые аккаунты';
     }
   });
 

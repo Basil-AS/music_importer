@@ -135,6 +135,35 @@
       return;
     }
 
+    if (event.data.type === 'get-all-libraries') {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'music-importer:get-all-libraries',
+          refresh: event.data.refresh === true,
+        });
+        window.postMessage({
+          source: marker,
+          type: 'all-libraries-response',
+          requestId,
+          libraries: response?.libraries || {},
+          statuses: response?.statuses || {},
+          pending: response?.pending === true,
+          error: response?.error || null,
+        }, location.origin);
+      } catch {
+        window.postMessage({
+          source: marker,
+          type: 'all-libraries-response',
+          requestId,
+          libraries: {},
+          statuses: {},
+          pending: false,
+          error: 'Не удалось связаться с расширением Chrome.',
+        }, location.origin);
+      }
+      return;
+    }
+
     if (event.data.type !== 'get-library') return;
 
     try {

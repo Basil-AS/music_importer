@@ -205,7 +205,10 @@ async function requestProviderLibrary(provider, refresh) {
   if (refresh && scan?.status !== 'reading') {
     const [tab] = await chrome.tabs.query({ url: providerConfig.tabPattern });
     const providerName = provider === 'spotify' ? 'Spotify Web Player' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыку';
-    if (!tab?.id) return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
+    if (!tab?.id) {
+      if (state.snapshots[provider]?.completeness?.confirmed === true) return { payload: state.snapshots[provider], cached: true };
+      return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
+    }
     state.snapshots[provider] = null;
     state.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
     await writeProviderState(state);
@@ -223,6 +226,50 @@ async function requestProviderLibrary(provider, refresh) {
   const payload = state.snapshots[provider];
   if (payload?.completeness?.confirmed === true) return { payload };
   return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
+}
+
+async function requestZvukLibrary(refresh) {
+  const state = await readState();
+  const payload = createLibraryPayload(state);
+  if (payload.completeness.confirmed) return { payload };
+  if (state.scan?.active) return { pending: true, progress: `Звук: ${state.scan.phase || 'сбор библиотеки'}.` };
+  if (!refresh) return { error: state.error || 'Сбор библиотеки Звука не запускался.' };
+  const tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
+  const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+  if (!tab?.id) return { error: 'Откройте Звук в Chrome и войдите в аккаунт.' };
+  const result = await startAccountScan(tab.id);
+  if (!result?.ok) return { error: result?.error || 'Не удалось запустить сбор библиотеки Звука.' };
+  return { pending: true, progress: 'Звук: собираем лайки, каталог и содержимое плейлистов.' };
+}
+
+async function requestAllLibraries(refresh) {
+  const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+  const outcomes = await Promise.all(providers.map(async (provider) => {
+    const result = provider === 'zvuk'
+      ? await requestZvukLibrary(refresh)
+      : await requestProviderLibrary(provider, refresh);
+    return [provider, result || { error: 'Сервис не вернул состояние.' }];
+  }));
+  const libraries = {};
+  const statuses = {};
+  let pending = false;
+  for (const [provider, result] of outcomes) {
+    if (result.pending) {
+      pending = true;
+      statuses[provider] = { status: 'scanning', message: String(result.progress || `Сканируем ${provider}…`) };
+    } else if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) {
+      libraries[provider] = result.payload;
+      statuses[provider] = {
+        status: 'ready',
+        trackCount: result.payload.tracks.length,
+        playlistCount: result.payload.playlists.length,
+        cached: result.cached === true,
+      };
+    } else {
+      statuses[provider] = { status: 'unavailable', message: String(result.error || 'Полная библиотека пока недоступна.') };
+    }
+  }
+  return { libraries, statuses, pending };
 }
 
 function pageKind(url) {
@@ -496,6 +543,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       sendResponse({ payload });
+      return;
+    }
+
+    if (message?.type === 'music-importer:get-all-libraries') {
+      let origin = '';
+      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+        sendResponse({ error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      sendResponse(await requestAllLibraries(message.refresh === true));
       return;
     }
 
