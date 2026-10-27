@@ -431,6 +431,13 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - `osacompile` accepted a temporary `set favorited of first track to true` AppleScript statement; the generated script was not run and was deleted. This is compile-time evidence only. No Favorite was changed, and catalog-to-Library add, live setter behavior, Automation prompts, and cloud sync remain unverified.
 - Updated [Apple Music provider notes](providers/apple-music.md). This strengthens the local macOS destination path as a no-developer-key candidate, without claiming an end-to-end transfer.
 
+## Any-to-any transfer capability matrix (2026-10-28)
+
+- Rechecked current provider inventories and official Spotify/Apple API documentation, then separated route existence from live read, pagination completeness, write/read-back, and author-owned credential requirements.
+- Added a 4-provider capability table and all 12 directed pairs for Spotify, Apple Music, Yandex Music, and Zvuk. All pairs have API-level candidates for likes and playlists, but none is a complete product flow: no target write/read-back was run, and Yandex/Zvuk reads still have completeness caveats.
+- Recorded the user's clarified product requirement: enumerate the complete user libraries (not each service's global catalogue), transfer likes and playlists in any direction, automatically match large lists, and leave manual review only for ambiguous results.
+- Defined matching/checkpoint requirements and the next adapter sequence in [transfer capability matrix](TRANSFER_CAPABILITY_MATRIX.md); linked it from [product direction](PRODUCT_DIRECTION.md) and [API matrix](API_MATRIX.md).
+
 ## Independent Yandex likes-client cross-check (2026-10-28)
 
 - GitHub CLI metadata and pinned depth-1 clones confirm `lifeart/ya-namp` HEAD `49cfee7002ebf816f4144860e67d6fa3be5f5708` (no declared license) and `Ermegilius/yMusic_playlist_importer` HEAD `84c06318d40d9aa01c6c216a6f968cbb17005567` (MIT). Both were inspected statically under `/tmp`; neither was executed and neither used account credentials.
