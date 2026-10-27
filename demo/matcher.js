@@ -10,6 +10,20 @@
     .trim()
     .replace(/\s+/g, ' ');
 
+  const cyrillicToLatin = {
+    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z',
+    и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r',
+    с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch',
+    ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+    і: 'i', ї: 'yi', є: 'ye', ґ: 'g', ў: 'u',
+  };
+
+  function romanize(value) {
+    return Array.from(String(value || '').normalize('NFKC').toLowerCase(), (character) => (
+      Object.hasOwn(cyrillicToLatin, character) ? cyrillicToLatin[character] : character
+    )).join('');
+  }
+
   const normalizeISRC = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
   function buildSearchQueries(track) {
@@ -37,9 +51,7 @@
     return new Set(versionMarkers.filter((marker) => (` ${text} `).includes(` ${marker} `)));
   }
 
-  function similarity(left, right) {
-    const a = normalizeText(left);
-    const b = normalizeText(right);
+  function similarityNormalized(a, b) {
     if (!a || !b) return 0;
     if (a === b) return 1;
     const aTokens = new Set(a.split(' '));
@@ -63,9 +75,26 @@
     return Math.max(tokenScore, editScore);
   }
 
+  function similarity(left, right) {
+    const direct = similarityNormalized(normalizeText(left), normalizeText(right));
+    const romanized = similarityNormalized(normalizeText(romanize(left)), normalizeText(romanize(right)));
+    return Math.max(direct, romanized);
+  }
+
+  function titleWithoutFeatureCredits(value) {
+    return String(value || '')
+      .replace(/[([{]\s*(?:feat\.?|featuring|ft\.?|with)\s+[^)\]}]*[)\]}]/gi, ' ')
+      .replace(/\s+(?:feat\.?|featuring|ft\.?)\s+.*$/i, ' ');
+  }
+
   function artistScore(sourceArtist, candidateArtist) {
-    const source = normalizeText(sourceArtist).split(/\s+(?:feat|ft|featuring|with|and)\s+|,|\s+&\s+/).filter(Boolean);
-    const candidate = normalizeText(candidateArtist).split(/\s+(?:feat|ft|featuring|with|and)\s+|,|\s+&\s+/).filter(Boolean);
+    const splitCredits = (value) => {
+      const names = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '') : [String(value || '')];
+      return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with|and)\s+|,|;|\s*&\s*/i))
+        .map(normalizeText).filter(Boolean);
+    };
+    const source = splitCredits(sourceArtist);
+    const candidate = splitCredits(candidateArtist);
     if (!source.length || !candidate.length) return 0;
     const matches = source.map((name) => Math.max(...candidate.map((other) => similarity(name, other))));
     return matches.reduce((sum, score) => sum + score, 0) / matches.length;
@@ -90,7 +119,10 @@
       return { score: 1, exactISRC: true, versionConflict: false };
     }
 
-    const title = similarity(source.title, candidate.trackName || candidate.title || candidate.name);
+    const title = similarity(
+      titleWithoutFeatureCredits(source.title),
+      titleWithoutFeatureCredits(candidate.trackName || candidate.title || candidate.name),
+    );
     const artist = artistScore(source.artist, candidate.artistName || candidate.artist || candidate.artists);
     const sourceAlbum = source.album || '';
     const candidateAlbum = candidate.collectionName || candidate.album || '';
