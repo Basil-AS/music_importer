@@ -222,6 +222,12 @@ Live проверки касались только чтения. Для наш�
 
 Так подтверждены локальный CLI login без developer Client ID/secret, полный read-only экспорт likes IDs и доступные поля для matching. Имена, реальные ID, размер библиотеки, cursor и token не выводились и не сохранялись; temporary cookie/header файлы удалены. Mutations не отправлялись. Веб API private и нестабильный; запросы без пользовательской сессии по-прежнему могут получать `418 text/html`.
 
+### Повторная UI-triggered трасса из Chrome (28.10.2026)
+
+В существующей Chrome-сессии без чтения cookies/storage открыты видимые разделы «Коллекция» и «Любимое». При навигации страница запросила `GET /desktop-data/_next/data/v8.20.1/collection.json` и `GET /desktop-data/_next/data/v8.20.1/favorites.json`; загрузка «Любимое» также вызвала `POST /api/v1/graphql` с operations `getPersonalWave` и `getPaginatedCollection`, а также `GET /desktop-data/api/cookieAPI`. Это наблюдение названий маршрутов/операций из DevTools request events; тела, заголовки и HTTP-статусы этих запросов не читались. Оно подтверждает, что маршрут likes collection активен в текущем UI, но не является новой проверкой полноты или статуса страницы.
+
+Сразу после UI-проверки чистые no-cookie terminal запросы к `POST /api/v1/graphql` с `query ReadOnlyProbe { __typename }` и `GET /desktop-data/_next/data/v8.20.1/favorites.json` вернули `418 text/html`. Тела отброшены. Совпадение с уже описанной WAF boundary не опровергает доступность authenticated UI. URL значения, идентификаторы коллекции, cookies, tokens, response bodies и данные треков в записи не включались; мутаций не было.
+
 ## Device login и GraphQL из source `zvuk/kithara`
 
 В GitHub-организации `Zvuk LLC` найден Rust workspace [`zvuk/kithara`](https://github.com/zvuk/kithara), HEAD `1e49fd342bcb614dba31db8c8a6d675b9dbeaf42` от 27.10.2026; GitHub metadata указывает Apache-2.0. Организация GitHub в настоящее время не отмечена как verified, поэтому это сильный source reference под именем компании, но не опубликованный/гарантированный API-контракт. Просмотрены `kithara-app-zvuk` auth/client source и tests; live login или запросы с пользовательским токеном не запускались. Все API запросы этого crate получают настроенный `User-Agent`; значения его client identity нужно считать частью сервиса-зависимого поведения и не подменять без проверки.

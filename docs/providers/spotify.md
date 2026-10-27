@@ -95,6 +95,12 @@ Extended Quota Mode снимает allowlist cap и даёт больший rate
 
 **Предыдущая повторная проверка user browser session, 27.10.2026:** Chrome-сессия открывала `/collection/tracks`. Ранее захваченный TOTP URL был одноразовым/истёкшим (два replay вернули 400), а исходные page request status не сохранились. Этот исторический replay был разрешён отдельной проверкой: helper с актуальной TOTP cipher dictionary и пользовательской сессией получил bearer из `sp_dc` (см. следующий раздел). В той более ранней capture дополнительных DELETE не наблюдалось; при более позднем повторе ниже два DELETE появились снова. Временные данные удалены.
 
+### Chrome route-key recheck (28.10.2026)
+
+На уже открытой странице «Любимые треки» выполнена обычная перезагрузка с read-only CDP capture. В видимом потоке браузер отправил `GET https://open.spotify.com/api/token` с query-key names `productType`, `reason`, `totp`, `totpServer`, `totpVer`, затем `POST https://clienttoken.spotify.com/v1/clienttoken` и preflight `OPTIONS` на тот же путь. Значения query, заголовки и тела не читались и не сохранялись. Буфер событий переполнился (`truncated=true`) до того, как удалось зафиксировать все запросы; Pathfinder operation и status этого token request поэтому не подтверждены этой итерацией. Не выводить из неё ни успех обновления bearer, ни доступность Saved Tracks.
+
+Сразу после браузерной проверки чистый запрос без Authorization к официальному `GET https://api.spotify.com/v1/me/tracks?limit=1` вернул `401 application/json`, что повторно подтверждает auth boundary официального endpoint. Свежая проверка не трогала лайки и не сохраняла список пользователя.
+
 ### Повторное получение Web Player bearer из `sp_dc` (27.10.2026)
 
 Найден MIT-кандидат [mirrorfm/spotify-webplayer-token](https://github.com/mirrorfm/spotify-webplayer-token), checked HEAD `7f0ac21eb95c0c592394fdb2529d9f6671b8aef4` (2026-03-22). Его `GetAccessToken()` берёт только `sp_dc`, получает TOTP cipher dictionary, выбирает последнюю версию и делает `GET https://open.spotify.com/api/token` с `totp`, `totpServer`, `totpVer` и Web Player headers; `sp_key`, Spotify OAuth Client ID и password не нужны. В исходном CLI `main.go` печатает первые 30 символов access token, а библиотечная `app.go` подгружает JSON cipher data с неприкреплённой к commit `raw.githubusercontent.com/.../main/...` ссылки — этот CLI нельзя запускать без исправлений, а зависимость надо pin-ить и аудировать.
