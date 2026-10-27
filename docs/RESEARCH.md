@@ -260,3 +260,10 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - From the existing Chrome `/favorites` page, issued only a safe same-origin `POST /api/v1/graphql` query for `__typename`; it returned `200 application/json; charset=utf-8`, one `data.__typename` key and no GraphQL errors. The identical unauthenticated terminal request returned `418 text/html` in the clean route sweep above.
 - The page context can therefore reach GraphQL using the site's existing session without reading or copying cookie/token values. A same-origin Tiny tracks GET with a synthetic non-existent ID returned HTML `404`; this is inconclusive about route access. No user track IDs, titles or response body were saved; no library mutation or playback request was sent.
 - Updated the [login model](LOGIN_MECHANISMS.md), [route matrix](API_MATRIX.md), and [Zvuk inventory](providers/zvuk-api-inventory.md#same-origin-graphql-и-tiny-metadata-recheck-27102026).
+
+## Yandex clean terminal host comparison recheck (2026-10-27)
+
+- Repeated read-only GET checks with Python `urllib`, no cookies, bearer, Chrome profile or account-specific ID: `/account/status` returned `200 application/json` on both `api.music.yandex.net` and `.ru`; `/search` returned `200 application/json` on both; `/users/1/likes/tracks?if-modified-since-revision=0` returned `403 application/json` on both.
+- This strengthens the host comparison only for these three GET routes at the time of the probe. It does not establish general `.net`/`.ru` interchangeability or expose private library data without a user session. No response bodies, search results, user IDs, track records or tokens were printed or saved.
+- The existing Chrome tab could not be inspected through the supported browser connection in this turn; prior browser-context likes evidence remains documented above and was not re-created by this clean CLI check. No cookies or profile storage were read.
+- Updated the [API matrix](API_MATRIX.md) with the repeated `.net`/`.ru` statuses.
