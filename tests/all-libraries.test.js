@@ -43,7 +43,11 @@ function bootWorker(storageState, tabs = []) {
         }));
       },
       async get(tabId) { return tabs.find((tab) => tab.id === tabId) || null; },
-      async update(tabId, update) { updates.push({ tabId, update }); },
+      async update(tabId, update) {
+        updates.push({ tabId, update });
+        const tab = tabs.find((candidate) => candidate.id === tabId);
+        if (tab && update.url) tab.url = update.url;
+      },
       async sendMessage(tabId, message) { messages.push({ tabId, message }); return { ok: true }; },
     },
   };
@@ -57,6 +61,13 @@ function bootWorker(storageState, tabs = []) {
       return new Promise((resolve) => {
         const keptOpen = runtimeListener(message, { id: 'fixture-extension', url: 'http://127.0.0.1:8001/' }, resolve);
         assert.equal(keptOpen, true);
+      });
+    },
+    pageMessage(message, tabId) {
+      const tab = tabs.find((candidate) => candidate.id === tabId);
+      assert.ok(tab, `Expected fixture tab ${tabId}`);
+      return new Promise((resolve) => {
+        runtimeListener(message, { id: 'fixture-extension', tab, url: tab.url }, resolve);
       });
     },
   };
@@ -113,4 +124,63 @@ test('one-click library scan returns all complete snapshots and marks missing se
   assert.equal(response.statuses.zvuk.status, 'ready');
   assert.equal(response.statuses['yandex-music'].status, 'unavailable');
   assert.equal(response.libraries.spotify.tracks.length, 3);
+});
+
+test('Zvuk account scan crawls favorites, playlist catalog, and playlist pages into one confirmed snapshot', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/favorites' }];
+  const storage = { [ZVUK_KEY]: makeZvukState() };
+  const app = bootWorker(storage, tabs);
+  const started = await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  assert.equal(started.pending, true);
+  assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url === 'https://zvuk.com/favorites?music_importer_capture=1'));
+
+  assert.equal((await app.pageMessage({ type: 'zvuk:collection-count', uniqueTrackCount: 1, uniquePlaylistCount: 2 }, 1)).ok, true);
+  await app.pageMessage({ type: 'zvuk:favorite-page', tracks: [{ id: 'like-1', title: 'Liked', artists: [{ title: 'Artist' }] }], hasMore: false }, 1);
+  await app.pageMessage({ type: 'zvuk:favorites-scroll-end' }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(storage[ZVUK_KEY].scan.phase, 'playlists', JSON.stringify(storage[ZVUK_KEY]));
+  assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url === 'https://zvuk.com/collection?music_importer_capture=1'), JSON.stringify(app.updates));
+
+  await app.pageMessage({
+    type: 'zvuk:playlist-list-page', hasMore: false,
+    playlists: [{ id: 'road', title: 'Road', trackCount: 2 }, { id: 'empty', title: 'Empty', trackCount: 0 }],
+  }, 1);
+  await app.pageMessage({ type: 'zvuk:collection-scroll-end' }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url === 'https://zvuk.com/playlist/road?music_importer_capture=1'));
+
+  await app.pageMessage({
+    type: 'zvuk:playlist-track-page', playlistId: 'road', offset: 0, limit: 100,
+    tracks: [
+      { id: 'road-1', title: 'First', artists: [{ title: 'Artist' }] },
+      { id: 'road-2', title: 'Second', artists: [{ title: 'Artist' }] },
+    ],
+  }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const completed = await app.call({ type: 'music-importer:get-library', provider: 'zvuk' });
+  assert.equal(completed.payload.completeness.confirmed, true);
+  assert.deepEqual(Array.from(completed.payload.tracks, (track) => track.id), ['like-1']);
+  assert.deepEqual(Array.from(completed.payload.playlists, (playlist) => [playlist.id, playlist.title, playlist.complete]), [
+    ['road', 'Road', true], ['empty', 'Empty', true],
+  ]);
+  assert.deepEqual(Array.from(completed.payload.playlists[0].tracks, (track) => [track.id, track.position]), [
+    ['road-1', 0], ['road-2', 1],
+  ]);
+  assert.deepEqual(Array.from(completed.payload.playlists[1].tracks), []);
+});
+
+test('Zvuk account scan refuses a favorites total mismatch', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/favorites' }];
+  const storage = { [ZVUK_KEY]: makeZvukState() };
+  const app = bootWorker(storage, tabs);
+  await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  await app.pageMessage({ type: 'zvuk:collection-count', uniqueTrackCount: 2, uniquePlaylistCount: 0 }, 1);
+  await app.pageMessage({ type: 'zvuk:favorite-page', tracks: [{ id: 'like-1', title: 'Liked' }], hasMore: false }, 1);
+  await app.pageMessage({ type: 'zvuk:favorites-scroll-end' }, 1);
+
+  assert.equal(storage[ZVUK_KEY].scan.phase, 'needs_review');
+  assert.match(storage[ZVUK_KEY].scan.error, /число избранных не совпало/i);
+  assert.equal(storage[ZVUK_KEY].captureEnabled, false);
+  assert.ok(!app.updates.some((entry) => entry.update.url === 'https://zvuk.com/collection?music_importer_capture=1'));
 });
