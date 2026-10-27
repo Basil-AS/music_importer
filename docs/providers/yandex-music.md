@@ -45,6 +45,22 @@ Token хранится plaintext в `~/.config/yamusic-tui/config.yaml`: код 
 
 Свежая проверка без авторизации: публичная GitHub-страница HEAD открылась в Chrome и показала release/README; затем чистый Python `urllib` GET дал `200 application/json` для `/account/status` и `403 application/json` для synthetic `/users/1/likes/tracks?if-modified-since-revision=0`. Тела ответов не читались и не сохранялись. `go version` не запустился (`go` отсутствует), поэтому Go tests/build не проверялись. Ни браузерные cookies/tokens, ни пользовательские данные не использовались.
 
+### Ещё два независимых клиента лайков (28.10.2026)
+
+Статически клонированы и проверены актуальные default-branch HEAD [`lifeart/ya-namp`](https://github.com/lifeart/ya-namp/tree/49cfee7002ebf816f4144860e67d6fa3be5f5708) (`49cfee7`, push 2026-07-16) и [`Ermegilius/yMusic_playlist_importer`](https://github.com/Ermegilius/yMusic_playlist_importer/tree/84c06318d40d9aa01c6c216a6f968cbb17005567) (`84c0631`, MIT, push 2026-02-28). Ни один проект не запускался и не подключался к пользовательскому аккаунту.
+
+Оба независимо реализуют один и тот же основной маршрут:
+
+1. `GET https://api.music.yandex.net/account/status` с `Authorization: OAuth <token>`; UID берётся из `result.account.uid`.
+2. `GET https://api.music.yandex.net/users/{uid}/likes/tracks`; код читает `result.library.tracks[]` как короткие записи `id` (также встречаются `albumId`, `timestamp`).
+3. Для метаданных `GET https://api.music.yandex.net/tracks?track-ids=<comma-separated IDs>` либо `POST /tracks` с form-urlencoded `track-ids=<...>` — форма зависит от клиента. `ya-namp` задаёт batches по 100; exporter — 100 и передаёт пары `id:albumId`.
+
+`ya-namp` — локальный web player, а не exporter/importer. Его GitHub Pages demo работает без учётной записи только в синтетическом demo mode; реальный каталог требует запустить Node/Express server и вручную вставить OAuth token, который хранится в памяти процесса и проксируется с сервера. В `docs/yandex-api.md` автор утверждает, что cookies дают только анонимный/preview доступ, а полноценный account и library API используют OAuth bearer. Это полезное свидетельство против предположения, что одного факта входа в web-страницу достаточно, но оно относится к live probes автора от 16.07.2026 и не заменяет новую проверку нашей сессии. Репозиторий не объявляет лицензию, поэтому код не включать без уточнения.
+
+`yMusic_playlist_importer` — zero-dependency Python CLI, сохраняет CSV локально и поддерживает несколько пользователей из `.env`. Это простой exporter, но не авторизационный UX: пользователь сам получает token через shared Android-app OAuth client и задаёт его в `.env`; так делать для продукта нельзя без отдельной оценки scopes и доверия к OAuth app. В исходнике нет page/cursor loop для likes, нет проверки количества обработанных карточек против числа исходных ID; ошибки чтения превращаются в пустой результат/список, а CSV создаётся локально. Не запускать с реальными секретами до улучшения обработки ошибок, проверки полноты и защищённого ввода token.
+
+Новый кросс-чек усиливает уверенность в именах routes и форме metadata hydration, но **не доказывает полный экспорт**: оба клиента делают один GET likes без continuation, а status/revision semantics не используют как контроль изменений. Для надёжного импорта нужно хранить исходные ID, считать уникальные IDs, гидрировать чанками, сверять вход/выход и явно показывать недоступные/ошибочные записи; если серверный endpoint не отдаёт total/cursor, отдельно исследовать revision и сравнить с UI, не выдавая одну страницу за «все».
+
 ### Public playlist routes из `YandexMusicExport`
 
 Статически просмотрен [YMusicExport/YandexMusicExport](https://github.com/YMusicExport/YandexMusicExport/tree/c80db0a54db7f1e67646695f1247292ab57e100b), HEAD `c80db0a54db7` от 16.05.2026, без declared license. В коде без auth headers используются два GET:
@@ -200,6 +216,8 @@ Apple API-вариант проверяет `GET /v1/me/library/songs?limit=1`, 
 ## Источники
 
 - [GitHub repository](https://github.com/MarshalX/yandex-music-api)
+- [lifeart/ya-namp pinned source](https://github.com/lifeart/ya-namp/tree/49cfee7002ebf816f4144860e67d6fa3be5f5708)
+- [Ermegilius/yMusic_playlist_importer pinned source](https://github.com/Ermegilius/yMusic_playlist_importer/tree/84c06318d40d9aa01c6c216a6f968cbb17005567)
 - [Официальная справка Яндекс Музыки: импорт коллекции в Яндекс](https://www.yandex.ru/support/music/ru/collection/sync-and-transfer)
 - [Официальный архив персональных данных Яндекса](https://yandex.com/support/m-yandex/en/privacy/clear-data)
 - [nevdev-ml/yandex-music-exporter](https://github.com/nevdev-ml/yandex-music-exporter)
