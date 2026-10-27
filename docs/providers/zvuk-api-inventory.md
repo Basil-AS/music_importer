@@ -159,6 +159,37 @@ Live проверки касались только чтения. Для наш�
 
 Следом чистый terminal `curl` без cookies/token проверил `GET /api/tiny/profile`, `GET /api/v2/tiny/profile` и безопасный `POST /api/v1/graphql` с `query SafeProbe { __typename }`. Все вернули `418 text/html`; тела ответов не сохранялись. Это повторно доказывает лишь, что прямой unauthenticated CLI path блокируется WAF. Авторизованный terminal replay в этой итерации не выполнялся.
 
+## Device login и GraphQL из source `zvuk/kithara`
+
+В GitHub-организации `Zvuk LLC` найден Rust workspace [`zvuk/kithara`](https://github.com/zvuk/kithara), HEAD `1e49fd342bcb614dba31db8c8a6d675b9dbeaf42` от 27.10.2026; GitHub metadata указывает Apache-2.0. Организация GitHub в настоящее время не отмечена как verified, поэтому это сильный source reference под именем компании, но не опубликованный/гарантированный API-контракт. Просмотрены `kithara-app-zvuk` auth/client source и tests; live login или запросы с пользовательским токеном не запускались. Все API запросы этого crate получают настроенный `User-Agent`; значения его client identity нужно считать частью сервиса-зависимого поведения и не подменять без проверки.
+
+В отличие от web-session подхода, клиент реализует QR device sign-in, при котором пароль и MFA вводятся в открытой сервисной странице:
+
+| Этап | Запрос и форма по source |
+|---|---|
+| Начать вход | `POST https://zvuk.com/api/tiny/login/qr/session`, `Content-Type: application/json`, JSON `{ "device_id": "<fresh UUID>" }`; ответ читается как `{ result: { device_code, expires_in, qr_authorization_url } }`. |
+| Пользователь подтвердит вход | Клиент открывает `qr_authorization_url` системным браузером; пароль не передаётся приложению. |
+| Poll результата | `GET https://zvuk.com/api/tiny/login/qr/token?device_code=<device_code>` без пользовательского auth token; опрашивается каждые 2 секунды до `expires_in`. Ответ — `result.status` `pending` либо `success`, при успехе `result.access_token`. |
+| Проверить имя профиля | `GET https://zvuk.com/api/v2/tiny/profile` с `X-Auth-Token`; source читает `result.profile.name`. |
+| Отключить/revoke | `POST https://zvuk.com/api/tiny/logout` с `X-Auth-Token`; source отзывает сессию и удаляет локальный секрет независимо от ответа сервиса. |
+
+Token сохраняется через абстракцию `Secrets`; README Kithara описывает OS keystore, когда включена feature `keystore`, иначе конфигурационный secrets overlay. Встроенная сессионная авторизация подходит под «войти в аккаунт у сервиса», не требует нашего OAuth Client ID и предоставляет явный logout endpoint. Это пока только кодовая подсказка: QR endpoints, consent, expiry, revoke и платформенный secret store нужно проверить на отдельном аккаунте до выбора как production flow.
+
+| Задача | GraphQL operation из source |
+|---|---|
+| Поиск каталога | `POST https://zvuk.com/api/v1/graphql/`, `X-Auth-Token`; `search(query)` → `tracks(limit: 100) { items, page { total } }`. |
+| Лайки | `KitharaLiked`: `collectionCount { tracks }` + `paginatedCollection { tracks(pagination: { first: 100 }) { items, page { hasNextPage } } }`. Ресурс поддерживает пагинацию, но текущая функция `liked_tracks()` запрашивает только первую страницу; использует `hasNextPage=false` только как fallback для вычисления `total`, не обходит следующие страницы. Экспорт полного списка из этой реализации не следует. |
+| Плейлисты | `collection { playlists { id title } }`; для выбранного ID `playlists(ids: […]) { id trackCount tracks(limit: 100, offset: 0) { … } }`. Текущая функция читает только первую страницу. |
+| Like/unlike | GraphQL mutation `collection.addItem(id: <id>, type: track)` или `collection.removeItem(...)`, `X-Auth-Token`. Source требует ожидаемое поле подтверждения; mutation transport настроен на один запрос без повторов. В нашем проекте writes не проверялись и не выполнялись. |
+
+Endpoint в crate задан как `https://zvuk.com/api/v1/graphql/` (trailing slash); профиль остаётся отдельным `/api/v2/tiny/profile`, а QR/login/logout — versionless `/api/tiny/...`. Значит проверенная версия API — GraphQL v1 плюс несколько Tiny routes, среди которых есть v2 profile; общего `/api/v2/graphql` в source нет. GitHub code search по точной строке `/api/v2/graphql` также не дал результатов; это не доказывает отсутствия скрытого маршрута на сервере.
+
+### Дополнительный UX/API reference: Crossfade
+
+В кандидате [`RoninHikami/Crossfade`](https://github.com/RoninHikami/Crossfade/tree/342110df795dc65f45ef198964b9a90fb8d7e9db), ветка `claude/sweet-ride-lejbvy`, увиден компактный Chrome MV3-переносчик между Spotify, Яндексом, Звуком и YouTube Music. GitHub license metadata не задана, checked-out `LICENSE` отсутствует. Статический audit показал: Zvuk connector пытается получить профиль сначала через `/api/v2/tiny/profile`, затем `/api/tiny/profile`; GraphQL reads/writes идут только на `/api/v1/graphql`. Лайки он читает через `userTracks(orderBy: dateAdded, orderDirection: desc)` без cursor, затем гидрирует `getTracks(ids)` группами по 100; like mutation `collection.addItem` выполняется по одному треку. Это не полный экспорт-контроль: code не проверяет cursor/total и не сверяет гидратированные ID с likes list.
+
+Crossfade демонстрирует желаемый user flow: кнопка подключения сначала использует вход на `zvuk.com` в браузере, при необходимости открывает сервисную вкладку и ждёт входа; полученный profile token сохраняется в `chrome.storage.local`. Есть явный ручной fallback ввода токена. Расширение включает `cookies` permission для YouTube auth; остальным сервисам запрашивает OAuth/session access, поддерживает pause/resume, fuzzy matching, run history и optional auto-sync, который автоматически добавляет лайки. Spotify всё равно требует пользовательский Client ID/app allowlist; исходники не объявляют лицензию, а ZV/Spotify/Yandex API остаются private/shared-client paths. Проверено статически; unit suite `node --test tests/*.test.js` прошёл: 38/38 на предоставленном Node runtime. Отдельных service tests для Yandex/Spotify в checkout нет; Chrome extension не устанавливался и аккаунты не подключались. Заимствовать можно UX-идеи после license clearance, не код.
+
 ## Продуктовый вывод
 
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.
