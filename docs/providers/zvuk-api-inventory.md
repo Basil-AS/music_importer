@@ -99,6 +99,12 @@ Live проверки касались только чтения. Для наш�
 
 ## Наблюдения авторизованного web app
 
+### Same-origin GraphQL и Tiny metadata recheck (27.10.2026)
+
+На уже открытой авторизованной `/favorites` вкладке Chrome выполнен без UI navigation один read-only запрос `POST /api/v1/graphql` с `{ operationName: "SafeProbe", query: "query SafeProbe { __typename }" }` из контекста страницы и `credentials: same-origin`. Ответ: `200 application/json; charset=utf-8`, только ключ `data.__typename`, `errors` отсутствовал. Эквивалентный без-cookie terminal запрос в той же итерации получил `418 text/html`; значит страничный контекст может вызывать GraphQL без ручного копирования bearer/cookie в приложение. Это лишь проверка безопасного query, не повтор лайков и не подтверждение независимого CLI auth.
+
+Дополнительно из того же контекста проверен описанный в `ZvukDownloader` `GET /api/tiny/tracks?ids=-987654321&include=track`: он вернул `404 text/html` (548 bytes) на синтетический несуществующий ID. Это не подтверждает доступность route и не доказывает его отсутствие: ответ не был JSON и ID заведомо некаталожный. Реальный user track ID не использовался. Страничный код не читал cookies/headers/storage; raw response bodies не сохранялись. Никаких mutations не было.
+
 27.10.2026 переход на видимую страницу `/favorites` в Chrome вызвал GraphQL `getPersonalWave(waveSrc, first, waveType)` и `getSubscriptions(status)`, `GET /api/tiny/profile`, `/api/featured/info`, `/desktop-data/api/cookieAPI`, а также Next.js `/desktop-data/_next/data/{buildId}/{page}.json` для `index`, `search`, `popular`, `kids`, `collection`, `favorites`, `notifications`. Это traffic inventory выбранных страниц, не полный список backend. Ответы с данными библиотеки не сохранялись.
 
 ### Свежая сверка frontend bundle из браузера и чистого терминала
