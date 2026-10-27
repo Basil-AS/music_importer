@@ -4,7 +4,7 @@
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     const { type, ...detail } = event.data;
-    if (!['favorite-page', 'collection-count', 'read-error', 'playlist-list-page', 'playlist-metadata', 'playlist-track-page', 'collection-scroll-end', 'playlist-scroll-end'].includes(type)) return;
+    if (!['favorite-page', 'favorites-scroll-end', 'favorites-scroll-stall', 'collection-count', 'read-error', 'playlist-list-page', 'playlist-metadata', 'playlist-track-page', 'collection-scroll-end', 'collection-scroll-stall', 'playlist-scroll-end'].includes(type)) return;
     chrome.runtime.sendMessage({ type: `zvuk:${type}`, ...detail });
   });
 

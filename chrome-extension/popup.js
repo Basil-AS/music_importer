@@ -1,17 +1,13 @@
 const $ = (selector) => document.querySelector(selector);
 const send = (type, detail = {}) => chrome.runtime.sendMessage({ type: `zvuk:${type}`, ...detail });
 
-function isCaptureUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.origin === 'https://zvuk.com' && (url.pathname === '/favorites' || url.pathname === '/collection' || url.pathname.startsWith('/playlist/'));
-  } catch {
-    return false;
-  }
-}
-
 function getCompleteness(state) {
   const parts = [];
+  const phases = { favorites: 'собираем избранное', playlists: 'собираем каталог плейлистов', playlists_items: 'собираем содержимое плейлистов' };
+  if (state.scan?.active) parts.push(`Автосбор: ${phases[state.scan.phase] || state.scan.phase}.`);
+  else if (state.scan?.phase === 'complete') parts.push('Полная библиотека собрана и сверена.');
+  else if (state.scan?.phase === 'needs_review') parts.push(state.scan.error || 'Сбор остановился; проверьте полноту.');
+  else if (state.scan?.phase === 'stopped') parts.push('Сбор остановлен вручную.');
   if (state.tracks.length) {
     if (state.hasMore === false && state.expectedCount === state.tracks.length) parts.push(`Избранное подтверждено: ${state.tracks.length} из ${state.expectedCount}.`);
     else if (state.hasMore === true) parts.push(`Избранное: ${state.tracks.length} треков; прокрутите «Любимое» дальше.`);
@@ -34,6 +30,9 @@ async function render() {
   $('#trackCount').textContent = String(state.tracks.length);
   $('#playlistCount').textContent = String(state.playlists.length);
   $('#completeness').textContent = getCompleteness(state);
+  $('#startBtn').disabled = Boolean(state.scan?.active);
+  $('#startBtn').textContent = state.scan?.active ? 'Собираем библиотеку…' : 'Собрать библиотеку целиком';
+  $('#stopBtn').disabled = !state.scan?.active && !state.automation?.active;
   $('#exportFavoritesBtn').disabled = state.tracks.length === 0;
   $('#exportPlaylistsBtn').disabled = state.playlists.length === 0;
   $('#runPlaylistsBtn').disabled = state.automation?.active || !state.playlistPagesSeen || state.playlistListHasMore !== false || state.expectedPlaylistCount !== state.playlists.length || state.playlists.length === 0;
@@ -45,19 +44,16 @@ async function render() {
 
 $('#startBtn').addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !isCaptureUrl(tab.url)) {
-    $('#completeness').textContent = 'Откройте «Любимое», «Коллекция» или страницу одного плейлиста в Звуке.';
+  let isZvuk = false;
+  try { isZvuk = new URL(tab?.url || '').origin === 'https://zvuk.com'; } catch { /* No active page URL. */ }
+  if (!tab?.id || !isZvuk) {
+    $('#completeness').textContent = 'Откройте Звук и войдите в свой аккаунт. Запуск не читает пароль или токены.';
     return;
   }
-  await send('start');
-  const url = new URL(tab.url);
-  url.searchParams.set('music_importer_capture', '1');
-  await chrome.tabs.update(tab.id, { url: url.href });
-  $('#completeness').textContent = url.pathname.startsWith('/collection')
-    ? 'Страница обновляется. Дождитесь полного списка плейлистов, затем запустите их сбор.'
-    : url.pathname.startsWith('/playlist/')
-      ? 'Страница обновляется. Треки этого плейлиста будут собраны при прокрутке.'
-      : 'Страница обновляется. Дождитесь загрузки списка «Любимое» и прокрутите его до конца.';
+  const result = await send('start-library', { tabId: tab.id });
+  if (!result?.ok) $('#completeness').textContent = result?.error || 'Не удалось начать сбор библиотеки.';
+  else $('#completeness').textContent = 'Сбор начался: избранное и плейлисты будут загружены по очереди.';
+  await render();
 });
 
 $('#runPlaylistsBtn').addEventListener('click', async () => {
@@ -80,7 +76,7 @@ $('#stopBtn').addEventListener('click', async () => {
 });
 
 $('#clearBtn').addEventListener('click', async () => {
-  if (!confirm('Удалить сохранённый локальный список избранного?')) return;
+  if (!confirm('Удалить сохранённые локальные лайки и плейлисты?')) return;
   await send('clear');
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) chrome.tabs.sendMessage(tab.id, { type: 'zvuk:stop' }).catch(() => {});
@@ -108,6 +104,8 @@ $('#exportFavoritesBtn').addEventListener('click', async () => {
 
 $('#exportPlaylistsBtn').addEventListener('click', async () => {
   const state = await send('state');
+  const catalogConfirmed = state.playlistListHasMore === false && state.expectedPlaylistCount === state.playlists.length;
+  const playlistItemsConfirmed = state.playlists.every((playlist) => playlist.complete);
   const payload = {
     schemaVersion: 1,
     service: 'zvuk',
@@ -117,9 +115,10 @@ $('#exportPlaylistsBtn').addEventListener('click', async () => {
       catalogCount: state.playlists.length,
       expectedCatalogCount: state.expectedPlaylistCount,
       catalogHasMore: state.playlistListHasMore,
-      catalogConfirmed: state.playlistListHasMore === false && state.expectedPlaylistCount === state.playlists.length,
+      catalogConfirmed,
       playlistItemsConfirmed: state.playlists.filter((playlist) => playlist.complete).length,
       playlistItemsTotal: state.playlists.length,
+      confirmed: catalogConfirmed && playlistItemsConfirmed,
     },
     playlists: state.playlists,
   };

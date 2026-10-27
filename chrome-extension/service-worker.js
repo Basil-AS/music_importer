@@ -16,6 +16,9 @@ async function readState() {
     playlistPagesSeen: 0,
     expectedPlaylistCount: null,
     playlistListHasMore: null,
+    favoritesScanFinished: false,
+    collectionScrollFinished: false,
+    scan: { active: false, phase: 'idle', tabId: null, startedAt: null },
     automation: { active: false, tabId: null, currentPlaylistId: null, startedAt: null },
     captureEnabled: false,
     updatedAt: null,
@@ -33,6 +36,19 @@ async function advancePlaylistAutomation(state) {
   if (!next) {
     state.automation = { ...automation, active: false, currentPlaylistId: null, finishedAt: new Date().toISOString() };
     state.captureEnabled = false;
+    const favoritesConfirmed = state.favoritesScanFinished && state.hasMore === false
+      && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+    const playlistCatalogConfirmed = state.playlistListHasMore === false
+      && Number.isInteger(state.expectedPlaylistCount) && state.expectedPlaylistCount === state.playlists.length;
+    const playlistsConfirmed = state.playlists.every((playlist) => playlist.complete);
+    if (state.scan?.active) {
+      state.scan = {
+        ...state.scan,
+        active: false,
+        phase: favoritesConfirmed && playlistCatalogConfirmed && playlistsConfirmed ? 'complete' : 'needs_review',
+        finishedAt: new Date().toISOString(),
+      };
+    }
     state.updatedAt = new Date().toISOString();
     await writeState(state);
     return;
@@ -42,6 +58,92 @@ async function advancePlaylistAutomation(state) {
   await chrome.tabs.update(automation.tabId, {
     url: `https://zvuk.com/playlist/${encodeURIComponent(next.id)}?music_importer_capture=1`,
   });
+}
+
+async function advanceAccountScan(state) {
+  if (!state.scan?.active) return;
+  if (state.scan.phase === 'favorites' && state.favoritesScanFinished) {
+    const favoritesConfirmed = state.hasMore === false
+      && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+    if (!favoritesConfirmed) {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Число избранных не совпало с независимым списком ID.' };
+      state.captureEnabled = false;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      return;
+    }
+    state.scan = { ...state.scan, phase: 'playlists' };
+    state.updatedAt = new Date().toISOString();
+    await writeState(state);
+    await chrome.tabs.update(state.scan.tabId, { url: 'https://zvuk.com/collection?music_importer_capture=1' });
+    return;
+  }
+  if (state.scan.phase === 'playlists' && state.collectionScrollFinished && state.playlistListHasMore === false) {
+    const catalogConfirmed = Number.isInteger(state.expectedPlaylistCount)
+      && state.expectedPlaylistCount === state.playlists.length;
+    if (!catalogConfirmed) {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Число найденных плейлистов не совпало с независимым списком ID.' };
+      state.captureEnabled = false;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      return;
+    }
+    const tab = await chrome.tabs.get(state.scan.tabId).catch(() => null);
+    if (!tab || pageKind(tab.url) !== 'collection') {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Не удалось открыть список плейлистов в Звуке.' };
+      await writeState(state);
+      return;
+    }
+    state.scan = { ...state.scan, phase: 'playlists_items' };
+    state.automation = { active: true, tabId: state.scan.tabId, currentPlaylistId: null, startedAt: new Date().toISOString() };
+    state.playlists.forEach((playlist) => { playlist.itemsScanFinished = Boolean(playlist.complete); });
+    await writeState(state);
+    await advancePlaylistAutomation(state);
+  }
+}
+
+async function startAccountScan(tabId) {
+  const numericTabId = Number(tabId);
+  const tab = Number.isInteger(numericTabId) ? await chrome.tabs.get(numericTabId).catch(() => null) : null;
+  let origin = '';
+  try { origin = new URL(tab?.url || '').origin; } catch { /* Invalid or unavailable tab URL. */ }
+  if (!tab || origin !== 'https://zvuk.com') return { ok: false, error: 'Войдите в Звук в этой вкладке и повторите запуск.' };
+  const state = await readState();
+  if (state.tracks.length || state.playlists.length) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
+  state.pagesSeen = 0;
+  state.receivedCount = 0;
+  state.expectedCount = null;
+  state.hasMore = null;
+  state.playlistPagesSeen = 0;
+  state.expectedPlaylistCount = null;
+  state.playlistListHasMore = null;
+  state.favoritesScanFinished = false;
+  state.collectionScrollFinished = false;
+  state.captureEnabled = true;
+  state.scan = { active: true, phase: 'favorites', tabId: numericTabId, startedAt: new Date().toISOString() };
+  state.updatedAt = new Date().toISOString();
+  state.error = null;
+  await writeState(state);
+  await chrome.tabs.update(numericTabId, { url: 'https://zvuk.com/favorites?music_importer_capture=1' });
+  return { ok: true };
+}
+
+async function beginPlaylistScan(state, tabId) {
+  const numericTabId = Number(tabId);
+  const tab = Number.isInteger(numericTabId) ? await chrome.tabs.get(numericTabId).catch(() => null) : null;
+  const catalogConfirmed = state.playlistPagesSeen > 0
+    && state.playlistListHasMore === false
+    && Number.isInteger(state.expectedPlaylistCount)
+    && state.expectedPlaylistCount === state.playlists.length;
+  if (!tab || pageKind(tab.url) !== 'collection' || !catalogConfirmed || !state.playlists.length) {
+    return { ok: false, error: 'Сначала завершите и подтвердите сбор списка плейлистов.' };
+  }
+  state.captureEnabled = true;
+  state.automation = { active: true, tabId: numericTabId, currentPlaylistId: null, startedAt: new Date().toISOString() };
+  state.playlists.forEach((playlist) => { playlist.itemsScanFinished = Boolean(playlist.complete); });
+  await writeState(state);
+  await advancePlaylistAutomation(state);
+  return { ok: true };
 }
 
 async function writeState(state) {
@@ -63,10 +165,12 @@ function pageKind(url) {
 
 function messageMatchesPage(type, kind) {
   if (type === 'zvuk:favorite-page') return kind === 'favorites';
+  if (type === 'zvuk:favorites-scroll-end' || type === 'zvuk:favorites-scroll-stall') return kind === 'favorites';
   if (type === 'zvuk:playlist-list-page') return kind === 'collection';
   if (type === 'zvuk:playlist-metadata') return kind === 'collection' || kind === 'playlist';
   if (type === 'zvuk:playlist-track-page') return kind === 'playlist';
   if (type === 'zvuk:collection-scroll-end') return kind === 'collection';
+  if (type === 'zvuk:collection-scroll-stall') return kind === 'collection';
   if (type === 'zvuk:playlist-scroll-end') return kind === 'playlist';
   return type === 'zvuk:collection-count' || type === 'zvuk:read-error';
 }
@@ -75,6 +179,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message?.type === 'zvuk:state') {
       sendResponse(await readState());
+      return;
+    }
+
+    if (message?.type === 'zvuk:start-library') {
+      sendResponse(await startAccountScan(message.tabId));
       return;
     }
 
@@ -91,6 +200,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const state = await readState();
       state.captureEnabled = false;
       state.automation = { ...state.automation, active: false };
+      state.scan = { ...state.scan, active: false, phase: 'stopped', finishedAt: new Date().toISOString() };
       await writeState(state);
       sendResponse({ ok: true });
       return;
@@ -107,6 +217,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.playlistPagesSeen = 0;
       state.expectedPlaylistCount = null;
       state.playlistListHasMore = null;
+      state.favoritesScanFinished = false;
+      state.collectionScrollFinished = false;
+      state.scan = { active: false, phase: 'idle', tabId: null, startedAt: null };
       state.automation = { active: false, tabId: null, currentPlaylistId: null, startedAt: null };
       state.captureEnabled = false;
       state.updatedAt = null;
@@ -118,22 +231,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === 'zvuk:run-playlists') {
       const state = await readState();
-      const tabId = Number(message.tabId);
-      const tab = Number.isInteger(tabId) ? await chrome.tabs.get(tabId).catch(() => null) : null;
-      const catalogConfirmed = state.playlistPagesSeen > 0
-        && state.playlistListHasMore === false
-        && Number.isInteger(state.expectedPlaylistCount)
-        && state.expectedPlaylistCount === state.playlists.length;
-      if (!tab || pageKind(tab.url) !== 'collection' || !catalogConfirmed || !state.playlists.length) {
-        sendResponse({ ok: false, error: 'Сначала завершите и подтвердите сбор списка плейлистов.' });
-        return;
-      }
-      state.captureEnabled = true;
-      state.automation = { active: true, tabId, currentPlaylistId: null, startedAt: new Date().toISOString() };
-      state.playlists.forEach((playlist) => { playlist.itemsScanFinished = Boolean(playlist.complete); });
-      await writeState(state);
-      sendResponse({ ok: true });
-      await advancePlaylistAutomation(state);
+      sendResponse(await beginPlaylistScan(state, message.tabId));
       return;
     }
 
@@ -161,6 +259,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.error = null;
       await writeState(state);
       sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:favorites-scroll-end') {
+      state.favoritesScanFinished = true;
+      state.hasMore = false;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:favorites-scroll-stall') {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Загрузка избранного остановилась до последней страницы.' };
+      state.captureEnabled = false;
+      state.error = state.scan.error;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
       return;
     }
 
@@ -170,6 +289,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.updatedAt = new Date().toISOString();
       await writeState(state);
       sendResponse({ ok: true });
+      await advanceAccountScan(state);
       return;
     }
 
@@ -197,6 +317,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.error = null;
       await writeState(state);
       sendResponse({ ok: true });
+      await advanceAccountScan(state);
       return;
     }
 
@@ -264,13 +385,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.updatedAt = new Date().toISOString();
       await writeState(state);
       sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:collection-scroll-stall') {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Каталог плейлистов не загрузился; проверьте вход и повторите сбор.' };
+      state.captureEnabled = false;
+      state.error = state.scan.error;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
       return;
     }
 
     if (message?.type === 'zvuk:read-error') {
-      state.error = 'Звук вернул ошибку при чтении страницы избранного.';
+      state.error = 'Звук вернул ошибку при чтении страницы.';
       const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
       const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;
+      if (state.scan?.active && state.scan.tabId === sender.tab?.id && state.scan.phase !== 'playlists_items') {
+        state.scan = { ...state.scan, active: false, phase: 'needs_review', error: state.error };
+        state.captureEnabled = false;
+      }
       if (current && atAutomationPlaylist) {
         current.itemsScanFinished = true;
         current.incompleteReason = 'Сервис вернул ошибку при чтении playlist page.';

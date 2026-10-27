@@ -5,6 +5,11 @@
   let enabled = startAtLoad;
   let autoScrollTimer = null;
   let lastPlaylistPageAt = 0;
+  let lastFavoritePageAt = 0;
+  let lastFavoriteHasMore = true;
+  let favoriteEndReported = false;
+  let lastCollectionPageAt = 0;
+  let lastCollectionHasMore = true;
 
   if (startAtLoad) {
     const cleanUrl = new URL(location.href);
@@ -23,6 +28,7 @@
 
   function startAutoScroll() {
     if (autoScrollTimer) return;
+    const startedAt = Date.now();
     autoScrollTimer = setInterval(() => {
       if (!enabled) { stopAutoScroll(); return; }
       const root = document.scrollingElement || document.documentElement;
@@ -32,6 +38,34 @@
         if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 16) element.scrollTop = element.scrollHeight;
       }
       const isPlaylist = /^\/playlist\/[^/]+/.test(location.pathname);
+      const isFavorites = location.pathname === '/favorites';
+      const isCollection = location.pathname.startsWith('/collection');
+      if (Date.now() - startedAt > 20000 && isFavorites && !lastFavoritePageAt) {
+        stopAutoScroll();
+        post('favorites-scroll-stall');
+      }
+      if (Date.now() - startedAt > 20000 && isPlaylist && !lastPlaylistPageAt) {
+        stopAutoScroll();
+        post('read-error');
+      }
+      if (Date.now() - startedAt > 20000 && isCollection && !lastCollectionPageAt) {
+        stopAutoScroll();
+        post('collection-scroll-stall');
+      }
+      if (isCollection && lastCollectionPageAt && lastCollectionHasMore && Date.now() - lastCollectionPageAt > 12000) {
+        stopAutoScroll();
+        post('collection-scroll-stall');
+      }
+      if (isFavorites && lastFavoritePageAt && Date.now() - lastFavoritePageAt > 5000) {
+        if (!lastFavoriteHasMore && !favoriteEndReported) {
+          favoriteEndReported = true;
+          stopAutoScroll();
+          post('favorites-scroll-end');
+        } else if (lastFavoriteHasMore && Date.now() - lastFavoritePageAt > 12000) {
+          stopAutoScroll();
+          post('favorites-scroll-stall');
+        }
+      }
       if (isPlaylist && lastPlaylistPageAt && Date.now() - lastPlaylistPageAt > 5000) {
         const playlistId = location.pathname.match(/^\/playlist\/([^/]+)/)?.[1] || '';
         stopAutoScroll();
@@ -86,9 +120,12 @@
       const page = payload.data?.paginatedCollection?.tracks;
       if (!page || !Array.isArray(page.items)) return;
       const tracks = page.items.map(sanitizeTrack).filter((track) => track.id && track.title);
+      lastFavoritePageAt = Date.now();
+      lastFavoriteHasMore = Boolean(page.page?.endCursor);
+      favoriteEndReported = false;
       post('favorite-page', {
         tracks,
-        hasMore: Boolean(page.page?.endCursor),
+        hasMore: lastFavoriteHasMore,
       });
       return;
     }
@@ -98,13 +135,15 @@
       const page = collection?.playlists;
       const items = Array.isArray(page) ? page : page?.items;
       if (!Array.isArray(items)) return;
+      lastCollectionPageAt = Date.now();
+      lastCollectionHasMore = Boolean(page?.page?.endCursor);
       const playlists = items.map((playlist) => ({
         id: String(playlist.id || ''),
         title: String(playlist.title || ''),
         trackCount: Number.isInteger(playlist.trackCount) ? playlist.trackCount : null,
       })).filter((playlist) => playlist.id && playlist.title);
       post('playlist-list-page', { playlists, hasMore: Boolean(page?.page?.endCursor) });
-      if (!page?.page?.endCursor && location.pathname.startsWith('/collection')) {
+      if (!lastCollectionHasMore && location.pathname.startsWith('/collection')) {
         stopAutoScroll();
         post('collection-scroll-end');
       }
@@ -196,5 +235,5 @@
     if (event.data.type === 'stop') { enabled = false; stopAutoScroll(); }
   });
 
-  if (startAtLoad && (location.pathname.startsWith('/collection') || /^\/playlist\/[^/]+/.test(location.pathname))) startAutoScroll();
+  if (startAtLoad && (location.pathname === '/favorites' || location.pathname.startsWith('/collection') || /^\/playlist\/[^/]+/.test(location.pathname))) startAutoScroll();
 })();

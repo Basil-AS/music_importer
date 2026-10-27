@@ -30,37 +30,92 @@
     const inputCollections = collections || [{ id: null, type: collectionType, name: collectionName, completeness, items: tracks }];
     if (!Array.isArray(inputCollections) || !inputCollections.length) throw new Error('collections должен быть непустым массивом');
 
+    const normalizedCollections = inputCollections.map((collection) => {
+      if (!collectionTypes.has(collection?.type)) throw new Error(`Неизвестный тип коллекции: ${collection?.type}`);
+      const rows = collection.items || collection.tracks;
+      if (!Array.isArray(rows)) throw new Error(`Коллекция ${collection?.name || ''} не содержит items`);
+      const positionIntegrity = collection.type !== 'playlists' || rows
+        .map((row, index) => Number.isInteger(row?.position) ? row.position : Number.isInteger(row?.track?.position) ? row.track.position : index)
+        .sort((left, right) => left - right)
+        .every((position, index) => position === index);
+      const reportedCount = Number.isInteger(collection.itemCount) ? collection.itemCount : Number.isInteger(collection.completeness?.totalCount) ? collection.completeness.totalCount : rows.length;
+      const status = { confirmed: false, ...(collection.completeness || {}) };
+      status.positionIntegrity = positionIntegrity;
+      status.confirmed = Boolean(status.confirmed) && reportedCount === rows.length && positionIntegrity;
+      return {
+        id: collection.id ? String(collection.id) : null,
+        type: collection.type,
+        name: collection.name || (collection.type === 'favorites' ? 'Любимое' : 'Плейлист'),
+        itemCount: rows.length,
+        completeness: status,
+        items: rows.map((row, index) => {
+          const track = row?.track || row;
+          const position = Number.isInteger(row?.position) ? row.position : Number.isInteger(track?.position) ? track.position : index;
+          return { position, track: normalizeTrack(track, provider, position) };
+        }),
+      };
+    });
+
+    const snapshotCompleteness = { confirmed: false, ...(completeness || {}) };
+    snapshotCompleteness.collectionsConfirmed = normalizedCollections.every((collection) => collection.completeness.confirmed);
+    snapshotCompleteness.confirmed = Boolean(snapshotCompleteness.confirmed)
+      && snapshotCompleteness.collectionsConfirmed
+      && normalizedCollections.length > 0;
     return {
       schemaVersion: 2,
       type: 'music-library-snapshot',
       provider,
       exportedAt: new Date().toISOString(),
-      collections: inputCollections.map((collection) => {
-        if (!collectionTypes.has(collection?.type)) throw new Error(`Неизвестный тип коллекции: ${collection?.type}`);
-        const rows = collection.items || collection.tracks;
-        if (!Array.isArray(rows)) throw new Error(`Коллекция ${collection?.name || ''} не содержит items`);
-        const positionIntegrity = collection.type !== 'playlists' || rows
-          .map((row, index) => Number.isInteger(row?.position) ? row.position : Number.isInteger(row?.track?.position) ? row.track.position : index)
-          .sort((left, right) => left - right)
-          .every((position, index) => position === index);
-        const reportedCount = Number.isInteger(collection.itemCount) ? collection.itemCount : Number.isInteger(collection.completeness?.totalCount) ? collection.completeness.totalCount : rows.length;
-        const status = { confirmed: false, ...(collection.completeness || {}) };
-        status.positionIntegrity = positionIntegrity;
-        status.confirmed = Boolean(status.confirmed) && reportedCount === rows.length && positionIntegrity;
-        return {
-          id: collection.id ? String(collection.id) : null,
-          type: collection.type,
-          name: collection.name || (collection.type === 'favorites' ? 'Любимое' : 'Плейлист'),
-          itemCount: rows.length,
-          completeness: status,
-          items: rows.map((row, index) => {
-            const track = row?.track || row;
-            const position = Number.isInteger(row?.position) ? row.position : Number.isInteger(track?.position) ? track.position : index;
-            return { position, track: normalizeTrack(track, provider, position) };
-          }),
-        };
-      }),
+      completeness: snapshotCompleteness,
+      collections: normalizedCollections,
     };
+  }
+
+  function createImportedSnapshot({ provider, tracks = [], playlists = [], collectionType = 'favorites', collectionName = null, completeness = {} }) {
+    if (collectionType !== 'playlists') {
+      return createSnapshot({
+        provider,
+        collections: [{
+          id: null, type: 'favorites', name: collectionName || 'Любимое', items: tracks,
+          itemCount: tracks.length, completeness,
+        }],
+        completeness,
+      });
+    }
+
+    const groups = new Map();
+    const ensureGroup = (id, name, itemCount = null, confirmed = false) => {
+      const key = String(id || name || 'playlist');
+      if (!groups.has(key)) groups.set(key, { id: id || null, name: name || 'Плейлист', itemCount, confirmed, tracks: [] });
+      const group = groups.get(key);
+      if (Number.isInteger(itemCount)) group.itemCount = itemCount;
+      group.confirmed = group.confirmed || confirmed;
+      return group;
+    };
+    for (const playlist of playlists || []) {
+      const itemCount = Number.isInteger(playlist.trackCount) ? playlist.trackCount : Array.isArray(playlist.tracks) ? playlist.tracks.length : null;
+      ensureGroup(playlist.id, playlist.title || playlist.name, itemCount, playlist.complete === true);
+    }
+    for (const track of tracks) {
+      if (!track.sourceCollectionId && !track.sourceCollectionName) continue;
+      ensureGroup(track.sourceCollectionId, track.sourceCollectionName, track.sourceCollectionItemCount, track.sourceCollectionComplete === true).tracks.push(track);
+    }
+    if (!groups.size) ensureGroup(null, collectionName || 'Плейлисты');
+
+    const collections = [...groups.values()].map((group) => {
+      group.tracks.sort((left, right) => (left.sourcePosition ?? 0) - (right.sourcePosition ?? 0));
+      const totalCount = Number.isInteger(group.itemCount) ? group.itemCount : group.tracks.length;
+      const positionIntegrity = group.tracks.every((track, index) => (Number.isInteger(track.sourcePosition) ? track.sourcePosition : index) === index);
+      return {
+        id: group.id,
+        type: 'playlists',
+        name: group.name,
+        itemCount: totalCount,
+        completeness: { confirmed: group.confirmed && totalCount === group.tracks.length && positionIntegrity, totalCount, positionIntegrity },
+        items: group.tracks.map((track, index) => ({ position: Number.isInteger(track.sourcePosition) ? track.sourcePosition : index, track })),
+      };
+    });
+    return createSnapshot({ provider, collections, completeness });
   }
 
   function createTransferPlan({ sourceSnapshot, targetProvider, targetCollectionType, targetCollectionName = null, storefront = null, tracks }) {
@@ -137,9 +192,9 @@
         reason: track.searched && !track.matches.length ? 'no_catalog_match' : 'not_selected',
       })),
       execution: { status: 'preview-only', writesPerformed: 0 },
-      completeness: { source: sourceCollectionSummaries.map(({ completeness: status }) => status), writesPerformed: 0 },
+      completeness: { source: [sourceSnapshot.completeness, ...sourceCollectionSummaries.map(({ completeness: status }) => status)].filter(Boolean), writesPerformed: 0 },
     };
   }
 
-  window.MusicTransferCore = Object.freeze({ createSnapshot, createTransferPlan, normalizeTrack });
+  window.MusicTransferCore = Object.freeze({ createImportedSnapshot, createSnapshot, createTransferPlan, normalizeTrack });
 })();

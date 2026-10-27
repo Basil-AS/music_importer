@@ -39,14 +39,16 @@
     $('#missingStat').textContent = state.loaded ? missing : '—';
     $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков` : 'ожидает список';
     $('#selectedCount').textContent = `${selected} выбрано`;
-    $('#importBtn').disabled = selected === 0 || state.searching;
+    const hasPlaylistMappings = state.collectionType === 'playlists' && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
+    $('#importBtn').disabled = (selected === 0 && !hasPlaylistMappings) || state.searching;
     $('#searchBtn').disabled = !state.loaded || state.searching;
     $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
   }
 
   function renderTracks() {
     if (!state.tracks.length) {
-      $('#trackList').innerHTML = '<div class="empty">Загрузите пример или свой список треков</div>';
+      const playlistCount = state.sourceSnapshot?.collections?.filter((collection) => collection.type === 'playlists').length || 0;
+      $('#trackList').innerHTML = playlistCount ? `<div class="empty">Загружено плейлистов: ${playlistCount}. Треки для сопоставления не найдены.</div>` : '<div class="empty">Загрузите пример или свой список треков</div>';
       updateCounts();
       return;
     }
@@ -100,18 +102,20 @@
     }));
     state.source = label;
     state.sourceProvider = metadata.provider || state.sourceProvider || 'file';
-    state.collectionType = list.some((track) => track.sourceCollectionId) ? 'playlists' : 'favorites';
-    state.sourceSnapshot = window.MusicTransferCore.createSnapshot({
+    state.collectionType = metadata.collectionType || (list.some((track) => track.sourceCollectionId) ? 'playlists' : 'favorites');
+    state.sourceSnapshot = window.MusicTransferCore.createImportedSnapshot({
       provider: state.sourceProvider,
       collectionType: state.collectionType,
-      collectionName: metadata.collectionName || (state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты'),
+      collectionName: metadata.collectionName,
       tracks: list,
+      playlists: metadata.playlists || [],
       completeness: metadata.completeness || { confirmed: false, reason: 'file_import' },
     });
     state.loaded = true;
     state.report = null;
     $('#report').classList.remove('show');
-    $('#reviewSub').textContent = `${label} · ${list.length} треков готовы к поиску`;
+    const playlistCount = state.sourceSnapshot.collections.filter((collection) => collection.type === 'playlists').length;
+    $('#reviewSub').textContent = `${label} · ${list.length} треков${playlistCount ? ` · ${playlistCount} плейлистов` : ''} готовы к поиску`;
     $('#targetCollection').textContent = state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#searchStatus').classList.remove('search-error');
@@ -186,6 +190,8 @@
         ...row,
         __sourceCollectionId: playlist.id || '',
         __sourceCollectionName: playlist.title || playlist.name || '',
+        __sourceCollectionItemCount: Number.isInteger(playlist.trackCount) ? playlist.trackCount : playlistTracks.length,
+        __sourceCollectionComplete: playlist.complete === true,
         __sourcePosition: Number.isInteger(row.position) ? row.position : index,
       }));
     }) : null;
@@ -203,6 +209,8 @@
         sourceId: String(track?.id || track?.trackId || track?.track_id || track?.uri || ''),
         sourceCollectionId: String(row?.__sourceCollectionId || track?.playlistId || ''),
         sourceCollectionName: String(row?.__sourceCollectionName || track?.playlistName || ''),
+        sourceCollectionItemCount: Number.isInteger(row?.__sourceCollectionItemCount) ? row.__sourceCollectionItemCount : null,
+        sourceCollectionComplete: row?.__sourceCollectionComplete === true,
         sourcePosition: Number.isInteger(row?.__sourcePosition) ? row.__sourcePosition : Number(track?.position || 0),
       };
     }).filter((track) => track.title && track.artist);
@@ -376,9 +384,15 @@
       } else {
         tracks = parseCSV(text);
       }
-      if (!tracks.length) throw new Error('В файле не нашёл треков с названием и исполнителем');
+      if (!tracks.length && !payload?.playlists?.length) throw new Error('В файле не нашёл треков с названием и исполнителем');
       const sourceProvider = payload?.service && sourceLabels[payload.service] ? payload.service : state.sourceProvider;
-      loadTracks(tracks, label, { provider: sourceProvider, collectionName: payload?.collection?.name, completeness: payload?.completeness });
+      loadTracks(tracks, label, {
+        provider: sourceProvider,
+        collectionName: payload?.collection?.name,
+        collectionType: payload?.collection?.type,
+        completeness: payload?.completeness,
+        playlists: payload?.playlists,
+      });
     } catch (error) {
       toast(error.message || 'Не удалось прочитать файл');
     } finally {

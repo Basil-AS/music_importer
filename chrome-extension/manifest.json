@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Music Importer — Zvuk connector",
   "version": "0.1.0",
-  "description": "Read the signed-in Zvuk favorites list locally for Music Importer.",
+  "description": "Read the signed-in Zvuk favorites and playlists locally for Music Importer.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
   "host_permissions": ["https://zvuk.com/*"],
