@@ -1,6 +1,6 @@
 # Звук: инвентарь API v1, Tiny API и пользовательского входа
 
-Срез на 27.10.2026. Официальной публичной API-спецификации не найдено; это reverse-engineered интерфейсы веб-клиента и community-библиотек, не обещанный стабильный контракт. Здесь «API v1» — GraphQL `/api/v1/graphql`; Tiny REST встречается как `/api/tiny/...` и `/api/v2/tiny/...`. Не следует считать все Tiny-маршруты API v2.
+Срез на 28.10.2026. Официальной публичной API-спецификации не найдено; это reverse-engineered интерфейсы веб-клиента и community-библиотек, не обещанный стабильный контракт. Здесь «API v1» — GraphQL `/api/v1/graphql`; Tiny REST встречается как `/api/tiny/...` и `/api/v2/tiny/...`. Не следует считать все Tiny-маршруты API v2.
 
 ## Вход и получение токена
 
@@ -76,6 +76,17 @@ MIT TypeScript-клиент проверен на HEAD `3c157f8114b236ccc2d15d12
 | Подборки | `synthesisPlaylist(ids)`, `synthesisPlaylistBuild(firstAuthorId, secondAuthorId)` | Получение и построение синтезированной подборки. В checked-in каталоге mutations `synthesisPlaylistBuild` объявлен как `query`. |
 
 В snapshot находятся 26 query operations и 10 mutation operations. Веб-приложение дополнительно использует `getPaginatedCollection(limit, after)` с `paginatedCollection.tracks.items/page.endCursor`; этой операции нет в Python `userTracks` document. Browser и ephemeral terminal ранее подтвердили initial/next cursor pages с `200`; в списке наблюдались повторные IDs и расхождение с collection count. Для полного экспорта нужна дедупликация и reconciliation страниц.
+
+### Независимый актуальный Swift-клиент: `korenskoy/zvuk-swift`
+
+Публичный GitHub README в Chrome подтверждает, что [`korenskoy/zvuk-swift`](https://github.com/korenskoy/zvuk-swift/tree/8245d4e39abe93739cc0c01249a6e8a460fe5cb3) на HEAD `8245d4e39abe93739cc0c01249a6e8a460fe5cb3` (2026-10-20) — неофициальная MIT-библиотека для Zvuk API; README заявляет требование аккаунта и оплаченной подписки. GitHub metadata и checked-in LICENSE показывают MIT. Утверждение о подписке — документация автора; доступность read-only лайков без подписки отдельно не проверялась.
+
+- Реализация использует `POST https://zvuk.com/api/v1/graphql` с JSON GraphQL payload и `X-Auth-Token`; Tiny endpoints: `https://zvuk.com/api/tiny/*`. README просит взять поле `token` на `/api/tiny/profile`, отдельный OAuth/login UI отсутствует. В библиотеке есть anonymous profile-token helper.
+- Отдельная операция `userTracks(orderBy, orderDirection)` выбирает `collection.tracks { id, collectionItemData { lastModified } }`, без `limit`/cursor; документация справедливо говорит затем гидрировать ID отдельным методом.
+- Более новый web-app query `getPaginatedCollection(limit, after)` возвращает `paginatedCollection.tracks.items` с full track data и `page.endCursor`. Обёртка `getPaginatedCollectionTracks(limit:cursor:)` передаёт cursor. В GraphQL query запрашивается только `endCursor`, без `hasNextPage`; helper по умолчанию декодирует отсутствующий `hasNextPage` как `false`, поэтому приложение должно продолжать по ненулевому end cursor и само делать reconciliation. Доказательство source-level, не обещание стабильности API.
+- `swift build` на checkout прошёл в среде Swift 6.4, с warning о недоступном системном framework search path; сборка пакета успешна. Тесты не запускались: интеграционные тесты читают живой аккаунт, а тест `addAndRemovePlaylistTracks` создаёт временный playlist и вызывает add/remove/delete. Не следует запускать suite на пользовательском аккаунте для этой задачи.
+
+Это полезная независимая сверка текущего web cursor query и MIT-licensed модели данных, но не готовый connector для приложения: нет входа пользователя, нет независимого доказательства полного likes feed или subscription gate, а token передаётся вручную в процесс. Не заимствовать его код до проверки, нужен ли Swift/macOS connector в нашем продукте.
 
 ### Независимый legacy cross-check: `oklookat/gozvuk`
 
