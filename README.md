@@ -14,6 +14,7 @@
 - [API-заметки: Spotify](docs/providers/spotify.md)
 - [Полный индекс 96 официальных Spotify OpenAPI операций](docs/providers/spotify-openapi-inventory.md)
 - [API-заметки: Apple Music](docs/providers/apple-music.md)
+- [Полный индекс 138 официальных Apple Music REST endpoint-операций](docs/providers/apple-openapi-inventory.md)
 - [API-заметки: Яндекс Музыка](docs/providers/yandex-music.md)
 - [Полный индекс 150 community OpenAPI операций Яндекс Музыки](docs/providers/yandex-openapi-inventory.md)
 - [Готовые проекты и библиотеки](docs/PROJECTS.md)

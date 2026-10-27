@@ -74,6 +74,7 @@ Spotify archive — отдельный offline export path, не HTTP API: фа�
 - Полные machine-readable route inventories: [Spotify official OpenAPI](providers/spotify-openapi-inventory.md), [Yandex community OpenAPI](providers/yandex-openapi-inventory.md).
 - Official Spotify: [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide), [saved tracks](https://developer.spotify.com/documentation/web-api/reference/get-users-saved-tracks), [save to library](https://developer.spotify.com/documentation/web-api/reference/save-library-items).
 - Official Apple: [Apple Music API](https://developer.apple.com/documentation/AppleMusicAPI), [ISRC lookup](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-isrc), [iTunes Search examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/SearchExamples.html).
+- Full official Apple REST endpoint inventory extracted from current DocC index: [apple-openapi-inventory.md](providers/apple-openapi-inventory.md).
 - Community Yandex: [OpenAPI](https://ym.marshal.dev/api/), [Device Flow source](https://github.com/MarshalX/yandex-music-api/blob/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/_client/device_auth.py).
 - Community Zvuk: [`zvuk-music`](https://github.com/trudenboy/zvuk-music), [`zvuk-swift`](https://github.com/korenskoy/zvuk-swift), user's [`ZvukDownloader`](https://github.com/Basil-AS/ZvukDownloader).
 
