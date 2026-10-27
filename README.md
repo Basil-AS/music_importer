@@ -6,6 +6,7 @@
 
 - [Сводная таблица API-маршрутов, авторизации и проверок](docs/API_MATRIX.md)
 - [Обзор API, авторизации и ограничений сервисов](docs/RESEARCH.md)
+- [Целевой опыт и архитектурные ограничения продукта](docs/PRODUCT_DIRECTION.md)
 - [API-заметки: SberZvuk / Звук](docs/providers/zvuk.md)
 - [API-заметки: Spotify](docs/providers/spotify.md)
 - [Полный индекс 96 официальных Spotify OpenAPI операций](docs/providers/spotify-openapi-inventory.md)
