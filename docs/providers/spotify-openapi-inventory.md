@@ -130,3 +130,4 @@
 - [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow)
 - [Scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes)
 - [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
+- [March 2026 changelog](https://developer.spotify.com/documentation/web-api/references/changes/march-2026) (reverts removal of Track and Album `external_ids`)

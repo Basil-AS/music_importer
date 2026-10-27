@@ -57,6 +57,7 @@ Extended Quota Mode снимает allowlist cap и даёт больший rate
 ## Лайки и запись библиотеки
 
 - Читать: `GET https://api.spotify.com/v1/me/tracks?limit=50&offset=0`, scope `user-library-read`. Текущий reference указывает максимум 50, `offset`/`next`, `total`, `added_at` и track object. Следовать `next` до `null`, не полагаться только на счётчик.
+- Для сопоставления Spotify track object по-прежнему может содержать `external_ids.isrc`: February 2026 changelog временно пометил `external_ids` как удалённое поле, но официальный [March 2026 changelog](https://developer.spotify.com/documentation/web-api/references/changes/march-2026) отменил это изменение и подтвердил, что поле остаётся. Проверять поле на каждой записи и иметь fallback для отсутствующего ISRC.
 - Сохранять/удалять: `PUT`/`DELETE https://api.spotify.com/v1/me/library?uris=spotify:track:<id>,...`, scope `user-library-modify`, максимум 40 URI. В новых Development Mode приложениях заменяет type-specific write routes вроде `PUT /me/tracks`; старые маршруты ещё могут отображаться в reference для совместимости/Extended Quota Mode.
 - Искать: `GET /v1/search` по track/title/artist; с февраля 2026 `limit` не больше 10 (по умолчанию 5). Пакетный `GET /v1/tracks?ids=...` в Development Mode удалён — читать metadata через `GET /v1/tracks/{id}` по одному ID.
 - Плейлисты: новые маршруты используют `/v1/playlists/{id}/items` (старые `/tracks` заменены); полный список items доступен не для всех чужих плейлистов. Сохранять `added_at` и исходный порядок отдельно.
