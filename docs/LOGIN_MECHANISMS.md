@@ -25,6 +25,8 @@
 
 Для Chrome технически есть узкий permission pattern: `activeTab` + `scripting`, запуск content script по нажатию пользователя, затем message passing. Chrome разрешает inject-скрипт в текущую вкладку и получить результат без постоянного доступа ко всем сайтам; если расширение вместо этого просит `cookies` permission и широкие `host_permissions`, разрешения существенно сильнее. Уточнять механику нужно по актуальной документации Chrome и каждому сервису отдельно. См. [activeTab](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab), [Scripting API](https://developer.chrome.com/docs/extensions/reference/api/scripting) и [Chrome permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions).
 
+Распространение — отдельный UX-барьер: публикация в Chrome Web Store требует аккаунт разработчика и разовую плату. Без неё проект можно бесплатно раздавать исходниками/архивом, но пользователь должен включить Developer mode в `chrome://extensions` и нажать **Load unpacked**. Это нормальный исследовательский/MVP путь, но не одношаговая установка для широкой аудитории. См. [регистрацию CWS](https://developer.chrome.com/docs/webstore/register/) и [официальную установку unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked).
+
 ### Почему не нужен «универсальный перехватчик токенов»
 
 - Для чтения можно выполнить запрос в контексте сайта и вернуть только библиотеку. Отдельный перенос bearer token увеличивает последствия утечки и усложняет отзыв доступа.
