@@ -171,3 +171,9 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Сторонние первичные реализации: [ZvukDownloader](https://github.com/Basil-AS/ZvukDownloader), [sberzvuk-api](https://github.com/Aiving/sberzvuk-api), [zvuk-music](https://github.com/trudenboy/zvuk-music), [yandex-music-api](https://github.com/MarshalX/yandex-music-api), [YandexMusic_to_AppleMusic](https://github.com/ComputerPers/YandexMusic_to_AppleMusic), [mixxer](https://github.com/Myp3a/mixxer).
 
 Подробные API-заметки и ссылки на код — в `docs/providers/`; проекты — в `docs/PROJECTS.md`.
+
+## Apple Music Transfer userscript privacy/source audit (2026-10-27)
+
+- Rechecked current GitHub HEAD `296e59e8530ed6e5268a24baa74f05482242dbd3`, MIT, version 1.0.4. The userscript intercepts `amp-api.music.apple.com/v1/me/library/songs` and `/albums`, replays missing song pages using offset/limit, and uses Apple Music UI actions for Library/playlist writes; it does not target `/v1/me/favorites` or write Favorite Songs.
+- Static review found import queue/progress and logs persisted in `music.apple.com` origin `localStorage`, plus matching `console.log` entries containing artist/album text. URL/network-call scan found no non-Apple data endpoint; this is source evidence, not a dynamic network test.
+- Added the local-data-retention and no-Favorites caveats to `docs/providers/apple-music.md` and `docs/PROJECTS.md`. The script was not installed or executed; no Apple account data was accessed.
