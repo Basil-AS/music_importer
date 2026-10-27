@@ -201,6 +201,12 @@ Apple API-вариант проверяет `GET /v1/me/library/songs?limit=1`, 
 
 Повторная page-load трасса Chrome от 28.10.2026 переполнила CDP buffer до попадания в сохранённую часть нужного API request. Прямая навигация во временной вкладке на тот же route с ID из текущей UI-ссылки не завершилась; response status/body не читались, временная вкладка закрыта, исходная пользовательская вкладка осталась открытой. Контрольный no-cookie terminal GET к тому же route с синтетическим UUID вернул `404 application/json;charset=utf-8`. Это не подтверждает поведение API для реального пользовательского ID и не доказывает, что route отсутствует; не добавлять этот no-auth ответ к evidence authenticated export.
 
+### Browser-context and terminal cross-origin check (2026-10-28)
+
+- Using the already-authenticated Yandex page, `window.fetch` with `credentials: include`, `Accept: application/json`, and `X-Requested-With: XMLHttpRequest` returned HTTP 200 for `/account/status`, likes, `/users/{uid}/playlists/list`, `/users/{uid}/playlists/list/kinds`, and one playlist detail. Response shape checks retained only key names and value types; no account IDs, playlist kinds/names, track data or collection sizes were saved.
+- The public catalog route `/search?text=…&page=0&type=track` returned HTTP 200 with `result.tracks.results`; `POST /tracks` with form-urlencoded `track-ids` and `with-positions=false` returned HTTP 200 and one metadata object. The same public search + one-result hydration was repeated from a clean terminal request without cookies and returned matching shapes. No private-library IDs were used in that terminal probe.
+- These observations verify page-context CORS and representative read/hydration response shapes. The source reader now compares playlist catalog kinds from the independent `/list/kinds` response. Neither the installed extension bridge nor the full account-wide library scan has been exercised yet; this is not proof of complete library pagination/performance or write behavior.
+
 ## Оценка
 
 Подходит как источник лайков для локального прототипа и для дальнейшей поддержки. Риски: нестабильный контракт, зависимость от OAuth credentials стороннего клиента, разная доступность по аккаунтам, и лицензия LGPL-3.0 при возможном включении библиотеки в проект. Для MVP лучше начать read-only экспорт, сохранить полный каталог, затем отдельно проверить изменение лайка на собственном аккаунте.
