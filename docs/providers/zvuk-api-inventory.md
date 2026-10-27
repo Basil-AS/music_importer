@@ -9,6 +9,12 @@
 3. Community-клиенты передают token в `X-Auth-Token`; веб-клиент использует same-origin cookie-сессию. Это bearer-секрет: хранить только локально в системном хранилище; не помещать в URL, логи, shell history или Git.
 4. Анонимный token упоминается в README `zvuk-music` и `sberzvuk-api`, но его получение из чистого CLI здесь не подтвердилось: без cookies три проверки получили `418 text/html` от защиты. Не трактовать WAF `418` как отсутствие API.
 
+### Статический cross-check: `Aiving/sberzvuk-api`
+
+MIT TypeScript-клиент проверен на HEAD `3c157f8114b236ccc2d15d1215d3b7e069e1e754`; GitHub metadata показывает последнее обновление 2024-01-15. В README заявлен `getAnonymousToken()` через `GET https://zvuk.com/api/tiny/profile`. В каталоге находятся семь GraphQL documents: `getSearch`, `getSearchAll`, `getTracks`, `getFullTrack`, `getReleases`, `getPlaylists`, `getStream`; однако executor регистрирует только шесть (`getSearchAll` в него не импортирован). Ни одна из доступных операций не запрашивает `userCollection`, `userTracks`, `paginatedCollection` или liked tracks; это каталоговый/stream client, не likes exporter.
+
+Важное отличие от актуальных HTTPS-клиентов: GraphQL executor шлёт `X-Auth-Token` на `http://zvuk.com/api/v1/graphql` по незашифрованному HTTP. Такой путь нельзя использовать с пользовательским токеном до замены на HTTPS. В нашей свежей credential-free terminal проверке `/api/tiny/profile`, `/api/v2/tiny/profile` и safe GraphQL `__typename` каждый вернул `418 text/html`; это тот же WAF boundary, не отрицание схемы из исходника.
+
 ### Email/password login route из `nikolaykindness/zvukplugin` (static only)
 
 В Lyrion-плагине [`nikolaykindness/zvukplugin`](https://github.com/nikolaykindness/zvukplugin/tree/2237230a4967d0b6bb66faf1882e3833da4a291c), HEAD `2237230a4967d0b6bb66faf1882e3833da4a291c` (v0.1.6, 08.07.2026), обнаружен third-party login flow:
