@@ -29,6 +29,12 @@
 
 Из этого проекта стоит взять формат полного offline экспорта/ручной сверки. Не перенимать implicit-token URL и постоянное хранение access token в `.env` как основную auth-архитектуру; предпочтительнее Device Flow с локальным защищённым token store и ясным revoke path.
 
+### Дополнительный CSV exporter: `nevdev-ml/yandex-music-exporter`
+
+В репозитории [nevdev-ml/yandex-music-exporter](https://github.com/nevdev-ml/yandex-music-exporter), MIT, просмотренный HEAD `78a081a` (последнее обновление GitHub — 13.03.2026), найдены экспорт лайкнутых/дизлайкнутых треков, альбомов и артистов. Треки читаются через `users_likes_tracks().fetch_tracks()` из `yandex-music`; CSV содержит название, артиста, альбом и ID, сохраняется UTF-8 BOM. Выходные файлы автоматически разбиваются на части до 500 строк — это ограничение формата файла, а не заявленный лимит выгрузки. Код сортирует записи по артисту, поэтому исходный порядок лайков теряется; ISRC не экспортируется.
+
+Авторизация открывает отдельный Selenium Chrome по implicit URL (`response_type=token`) с client ID публичного Android-приложения, извлекает access token из callback URL и записывает его в `.env` через `python-dotenv`. Источник прямо заявляет, что client ID не является credential нашего приложения; режим прав файла не задаётся, а токен в URL/файле нужно считать секретом. Код просмотрен статически, не запускался. Полезен как CSV-exporter/reference на методы библиотеки, но не как готовый Apple importer или образец безопасной авторизации.
+
 Дополнительная реализация в [oklookat/synchro](https://github.com/oklookat/synchro), HEAD `ac441f4` от 2024-07-07 (GPL-3.0), использует Go-клиент `goym`: OAuth Device Flow с credentials публичного Android-клиента, чтение `LikedTracks`, загрузку metadata пачками по 30 и методы `LikeTracks`/`UnlikeTracks`. В просмотренной версии `LikedTracks` отбрасывает UGC записи; это означает, что такой экспорт не гарантированно сохраняет весь список лайков. Код старый и хранит auth в SQLite без шифрования, поэтому годится только как reference операций, не как готовое приложение.
 
 ## Практическая проверка
@@ -46,6 +52,7 @@
 ## Источники
 
 - [GitHub repository](https://github.com/MarshalX/yandex-music-api)
+- [nevdev-ml/yandex-music-exporter](https://github.com/nevdev-ml/yandex-music-exporter)
 - [Project docs](https://ym.marshal.dev/)
 - [Client method reference](https://ym.marshal.dev/client/)
 - [OpenAPI reference](https://ym.marshal.dev/api/)
