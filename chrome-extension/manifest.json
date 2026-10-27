@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Music Importer — Zvuk connector",
+  "version": "0.1.0",
+  "description": "Read the signed-in Zvuk favorites list locally for Music Importer.",
+  "minimum_chrome_version": "111",
+  "permissions": ["activeTab", "storage", "unlimitedStorage"],
+  "host_permissions": ["https://zvuk.com/*"],
+  "action": {
+    "default_title": "Music Importer",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://zvuk.com/favorites*"],
+      "js": ["main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://zvuk.com/favorites*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ]
+}

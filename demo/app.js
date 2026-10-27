@@ -176,8 +176,8 @@
       const artist = track?.artist || track?.artists || track?.performer || track?.artistName || track?.artist_name || track?.artist_names;
       return {
         title: String(track?.title || track?.name || track?.trackName || track?.track_name || ''),
-        artist: Array.isArray(artist) ? artist.map((item) => typeof item === 'string' ? item : item?.name).filter(Boolean).join(', ') : String(artist || ''),
-        album: String((typeof track?.album === 'object' ? track.album?.name : track?.album) || track?.albumName || track?.album_name || ''),
+        artist: Array.isArray(artist) ? artist.map((item) => typeof item === 'string' ? item : item?.name || item?.title).filter(Boolean).join(', ') : String(artist || ''),
+        album: String((typeof track?.album === 'object' ? track.album?.name || track.album?.title : track?.album) || track?.albumName || track?.album_name || track?.release?.title || ''),
         isrc: String(track?.isrc || track?.ISRC || track?.externalIds?.isrc || track?.external_ids?.isrc || ''),
         durationMs: normalizeDuration(track?.durationMs || track?.duration_ms || track?.duration),
         sourceId: String(track?.id || track?.trackId || track?.track_id || track?.uri || ''),
