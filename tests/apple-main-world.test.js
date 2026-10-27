@@ -138,6 +138,27 @@ test('Apple catalog search returns catalog song IDs without exposing session hea
   assert.ok(!JSON.stringify(page.messages).includes(page.token));
 });
 
+test('Apple catalog search accepts a batch of ISRCs and keeps each result ISRC', async () => {
+  const page = makePage({
+    'GET /v1/catalog/ae/songs?filter%5Bisrc%5D=USABC1234567%2CGBDEF1234567&limit=25': {
+      data: [
+        { id: 'catalog-song-a', attributes: { name: 'Song A', artistName: 'Artist A', isrc: 'USABC1234567' } },
+        { id: 'catalog-song-b', attributes: { name: 'Song B', artistName: 'Artist B', isrc: 'GBDEF1234567' } },
+      ],
+    },
+  });
+  const result = await page.command('search-tracks', {
+    query: 'isrc:USABC1234567,GBDEF1234567', storefront: 'AE',
+  });
+
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(Array.from(result.result, (song) => [song.trackId, song.isrc]), [
+    ['catalog-song-a', 'USABC1234567'],
+    ['catalog-song-b', 'GBDEF1234567'],
+  ]);
+  assert.equal(page.requests[1].url, 'https://amp-api.music.apple.com/v1/catalog/ae/songs?filter%5Bisrc%5D=USABC1234567%2CGBDEF1234567&limit=25');
+});
+
 test('Apple target writer adds favorites and ordered playlist items, then verifies both', async () => {
   let favoriteReads = 0;
   const fixtures = {

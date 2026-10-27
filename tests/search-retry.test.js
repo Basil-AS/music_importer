@@ -81,3 +81,35 @@ test('catalog search waits longer after rate limiting and does not retry permane
   assert.deepEqual(permanent.delays, []);
   assert.match(result.error.message, /401/);
 });
+
+test('batch catalog search preserves order and individually retries missing ISRC results', async () => {
+  const { engine } = loadEngine();
+  let batchCalls = 0;
+  const individualQueries = [];
+  const tracks = [
+    { title: 'Song A', artist: 'Artist A', isrc: 'USABC1234567' },
+    { title: 'Song B', artist: 'Artist B', isrc: 'GBDEF1234567' },
+  ];
+  const progress = [];
+  const results = await engine.searchMany({
+    id: 'apple-music',
+    canBatchSearch() { return true; },
+    async searchTracksBatch(batchTracks) {
+      batchCalls += 1;
+      assert.deepEqual(Array.from(batchTracks, (track) => track.title), ['Song A', 'Song B']);
+      return [[{ trackId: 'apple:a', isrc: 'USABC1234567' }], []];
+    },
+    async searchTracks(track) {
+      individualQueries.push(track.title);
+      return [{ trackId: 'apple:b', isrc: track.isrc }];
+    },
+  }, tracks, {
+    context: { accountWrite: true },
+    onProgress: (_group, completed) => progress.push(completed),
+  });
+
+  assert.equal(batchCalls, 1);
+  assert.deepEqual(individualQueries, ['Song B']);
+  assert.deepEqual(Array.from(results, (result) => result.candidates[0].trackId), ['apple:a', 'apple:b']);
+  assert.deepEqual(progress, [1, 2]);
+});

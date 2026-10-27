@@ -5,7 +5,7 @@
     if (!adapter || !providerIds.has(adapter.id)) throw new Error('Adapter должен объявить один из четырёх provider ID');
     const methods = [
       'connect', 'disconnect', 'discoverCollectionPage', 'readCollectionPage', 'searchTracks',
-      'readDestination', 'writeFavorites', 'createPlaylist', 'writePlaylistItems', 'readBack',
+      'searchTracksBatch', 'readDestination', 'writeFavorites', 'createPlaylist', 'writePlaylistItems', 'readBack',
     ];
     return Object.fromEntries(methods.map((method) => [method, typeof adapter[method] === 'function']));
   }
@@ -48,12 +48,15 @@
     });
   }
 
-  async function searchWithRetry(adapter, track, options) {
-    const maxRetries = Math.max(0, Math.min(5, Math.floor(options.maxRetries ?? 3)));
+  async function searchWithRetry(search, options) {
+    const requestedRetries = Number(options.maxRetries ?? 3);
+    const maxRetries = Number.isFinite(requestedRetries) ? Math.max(0, Math.min(5, Math.floor(requestedRetries))) : 3;
     for (let attempt = 0; ; attempt += 1) {
       if (options.signal?.aborted) throw new DOMException('Поиск отменён', 'AbortError');
       try {
-        return await adapter.searchTracks(track, options.context || {});
+        const result = await search();
+        if (options.signal?.aborted) throw new DOMException('Поиск отменён', 'AbortError');
+        return result;
       } catch (error) {
         if (attempt >= maxRetries || !retryableSearchError(error)) throw error;
         const status = searchStatus(error);
@@ -77,23 +80,63 @@
 
     const queue = [...groups.values()];
     const results = new Array(queue.length);
-    let nextIndex = 0;
     let completed = 0;
-    const workerCount = Math.min(concurrency, queue.length);
-    await Promise.all(Array.from({ length: workerCount }, async () => {
-      while (true) {
-        const index = nextIndex++;
-        if (index >= queue.length) return;
-        const group = queue[index];
+    const finishGroup = async (index, candidates, error = null) => {
+      const group = queue[index];
+      results[index] = { key: group.key, tracks: group.tracks, candidates: Array.isArray(candidates) ? candidates : [], error };
+      completed += 1;
+      if (options.onProgress) await options.onProgress(results[index], completed, queue.length);
+    };
+
+    const pendingIndexes = new Set(queue.map((_, index) => index));
+    if (typeof adapter.searchTracksBatch === 'function' && typeof adapter.canBatchSearch === 'function') {
+      const batchIndexes = queue.map((group, index) => index)
+        .filter((index) => adapter.canBatchSearch(queue[index].tracks[0], options.context || {}));
+      const batchSize = Math.max(1, Math.min(25, Math.floor(adapter.batchSearchSize || 25)));
+      for (let offset = 0; offset < batchIndexes.length; offset += batchSize) {
+        const indexes = batchIndexes.slice(offset, offset + batchSize);
+        const batchTracks = indexes.map((index) => queue[index].tracks[0]);
+        let batchResults;
         try {
-          const candidates = await searchWithRetry(adapter, group.tracks[0], options);
-          results[index] = { key: group.key, tracks: group.tracks, candidates: Array.isArray(candidates) ? candidates : [], error: null };
+          batchResults = await searchWithRetry(
+            () => adapter.searchTracksBatch(batchTracks, options.context || {}),
+            options,
+          );
         } catch (error) {
           if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
-          results[index] = { key: group.key, tracks: group.tracks, candidates: [], error };
+          // If the batch request fails, the ordinary per-track adapter path remains available.
+          continue;
         }
-        completed += 1;
-        if (options.onProgress) await options.onProgress(results[index], completed, queue.length);
+        if (!Array.isArray(batchResults) || batchResults.length !== indexes.length) continue;
+        for (let index = 0; index < indexes.length; index += 1) {
+          const candidates = Array.isArray(batchResults[index]) ? batchResults[index] : [];
+          if (!candidates.length) continue;
+          pendingIndexes.delete(indexes[index]);
+          await finishGroup(indexes[index], candidates);
+        }
+      }
+    }
+
+    const workerQueue = [...pendingIndexes];
+    let nextIndex = 0;
+    const workerCount = Math.min(concurrency, workerQueue.length);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const pendingIndex = nextIndex++;
+        if (pendingIndex >= workerQueue.length) return;
+        const index = workerQueue[pendingIndex];
+        const group = queue[index];
+        let candidates = [];
+        let error = null;
+        try {
+          candidates = await searchWithRetry(() => adapter.searchTracks(group.tracks[0], options.context || {}), options);
+        } catch (caught) {
+          error = caught;
+        }
+        if (error) {
+          if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
+        }
+        await finishGroup(index, candidates, error);
       }
     }));
     return results;

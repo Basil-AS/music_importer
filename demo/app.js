@@ -376,6 +376,24 @@
   const appleCatalogAdapter = {
     id: 'apple-music',
     maxConcurrentSearches: 2,
+    batchSearchSize: 25,
+    canBatchSearch(track, context = {}) {
+      return context.accountWrite === true && Boolean(exactIsrcQuery(track, 'apple-music'));
+    },
+    async searchTracksBatch(tracks, context = {}) {
+      const isrcs = tracks.map((track) => exactIsrcQuery(track, 'apple-music').slice('isrc:'.length));
+      const response = await requestExtensionCommand('search-tracks', {
+        query: `isrc:${isrcs.join(',')}`,
+        storefront: context.storefront || $('#storefront').value,
+      }, 'apple');
+      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось пакетно найти ISRC в каталоге Apple Music.');
+      const candidatesByIsrc = new Map(isrcs.map((isrc) => [isrc, []]));
+      for (const candidate of response.results) {
+        const isrc = window.MusicMatcher.normalizeISRC(candidate?.isrc || '');
+        if (candidatesByIsrc.has(isrc)) candidatesByIsrc.get(isrc).push(candidate);
+      }
+      return isrcs.map((isrc) => candidatesByIsrc.get(isrc) || []);
+    },
     async searchTracks(track, context = {}) {
       if (context.accountWrite !== true) {
         const params = new URLSearchParams({

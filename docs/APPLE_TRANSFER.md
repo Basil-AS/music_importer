@@ -12,7 +12,7 @@ Status: experimental implementation; fixture-tested, not live-verified against a
 ## API operations
 
 - Catalog metadata search: `GET /v1/catalog/{storefront}/search?term=…&types=songs&limit=25`.
-- Exact catalog lookup: `GET /v1/catalog/{storefront}/songs?filter[isrc]={isrc}` when the source track has a valid ISRC; if Apple returns no exact match, the adapter falls back to title/artist search. Apple documents this route in [Get Multiple Catalog Songs by ISRC](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-isrc); a single ISRC can still return multiple catalog songs.
+- Exact catalog lookup: up to 25 valid source ISRCs are sent in one `GET /v1/catalog/{storefront}/songs?filter[isrc]={isrc1},{isrc2},…` request. Results are grouped by returned ISRC. If a code is absent from the batch response, the adapter retries that track with a single-ISRC query and then falls back to title/artist search. Apple documents this route in [Get Multiple Catalog Songs by ISRC](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-isrc); a single ISRC can still return multiple catalog songs.
 - Favorites: `POST /v1/me/favorites?ids[songs]=…`.
 - Create playlist: `POST /v1/me/library/playlists` with `attributes.name` and `attributes.isPublic=false`.
 - Append playlist songs: `POST /v1/me/library/playlists/{id}/tracks` with `{ "data": [{ "id": "catalog-song-id", "type": "songs" }] }`.
@@ -29,7 +29,7 @@ Official references:
 
 ## Limits before calling it usable
 
-- The current Chrome installation did not answer the local extension handshake. Reloading the unpacked extension, allowing it on the local app origin, and reloading Apple Music are required before a live check.
+- On 2026-10-28, the local app on `127.0.0.1:8001` returned no `extension-ready` response in Chrome. Reloading the unpacked extension, allowing it on the local app origin, and reloading Apple Music are required before a live check. This is separate from Apple account sign-in: an authenticated Apple tab cannot bridge to the local app until the Music Importer extension responds.
 - Fixture tests cannot establish Apple account eligibility, actual favorite propagation delay, browser CORS behavior, or whether all catalog IDs resolve identically in the user's storefront.
 - Apple returns `202 Accepted` for favorite writes. The adapter polls library read-back and fails closed if it cannot see every requested favorite.
 - Playlist creation followed by a later failure can leave a partial playlist. A retry can create another playlist; persistent idempotency/recovery is not implemented yet.

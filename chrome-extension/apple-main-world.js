@@ -224,7 +224,7 @@
     const term = String(query || '').trim().slice(0, 400);
     if (!/^[a-z]{2}$/.test(country)) throw new Error('Укажите двухбуквенный storefront Apple Music.');
     if (!term) throw new Error('Введите название песни или исполнителя.');
-    const isrcQuery = /^isrc:([a-z0-9]{12})$/i.exec(term);
+    const isrcQuery = /^isrc:([a-z0-9]{12}(?:,[a-z0-9]{12}){0,24})$/i.exec(term);
     const params = isrcQuery
       ? new URLSearchParams({ 'filter[isrc]': isrcQuery[1].toUpperCase(), limit: '25' })
       : new URLSearchParams({ term, types: 'songs', limit: '25' });
