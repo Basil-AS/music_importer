@@ -215,5 +215,115 @@
     };
   }
 
-  window.MusicTransferEngine = Object.freeze({ discoverAllCollections, normalizedQuery, readCompleteCollection, readLibrary, searchMany, validateAdapter });
+  function destinationIds(destination) {
+    const items = Array.isArray(destination) ? destination : destination?.items || [];
+    return new Set(items.map((item) => String(item?.providerId || item?.id || '')).filter(Boolean));
+  }
+
+  function completeRead(read) {
+    return read?.complete === true || read?.completeness?.confirmed === true;
+  }
+
+  async function executeTransferPlan(adapter, plan, options = {}) {
+    if (!adapter || !providerIds.has(adapter.id)) throw new Error('Нужен адаптер целевого музыкального сервиса');
+    if (plan?.type !== 'music-transfer-plan' || plan.target?.provider !== adapter.id) throw new Error('План не предназначен для этого сервиса');
+    if (!Array.isArray(plan.operations) || plan.operations.some((operation) => !operation?.target?.providerId)) throw new Error('В плане есть операции без ID целевого трека');
+    if (options.confirmed !== true) throw new Error('Перед записью пользователь должен явно подтвердить перенос');
+    if (typeof adapter.readDestination !== 'function' || typeof adapter.readBack !== 'function') throw new Error('Адаптеру нужны чтение назначения и обратная сверка');
+    const writeFavorites = plan.target.collectionType === 'favorites';
+    if (!writeFavorites && plan.target.collectionType !== 'playlists') throw new Error('Неизвестный тип целевой коллекции');
+    if (writeFavorites && typeof adapter.writeFavorites !== 'function') throw new Error('Адаптер не умеет добавлять треки в избранное');
+    if (!writeFavorites && (typeof adapter.createPlaylist !== 'function' || typeof adapter.writePlaylistItems !== 'function')) throw new Error('Адаптер не умеет создавать и наполнять плейлисты');
+    const sourceCompleteness = plan.completeness?.source || [];
+    if (!sourceCompleteness.length || sourceCompleteness.some((status) => status?.confirmed !== true)) throw new Error('Перенос остановлен: полнота исходной библиотеки не подтверждена');
+
+    const batchSize = Math.max(1, Math.min(500, Math.floor(options.batchSize || adapter.writeBatchSize || 50)));
+    const report = {
+      status: 'writing', targetProvider: adapter.id, collectionType: plan.target.collectionType,
+      startedAt: new Date().toISOString(), writesAttempted: 0, writesPerformed: 0,
+      alreadyPresent: 0, verified: 0, collectionsExpected: 0, collectionsVerified: 0, failures: [], checkpoints: [],
+    };
+    const checkpoint = async (value) => {
+      report.checkpoints.push(value);
+      if (options.onCheckpoint) await options.onCheckpoint(structuredClone(report));
+    };
+    const existing = await adapter.readDestination({
+      collectionType: plan.target.collectionType,
+      collectionName: plan.target.collectionName,
+      signal: options.signal,
+    });
+    if (!completeRead(existing)) {
+      throw new Error('Перенос остановлен: не удалось подтвердить полный список уже сохранённых треков');
+    }
+    if (writeFavorites) {
+      const present = destinationIds(existing);
+      const pending = plan.operations.filter((operation) => !present.has(String(operation.target?.providerId || '')));
+      report.alreadyPresent = plan.operations.length - pending.length;
+      for (let offset = 0; offset < pending.length; offset += batchSize) {
+        if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');
+        const batch = pending.slice(offset, offset + batchSize);
+        report.writesAttempted += batch.length;
+        const result = await adapter.writeFavorites(batch.map((operation) => operation.target), {
+          signal: options.signal, idempotencyKey: `${plan.createdAt}:favorites:${offset}`,
+        });
+        report.writesPerformed += Number.isInteger(result?.writtenCount) ? result.writtenCount : batch.length;
+        await checkpoint({ phase: 'favorites', offset, count: batch.length });
+      }
+      const back = await adapter.readBack({ type: 'favorites', operations: plan.operations }, { signal: options.signal });
+      const readIds = destinationIds(back);
+      report.verified = completeRead(back)
+        ? plan.operations.filter((operation) => readIds.has(String(operation.target.providerId))).length
+        : 0;
+    } else {
+      const groups = new Map();
+      for (const mapping of plan.collectionMappings || []) {
+        const key = String(mapping.sourceId || mapping.sourceName || 'Перенесённая музыка');
+        groups.set(key, []);
+      }
+      for (const operation of plan.operations) {
+        const key = String(operation.source?.collectionId || operation.source?.collectionName || plan.target.collectionName || 'Перенесённая музыка');
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(operation);
+      }
+      for (const [sourceKey, operations] of groups) {
+        report.collectionsExpected += 1;
+        operations.sort((left, right) => (left.source?.position ?? 0) - (right.source?.position ?? 0));
+        const sourceMapping = (plan.collectionMappings || []).find((mapping) => String(mapping.sourceId || mapping.sourceName) === sourceKey);
+        const name = sourceMapping?.targetName || sourceMapping?.sourceName || plan.target.collectionName || 'Перенесённая музыка';
+        const playlist = await adapter.createPlaylist({
+          name, sourceId: sourceMapping?.sourceId || operations[0]?.source?.collectionId || null,
+          idempotencyKey: `${plan.createdAt}:playlist:${sourceKey}`,
+        }, { signal: options.signal, existing });
+        if (!playlist?.id) throw new Error(`Адаптер не вернул ID плейлиста «${name}»`);
+        for (let offset = 0; offset < operations.length; offset += batchSize) {
+          if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');
+          const batch = operations.slice(offset, offset + batchSize);
+          report.writesAttempted += batch.length;
+          const result = await adapter.writePlaylistItems(String(playlist.id), batch.map((operation, index) => ({
+            ...operation.target, position: offset + index,
+          })), {
+            signal: options.signal, idempotencyKey: `${plan.createdAt}:playlist:${sourceKey}:${offset}`,
+          });
+          report.writesPerformed += Number.isInteger(result?.writtenCount) ? result.writtenCount : batch.length;
+          await checkpoint({ phase: 'playlist', playlistId: String(playlist.id), offset, count: batch.length });
+        }
+        const back = await adapter.readBack({ type: 'playlist', playlistId: String(playlist.id), operations }, { signal: options.signal });
+        if (completeRead(back) && back?.collectionPresent === true) report.collectionsVerified += 1;
+        if (completeRead(back)) {
+          report.verified += Number.isInteger(back?.verifiedCount)
+            ? Math.min(operations.length, Math.max(0, back.verifiedCount))
+            : Array.isArray(back?.items)
+              ? operations.filter((operation, index) => String(back.items[index]?.providerId || back.items[index]?.id || '') === String(operation.target.providerId)).length
+              : 0;
+        }
+      }
+    }
+    report.status = report.verified === plan.operations.length
+      && report.collectionsVerified === report.collectionsExpected ? 'complete' : 'needs_review';
+    report.finishedAt = new Date().toISOString();
+    if (options.onComplete) await options.onComplete(structuredClone(report));
+    return report;
+  }
+
+  window.MusicTransferEngine = Object.freeze({ discoverAllCollections, executeTransferPlan, normalizedQuery, readCompleteCollection, readLibrary, searchMany, validateAdapter });
 })();
