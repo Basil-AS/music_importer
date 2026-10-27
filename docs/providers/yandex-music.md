@@ -68,6 +68,12 @@ QR implementation в [`PassportAuthenticator.cs`](https://github.com/jrfrigat/Ya
 
 Реализация `_like_action` считает операцию успешной по наличию `revision` в ответе для треков. В изученном исходнике не обнаружено зафиксированного стабильного максимального размера пачки: его нельзя предполагать, нужно выяснять тестом и учитывать ответы сервиса.
 
+### Свежая browser/terminal сверка (27.10.2026)
+
+- В новой вкладке Chrome маршрут `/likes` не является канонической страницей коллекции: он показывал пустой раздел. После перехода к API через тот же браузерный контекст `GET /account/status` дал JSON account status, а `GET /users/{uid}/likes/tracks?if-modified-since-revision=0` вернул `result.library` с ключами `uid`, `revision`, `playlistUuid`, `tracks`. Элементы списка содержат `id`, `albumId`, `timestamp`; фактические UID, IDs, titles и размер библиотеки не сохранялись.
+- Чистый terminal повтор без cookies/tokens: `/account/status` вернул `200 application/json`, но likes route с нейтральным ID `1` вернул `403 application/json`. Значит публичный account-status ответ не открывает пользовательскую коллекцию; для likes нужен auth context. Предыдущий cookie-only terminal replay остаётся подтверждением этого же endpoint с пользовательской сессией.
+- Это browser read-only проверка текущей формы ответа. Ни один лайк не ставился/снимался, записи не гидрировались, секреты не копировались и не сохранялись.
+
 ### Другой рабочий клиент: `yandex-music-transfer`
 
 В репозитории [yarikmsu/yandex-music-transfer](https://github.com/yarikmsu/yandex-music-transfer), HEAD `eb88366` (2026-10-20, MIT), exporter использует тот же список лайков, но отдельный legacy flow: пользователь получает access token по URL с `response_type=token` и client ID официального Android-приложения. README уточняет, что этот client ID не опубликован Яндексом для сторонних интеграций. Это не Device Flow из MarshalX-библиотеки и не официально зарегистрированное приложение нашего проекта.
