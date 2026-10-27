@@ -8,6 +8,7 @@
 - [oklookat/synchro](https://github.com/oklookat/synchro) и его Go-зависимость [oklookat/gozvuk](https://github.com/oklookat/gozvuk), snapshot исходников 2024/2023 годов.
 - [Aiving/sberzvuk-api](https://github.com/Aiving/sberzvuk-api), исходники TypeScript и docs.
 - [trudenboy/zvuk-music](https://github.com/trudenboy/zvuk-music), исходники, GraphQL operation-файлы, README, MIT license; на дату проверки PyPI показывал версию `0.6.3` (7 октября 2026).
+- [korenskoy/zvuk-swift](https://github.com/korenskoy/zvuk-swift), Swift Package, README, GraphQL документы, transport/auth implementation, MIT; проверенный HEAD `8245d4e` от 20.10.2026.
 - Контрольные checkout исходников на 27.10.2026: `Basil-AS/ZvukDownloader` `922e258` (GitHub metadata не обнаружила license; README заявляет MIT, но в checkout нет `LICENSE`), `Aiving/sberzvuk-api` `3c157f8`, `trudenboy/zvuk-music` `ed491f6`.
 - Официальная справка Звука о переносе [«Как перенести музыку в Звук?»](https://help.zvuk.com/article/42207), проверена 27.10.2026.
 
@@ -23,6 +24,8 @@
 
 `zvuk-music` также принимает токен пользователя (в `X-Auth-Token`), имеет ограниченный anonymous access, sync/async Python-клиенты и MIT license. В `client.py` подтверждены `get_liked_tracks(order_by, direction)`, `like_track(id)`, `unlike_track(id)`, `get_collection()`, а в GraphQL operation-файлах — `userTracks` (возвращает track IDs и дату последнего изменения), `collection.addItem(id,type)` и `collection.removeItem(id,type)`. Важная деталь: конкретный `userTracks` document и `get_liked_tracks()` не передают cursor/page-size, а затем клиент отдельно вызывает `get_tracks(ids)` для метаданных. В отличие от этого API библиотеки, веб-клиент использует `getPaginatedCollection(limit, after)`; его cursor-путь проверен отдельно в живой сессии и чистом терминальном запросе. До сравнения total/уникальных ID у `userTracks` и `getPaginatedCollection` нельзя считать выгрузку через готовую `get_liked_tracks()` полной на больших коллекциях. По README полноценные лайки/плейлисты требуют авторизованный токен. При этом англоязычный README сверху говорит «нужна платная подписка», а ниже описывает отдельно лишь подписочные качества FLAC/320 kbps; исходники не доказывают, что чтение лайков само требует платного плана. Это противоречие нужно проверить read-only на аккаунте без подписки, если такой аккаунт доступен.
 
+Новый альтернативный клиент [korenskoy/zvuk-swift](https://github.com/korenskoy/zvuk-swift) подтверждает ровно тот же browser cursor-путь на уровне реализации: `getPaginatedCollectionTracks(limit:cursor:)` вызывает GraphQL `getPaginatedCollection` с `limit` и `after`, читает `paginatedCollection.tracks.items` и `page.endCursor`, причём возвращает полные track objects. Его transport отправляет JSON `POST https://zvuk.com/api/v1/graphql`, а пользовательский токен кладёт в `X-Auth-Token`; анонимный токен получается через `/api/tiny/profile`. README требует аккаунт с платной подпиской для полного доступа — это пока только заявление автора, без независимой проверки тарифа. Код не запускали. При включённом network logger callback клиент передаёт в лог сырые request/response body; токен находится в header, но response body может содержать личные карточки коллекции, поэтому нельзя сохранять такие логи целиком.
+
 ## Подтверждённые в стороннем коде запросы
 
 База API: `https://zvuk.com/api`.
@@ -37,6 +40,7 @@
 | `GET /tiny/lyrics?track_id=...` | Текст/таймкодированный текст в downloader |
 | `POST /v1/graphql` | GraphQL-каталог, поиск, треки, релизы, плейлисты и mediaContents/stream |
 | GraphQL `userTracks` | Список ID лайкнутых треков и время изменения элемента в `zvuk-music` |
+| GraphQL `getPaginatedCollection` (`limit`, `after`) | Cursor-страницы `paginatedCollection.tracks.items` и `page.endCursor`; подтверждено web-клиентом, live replay и отдельным Swift-клиентом |
 | GraphQL `collection.addItem` / `collection.removeItem` | Поставить/снять лайк; тип коллекции передаётся отдельным параметром |
 
 В TypeScript клиенте GraphQL operations включают `quickSearch`, `getTrack`, `getAlbum`, `getPlaylist`, `getStreamURL`. В переданном `ZvukDownloader` и в `Aiving/sberzvuk-api` не найдено чтения liked tracks или мутации like/unlike. Это пробел именно этих клиентов, а не самого API: в более новой `trudenboy/zvuk-music` найдены методы чтения и изменения коллекции. У `ZvukDownloader` дополнительно проверены `get_profile`, `get_tracks`, `get_releases`, `get_playlists`, `get_stream_url`, `get_lyrics` и GraphQL `get_artist_releases`; у них нет пользовательского collection API.
@@ -106,6 +110,8 @@
 
 Из найденных библиотек `trudenboy/zvuk-music` лучше всего подходит как исходный адаптер: он явно покрывает чтение и запись лайков, имеет тесты и упакован в PyPI. Не запускать массовые изменения коллекции и не использовать функции скачивания для задачи миграции. Сначала исследовать `get_liked_tracks()` на чтение, затем отдельно получить метаданные песен по ID.
 
+Для полноты крупной коллекции отдельно стоит сравнить Python `userTracks` с cursor implementation `korenskoy/zvuk-swift`/web `getPaginatedCollection`; Swift-клиент пока только статически просмотрен, его наличие не заменяет уже проведённую live read-only проверку.
+
 Официальный импорт Звука может быть полезен для обратного сценария или как reference UX, но не решает Звук → Apple Music: у него нет экспорта, а импортированный плейлист не равен «Любимому».
 
 ## Источники
@@ -115,3 +121,6 @@
 - [Справка Звука: плейлисты и «Любимое»](https://help.zvuk.com/article/48272)
 - [Synchro Zvuk adapter at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/zvuk/accountActions.go)
 - [gozvuk GraphQL client at `fc4ed93`](https://github.com/oklookat/gozvuk/tree/fc4ed9399d70f599e0d85a133aa663d0a8cbe3fb)
+- [Zvuk Swift library README at `8245d4e`](https://github.com/korenskoy/zvuk-swift/blob/8245d4e39abe93739cc0c01249a6e8a460fe5cb3/README.md)
+- [Zvuk Swift cursor collection implementation at `8245d4e`](https://github.com/korenskoy/zvuk-swift/blob/8245d4e39abe93739cc0c01249a6e8a460fe5cb3/Sources/ZvukMusic/API/Client%2BCollection.swift)
+- [Zvuk Swift GraphQL transport and optional body logger at `8245d4e`](https://github.com/korenskoy/zvuk-swift/blob/8245d4e39abe93739cc0c01249a6e8a460fe5cb3/Sources/ZvukMusic/Networking/Request.swift)
