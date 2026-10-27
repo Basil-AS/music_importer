@@ -6,7 +6,11 @@
 
 Основной кандидат — [MarshalX/yandex-music-api](https://github.com/MarshalX/yandex-music-api), LGPL-3.0. В проверенном срезе GitHub: последний опубликованный релиз `v3.2.2`, исходный commit `9ca132e` (2026-10-11), репозиторий обновлялся 2026-10-26. Поддерживает sync/async клиент; OpenAPI справочник, генерируемый из реализации библиотеки, описывает около 150 операций и 220 схем. Сверяйте детали с конкретной версией перед реализацией.
 
-В библиотеке есть OAuth Device Flow: клиент запрашивает device code у `https://oauth.yandex.ru/device/code`, показывает `verification_url` и `user_code`, периодически опрашивает `https://oauth.yandex.ru/token` и получает access token (и, в ответе библиотеки, поля refresh token/expires). Пользователь сам подтверждает вход на домене Яндекса. В коде этой версии используются OAuth client credentials публичного Android-клиента; это не равно официально выданным credentials нашему приложению. Некоторые аккаунты/регионы/режимы могут не пройти flow. Библиотека предупреждает, что хранение токена остаётся вызывающему приложению; lifecycle обновления следует явно реализовать и проверить.
+В библиотеке есть OAuth Device Flow. `POST https://oauth.yandex.ru/device/code` передаёт form-urlencoded `client_id`, `device_id` и `device_name`; по умолчанию библиотека генерирует `device_id` из 10 символов, а имя задаёт `YandexMusicAPI`. Ответная модель описана полями `device_code`, `user_code`, `verification_url`, `expires_in` и `interval`. Пользователь открывает verification URL и подтверждает код на домене Яндекса.
+
+Затем библиотека делает `POST https://oauth.yandex.ru/token` с form-urlencoded полями `grant_type=device_code`, `code`, `client_id` и `client_secret`. В проверенном commit вшиты credentials публичного Android-клиента Яндекс Музыки; это не credentials, выданные нашему приложению, и встроенный `client_secret` нельзя считать секретом проекта. Значения самих credentials в документацию не копируем. Polling следует выполнять с интервалом `interval` и до срока `expires_in` из device-code ответа: `authorization_pending` возвращается как `None`, а `expired_token`, `access_denied`, `invalid_client` и другие OAuth ошибки приводят к `DeviceAuthError`. Блокирующий helper также поддерживает timeout и отмену. При успехе он записывает access token в клиент и добавляет `Authorization: OAuth <token>`.
+
+Ответ token-модели содержит `access_token`, `refresh_token`, `expires_in` и `token_type`, но эта библиотека не сохраняет токены и не обновляет access token автоматически. Хранение и срок жизни — ответственность приложения; поведение refresh token этим клиентом не реализовано. Device Flow в пользовательском аккаунте не запускали. Некоторые аккаунты/регионы/режимы могут не пройти этот неофициальный flow.
 
 Вход через логин/пароль не нужен для рекомендуемого прототипа. Токен — секрет; не коммитить и не печатать в лог.
 
@@ -16,7 +20,7 @@
 
 - `GET /users/{user_id}/likes/tracks` — список лайкнутых треков (`users_likes_tracks()`); если `user_id` не передан, библиотека использует UID текущего аккаунта. Метод по умолчанию отправляет `if-modified-since-revision=0`. Код и community OpenAPI не описывают `offset`, `limit` или cursor для этой операции.
 - Ответ описан как `TracksList { uid, revision, tracks[] }`, где элементы — `TrackShort`; у модели нет page/cursor полей. `revision` описан авторами как актуальность списка, но его семантика в коде помечена TODO. Следовательно, выгрузку нельзя считать полной только по наличию ответа: отдельно сверять browser-side count, число коротких refs и последующие metadata responses.
-- `POST /users/{user_id}/likes/tracks/add-multiple` и `/remove` — изменить лайк (`users_likes_tracks_add`/`_remove`). Community OpenAPI указывает `application/x-www-form-urlencoded` и поле `track-ids` (описанное как string), не JSON. Библиотека принимает ID как list/string/int и передаёт словарь через `requests` `data=`; точный сериализованный формат нескольких ID не закреплён как стабильный контракт.
+- `POST /users/{user_id}/likes/tracks/add-multiple` и `/remove` — изменить лайк (`users_likes_tracks_add`/`_remove`). Community OpenAPI указывает `application/x-www-form-urlencoded` и поле `track-ids` (описанное как string), не JSON. Библиотека принимает ID как list/string/int и передаёт словарь через `requests` `data=`; точный wire format списка и то, какие варианты принимает сервер, требуют отдельной контролируемой проверки. Максимальный размер пачки также не зафиксирован.
 - `POST /tracks` — получить карточки по набору ID; community OpenAPI также помечает тело как `application/x-www-form-urlencoded`, поля `track-ids` и `with-positions`. В ранее проверенном единичном terminal-запросе form body `track-ids=<id>` вернул карточку; JSON-array формат дал `400`.
 
 Реализация `_like_action` считает операцию успешной по наличию `revision` в ответе для треков. В изученном исходнике не обнаружено зафиксированного стабильного максимального размера пачки: его нельзя предполагать, нужно выяснять тестом и учитывать ответы сервиса.
@@ -58,6 +62,9 @@
 - [Client method reference](https://ym.marshal.dev/client/)
 - [OpenAPI reference](https://ym.marshal.dev/api/)
 - [Device auth docs](https://ym.marshal.dev/token)
+- [Device auth implementation at `9ca132e`](https://github.com/MarshalX/yandex-music-api/blob/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/_client/device_auth.py)
+- [OAuth device-code and token models at `9ca132e`](https://github.com/MarshalX/yandex-music-api/tree/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/device_auth)
+- [Request authorization and form-post implementation at `9ca132e`](https://github.com/MarshalX/yandex-music-api/blob/9ca132e5c18a72aab779c1fc68c169380a9357d0/yandex_music/utils/request_base.py)
 - [oklookat/synchro Yandex adapter at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/yandexmusic/accountActions.go)
 - [oklookat/synchro Yandex auth at `ac441f4`](https://github.com/oklookat/synchro/blob/ac441f45f1cd6a143b361a10a48611f33e96f426/remote/yandexmusic/main.go)
 
