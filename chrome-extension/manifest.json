@@ -16,13 +16,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://zvuk.com/favorites*"],
+      "matches": ["https://zvuk.com/favorites*", "https://zvuk.com/collection*", "https://zvuk.com/playlist/*"],
       "js": ["main-world.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://zvuk.com/favorites*"],
+      "matches": ["https://zvuk.com/favorites*", "https://zvuk.com/collection*", "https://zvuk.com/playlist/*"],
       "js": ["bridge.js"],
       "run_at": "document_start",
       "world": "ISOLATED"

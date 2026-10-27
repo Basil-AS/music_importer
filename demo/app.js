@@ -9,7 +9,7 @@
     { title: 'Blinding Lights', artist: 'The Weeknd', album: '' },
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
-  const state = { source: 'Звук', tracks: [], loaded: false, report: null, searching: false };
+  const state = { source: 'Звук', collectionType: 'favorites', tracks: [], loaded: false, report: null, searching: false };
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
@@ -99,10 +99,12 @@
       searchError: false,
     }));
     state.source = label;
+    state.collectionType = list.some((track) => track.sourceCollectionId) ? 'playlists' : 'favorites';
     state.loaded = true;
     state.report = null;
     $('#report').classList.remove('show');
     $('#reviewSub').textContent = `${label} · ${list.length} треков готовы к поиску`;
+    $('#targetCollection').textContent = state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#searchStatus').classList.remove('search-error');
     renderTracks();
@@ -169,7 +171,17 @@
   }
 
   function normalizeJSON(value) {
-    const root = Array.isArray(value) ? value : value?.tracks || value?.items || value?.data;
+    const playlistRows = Array.isArray(value?.playlists) ? value.playlists.flatMap((playlist) => {
+      const playlistTracks = playlist.tracks || playlist.items || [];
+      if (!Array.isArray(playlistTracks)) return [];
+      return playlistTracks.map((row, index) => ({
+        ...row,
+        __sourceCollectionId: playlist.id || '',
+        __sourceCollectionName: playlist.title || playlist.name || '',
+        __sourcePosition: Number.isInteger(row.position) ? row.position : index,
+      }));
+    }) : null;
+    const root = Array.isArray(value) ? value : playlistRows || value?.tracks || value?.items || value?.data;
     if (!Array.isArray(root)) throw new Error('Ожидается массив треков или поле tracks/items/data');
     return root.map((row) => {
       const track = row?.track || row;
@@ -181,6 +193,9 @@
         isrc: String(track?.isrc || track?.ISRC || track?.externalIds?.isrc || track?.external_ids?.isrc || ''),
         durationMs: normalizeDuration(track?.durationMs || track?.duration_ms || track?.duration),
         sourceId: String(track?.id || track?.trackId || track?.track_id || track?.uri || ''),
+        sourceCollectionId: String(row?.__sourceCollectionId || track?.playlistId || ''),
+        sourceCollectionName: String(row?.__sourceCollectionName || track?.playlistName || ''),
+        sourcePosition: Number.isInteger(row?.__sourcePosition) ? row.__sourcePosition : Number(track?.position || 0),
       };
     }).filter((track) => track.title && track.artist);
   }
@@ -302,15 +317,26 @@
   function buildPlan() {
     const selected = state.tracks.filter((track) => track.selected && track.match);
     const skipped = state.tracks.filter((track) => !selected.includes(track));
+    const playlistGroups = new Map();
+    if (state.collectionType === 'playlists') {
+      for (const track of state.tracks) {
+        const key = track.sourceCollectionId || track.sourceCollectionName || 'playlist';
+        if (!playlistGroups.has(key)) playlistGroups.set(key, { sourceId: track.sourceCollectionId || null, sourceName: track.sourceCollectionName || 'Плейлист', targetName: track.sourceCollectionName || 'Плейлист', sourceTrackCount: 0, matchedCount: 0 });
+        const group = playlistGroups.get(key);
+        group.sourceTrackCount += 1;
+        if (track.selected && track.match) group.matchedCount += 1;
+      }
+    }
     return {
       schemaVersion: 1,
       mode: 'preview-only',
       createdAt: new Date().toISOString(),
       source: state.source,
-      target: { service: 'Apple Music', collection: 'favorite songs', storefront: $('#storefront').value },
+      target: { service: 'Apple Music', collection: state.collectionType, storefront: $('#storefront').value },
       search: { service: 'Apple iTunes Search API', writesPerformed: 0 },
+      playlists: [...playlistGroups.values()],
       selected: selected.map((track) => ({
-        source: { id: track.sourceId || null, isrc: track.isrc || null, title: track.title, artist: track.artist, album: track.album || null, durationMs: track.durationMs || null },
+        source: { id: track.sourceId || null, isrc: track.isrc || null, title: track.title, artist: track.artist, album: track.album || null, durationMs: track.durationMs || null, playlistId: track.sourceCollectionId || null, playlistName: track.sourceCollectionName || null, position: track.sourcePosition ?? null },
         target: {
           trackId: track.match.trackId,
           title: track.match.trackName,
@@ -320,7 +346,7 @@
           artworkUrl: track.match.artworkUrl100 || null,
           durationMs: track.match.trackTimeMillis || null,
         },
-        action: 'favorite',
+        action: state.collectionType === 'playlists' ? 'add_to_playlist' : 'favorite',
         match: { method: track.matchReason || 'manual_review', confidence: track.matchConfidence || null, automatic: Boolean(track.autoMatched) },
       })),
       skipped: skipped.map((track) => ({ title: track.title, artist: track.artist, reason: track.searched && !track.matches.length ? 'no_catalog_match' : 'not_selected' })),

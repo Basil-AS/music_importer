@@ -13,16 +13,18 @@
     <p class="privacy">Работаем в открытой вкладке Звука. Пароль, cookies и токены не читаются и не сохраняются.</p>
     <section class="status" aria-live="polite">
       <div class="metric"><b id="trackCount">0</b><span>уникальных треков</span></div>
-      <div class="metric"><b id="pageCount">0</b><span>страниц поймано</span></div>
+      <div class="metric"><b id="playlistCount">0</b><span>плейлистов найдено</span></div>
       <p id="completeness">Откройте <b>zvuk.com/favorites</b>.</p>
     </section>
     <div class="actions">
-      <button class="primary" id="startBtn">Начать сбор избранного</button>
+      <button class="primary" id="startBtn">Начать сбор этой страницы</button>
+      <button id="runPlaylistsBtn" disabled>Собрать треки всех плейлистов</button>
       <button id="stopBtn">Остановить</button>
-      <button id="exportBtn" disabled>Скачать JSON</button>
+      <button id="exportFavoritesBtn" disabled>Скачать избранное JSON</button>
+      <button id="exportPlaylistsBtn" disabled>Скачать плейлисты JSON</button>
       <button class="danger" id="clearBtn" disabled>Очистить локальные данные</button>
     </div>
-    <p class="hint">После начала сбора страница обновится. Прокрутите список «Любимое» до конца; завершение подтвердится сверкой с количеством ID коллекции.</p>
+    <p class="hint">Для избранного откройте «Любимое». Для плейлистов откройте «Коллекция», соберите полный список и нажмите «Собрать треки всех плейлистов». Расширение последовательно откроет страницы плейлистов и вернёт вас к выгрузке списка.</p>
     <p class="error" id="error" hidden></p>
   </main>
 </body>

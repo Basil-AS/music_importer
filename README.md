@@ -20,4 +20,4 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 
 Подробности сценария и границ прототипа: [`docs/MVP.md`](docs/MVP.md). Правила сопоставления и ограничения confidence: [`docs/MATCHING.md`](docs/MATCHING.md).
 
-Первый локальный browser connector для чтения избранного Звука находится в [`chrome-extension/`](chrome-extension/) и описан в [`docs/ZVUK_CONNECTOR.md`](docs/ZVUK_CONNECTOR.md). Он пока read-only; установка и сбор выполняются пользователем вручную. Коннекторы Spotify, Apple Music и Яндекс Музыки, playlist import/export и любые provider writes пока отсутствуют.
+Первый локальный browser connector для чтения избранного и плейлистов Звука находится в [`chrome-extension/`](chrome-extension/) и описан в [`docs/ZVUK_CONNECTOR.md`](docs/ZVUK_CONNECTOR.md). Он read-only; сбор списка плейлистов запускается вручную и открывает их последовательно в текущей вкладке. Коннектор пока не установлен и не проверен на живой сессии. Коннекторы Spotify, Apple Music и Яндекс Музыки, а также любые записи в пользовательские библиотеки пока отсутствуют.

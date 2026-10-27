@@ -1,45 +1,75 @@
 const $ = (selector) => document.querySelector(selector);
-const send = (type) => chrome.runtime.sendMessage({ type: `zvuk:${type}` });
+const send = (type, detail = {}) => chrome.runtime.sendMessage({ type: `zvuk:${type}`, ...detail });
 
-function isFavoritesUrl(value) {
+function isCaptureUrl(value) {
   try {
     const url = new URL(value);
-    return url.origin === 'https://zvuk.com' && url.pathname === '/favorites';
+    return url.origin === 'https://zvuk.com' && (url.pathname === '/favorites' || url.pathname === '/collection' || url.pathname.startsWith('/playlist/'));
   } catch {
     return false;
   }
 }
 
 function getCompleteness(state) {
-  if (!state.tracks.length) return 'Пока нет пойманных страниц.';
-  if (state.hasMore === false && state.expectedCount === state.tracks.length) return `Полный список подтверждён: ${state.tracks.length} из ${state.expectedCount}.`;
-  if (state.hasMore === false && state.expectedCount !== null) return `Нужна сверка: поймано ${state.tracks.length}, ID коллекции ${state.expectedCount}.`;
-  if (state.hasMore === true) return 'Есть следующая страница. Прокрутите «Любимое» дальше.';
-  return 'Полнота пока не подтверждена: прокрутите «Любимое» до конца.';
+  const parts = [];
+  if (state.tracks.length) {
+    if (state.hasMore === false && state.expectedCount === state.tracks.length) parts.push(`Избранное подтверждено: ${state.tracks.length} из ${state.expectedCount}.`);
+    else if (state.hasMore === true) parts.push(`Избранное: ${state.tracks.length} треков; прокрутите «Любимое» дальше.`);
+    else parts.push(`Избранное: ${state.tracks.length} треков; полнота не подтверждена (контроль: ${state.expectedCount ?? 'нет данных'}).`);
+  }
+  if (state.playlistPagesSeen) {
+    if (state.playlistListHasMore === false && state.expectedPlaylistCount === state.playlists.length) parts.push(`Список плейлистов подтверждён: ${state.playlists.length}.`);
+    else if (state.playlistListHasMore) parts.push(`Список плейлистов: ${state.playlists.length}; прокрутите «Коллекция» дальше.`);
+    else parts.push(`Список плейлистов: ${state.playlists.length}; полнота не подтверждена (контроль: ${state.expectedPlaylistCount ?? 'нет данных'}).`);
+  }
+  if (state.automation?.active) parts.push(`Автосбор плейлистов выполняется: ${state.playlists.filter((playlist) => playlist.complete).length} из ${state.playlists.length} подтверждено.`);
+  const completePlaylists = state.playlists.filter((playlist) => playlist.complete).length;
+  const playlistsWithItems = state.playlists.filter((playlist) => playlist.pagesSeen).length;
+  if (playlistsWithItems) parts.push(`Треки собраны для ${completePlaylists} из ${state.playlists.length} плейлистов.`);
+  return parts.join(' ') || 'Откройте «Любимое» или «Коллекция» в Звуке.';
 }
 
 async function render() {
   const state = await send('state');
   $('#trackCount').textContent = String(state.tracks.length);
-  $('#pageCount').textContent = String(state.pagesSeen);
+  $('#playlistCount').textContent = String(state.playlists.length);
   $('#completeness').textContent = getCompleteness(state);
-  $('#exportBtn').disabled = state.tracks.length === 0;
-  $('#clearBtn').disabled = state.tracks.length === 0;
+  $('#exportFavoritesBtn').disabled = state.tracks.length === 0;
+  $('#exportPlaylistsBtn').disabled = state.playlists.length === 0;
+  $('#runPlaylistsBtn').disabled = state.automation?.active || !state.playlistPagesSeen || state.playlistListHasMore !== false || state.expectedPlaylistCount !== state.playlists.length || state.playlists.length === 0;
+  $('#runPlaylistsBtn').textContent = state.automation?.active ? 'Сбор плейлистов выполняется…' : 'Собрать треки всех плейлистов';
+  $('#clearBtn').disabled = state.tracks.length === 0 && state.playlists.length === 0;
   $('#error').hidden = !state.error;
   $('#error').textContent = state.error || '';
 }
 
 $('#startBtn').addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !isFavoritesUrl(tab.url)) {
-    $('#completeness').textContent = 'Сначала откройте страницу https://zvuk.com/favorites.';
+  if (!tab?.id || !isCaptureUrl(tab.url)) {
+    $('#completeness').textContent = 'Откройте «Любимое», «Коллекция» или страницу одного плейлиста в Звуке.';
     return;
   }
   await send('start');
   const url = new URL(tab.url);
   url.searchParams.set('music_importer_capture', '1');
   await chrome.tabs.update(tab.id, { url: url.href });
-  $('#completeness').textContent = 'Страница обновляется. Прокрутите «Любимое» до конца.';
+  $('#completeness').textContent = url.pathname.startsWith('/collection')
+    ? 'Страница обновляется. Дождитесь полного списка плейлистов, затем запустите их сбор.'
+    : url.pathname.startsWith('/playlist/')
+      ? 'Страница обновляется. Треки этого плейлиста будут собраны при прокрутке.'
+      : 'Страница обновляется. Дождитесь загрузки списка «Любимое» и прокрутите его до конца.';
+});
+
+$('#runPlaylistsBtn').addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  const result = await send('run-playlists', { tabId: tab.id });
+  if (!result?.ok) {
+    $('#completeness').textContent = result?.error || 'Сначала завершите сбор списка плейлистов.';
+    return;
+  }
+  $('#completeness').textContent = 'Открываются страницы плейлистов. Не закрывайте вкладку до завершения.';
+  await render();
 });
 
 $('#stopBtn').addEventListener('click', async () => {
@@ -57,7 +87,7 @@ $('#clearBtn').addEventListener('click', async () => {
   await render();
 });
 
-$('#exportBtn').addEventListener('click', async () => {
+$('#exportFavoritesBtn').addEventListener('click', async () => {
   const state = await send('state');
   const payload = {
     schemaVersion: 1,
@@ -73,13 +103,37 @@ $('#exportBtn').addEventListener('click', async () => {
     },
     tracks: state.tracks,
   };
+  downloadJSON(payload, 'zvuk-favorites.json');
+});
+
+$('#exportPlaylistsBtn').addEventListener('click', async () => {
+  const state = await send('state');
+  const payload = {
+    schemaVersion: 1,
+    service: 'zvuk',
+    collection: { type: 'playlists', name: 'Плейлисты' },
+    completeness: {
+      catalogPagesSeen: state.playlistPagesSeen,
+      catalogCount: state.playlists.length,
+      expectedCatalogCount: state.expectedPlaylistCount,
+      catalogHasMore: state.playlistListHasMore,
+      catalogConfirmed: state.playlistListHasMore === false && state.expectedPlaylistCount === state.playlists.length,
+      playlistItemsConfirmed: state.playlists.filter((playlist) => playlist.complete).length,
+      playlistItemsTotal: state.playlists.length,
+    },
+    playlists: state.playlists,
+  };
+  downloadJSON(payload, 'zvuk-playlists.json');
+});
+
+function downloadJSON(payload, filename) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = 'zvuk-favorites.json';
+  link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-});
+}
 
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.zvukFavoriteCapture) render();

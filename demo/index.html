@@ -58,7 +58,7 @@
       <aside class="side-col" aria-label="Настройки переноса">
         <section class="card side-card">
           <div class="card-head"><div><h2>Куда переносим</h2><p class="card-sub">Целевая библиотека</p></div></div>
-          <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title">Apple Music</div><div class="dest-sub">Избранные песни</div></div></div>
+          <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title">Apple Music</div><div class="dest-sub" id="targetCollection">Избранные песни</div></div></div>
           <div class="check-row"><span>Совпадения найдены</span><span id="readyStat">—</span></div><div class="check-row"><span>Нужно проверить</span><span id="reviewStat" style="color:var(--amber)">—</span></div><div class="check-row"><span>Без совпадения</span><span id="missingStat" style="color:var(--red)">—</span></div>
           <button class="primary side-primary" id="importBtn" type="button" disabled>Сформировать план <span aria-hidden="true">→</span></button>
           <div class="report" id="report" aria-live="polite"><h3>План готов</h3><div class="report-grid"><div class="metric"><b id="addedMetric">0</b><span>выбрано</span></div><div class="metric"><b id="skippedMetric">0</b><span>пропущено</span></div><div class="metric"><b>0</b><span>записано</span></div></div><div class="quiet" style="margin-top:10px">JSON содержит выбранные Apple Music ID и ссылки. Библиотека не менялась.</div><button class="linkbtn" id="downloadReport" type="button" style="margin-top:12px">Скачать JSON-план</button></div>
