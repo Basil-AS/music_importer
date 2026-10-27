@@ -6,13 +6,20 @@
     ['fetchLibraryTracks', '087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240'],
     ['libraryV3', '973e511ca44261fda7eebac8b653155e7caee3675abb4fb110cc1b8c78b091c3'],
     ['fetchPlaylistContents', '32b05e92e438438408674f95d0fdad8082865dc32acd55bd97f5113b8579092b'],
+    ['addToLibrary', '896ebcb47815681340860d121cb5d494e157e2a78d3950385cd54e0393c67148'],
+    ['addToPlaylist', 'b907ad6b088d5bf7680fa81198996d58398c2d55dfcdf59fcc959e0be98a418a'],
   ]);
   let sessionHeaders = null;
   let scanPromise = null;
   let lastQueryAt = 0;
+  let activeCommandId = '';
 
   function post(type, detail = {}) {
     window.postMessage({ source: marker, type, ...detail }, location.origin);
+  }
+
+  function transferProgress(message) {
+    if (activeCommandId) post('transfer-progress', { requestId: activeCommandId, progress: { message } });
   }
 
   function getHeaderBag(input, init) {
@@ -217,6 +224,201 @@
     return { ...playlist, trackCount: playlistTotal, complete: true, tracks };
   }
 
+  function spotifyCandidate(item) {
+    const track = item?.track || item;
+    const uri = String(track?.uri || (track?.id ? `spotify:track:${track.id}` : ''));
+    const artists = Array.isArray(track?.artists) ? track.artists : [];
+    if (!uri.startsWith('spotify:track:') || !track?.name || !artists.length) return null;
+    return {
+      uri,
+      id: uri,
+      trackId: uri,
+      trackName: String(track.name),
+      title: String(track.name),
+      artistName: artists.map((artist) => artist?.name).filter(Boolean).join(', '),
+      artists: artists.map((artist) => ({ id: artist?.id || '', name: artist?.name || '' })).filter((artist) => artist.name),
+      collectionName: String(track.album?.name || ''),
+      album: { name: String(track.album?.name || '') },
+      isrc: String(track.external_ids?.isrc || ''),
+      durationMs: Number(track.duration_ms) || 0,
+    };
+  }
+
+  async function searchCatalog(term) {
+    const normalized = String(term || '').trim().slice(0, 400);
+    if (!normalized) throw new Error('Введите название песни или исполнителя.');
+    const headers = await waitForSession();
+    const params = new URLSearchParams({ q: normalized, type: 'track', limit: '10', market: 'from_token' });
+    const response = await originalFetch.call(window, `https://api.spotify.com/v1/search?${params}`, {
+      method: 'GET', credentials: 'include', headers: { ...headers, Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(`Каталог Spotify: HTTP ${response.status}.`);
+    const payload = await response.json();
+    if (!Array.isArray(payload?.tracks?.items)) throw new Error('Spotify вернул неожиданный ответ каталога.');
+    return payload.tracks.items.map(spotifyCandidate).filter(Boolean);
+  }
+
+  async function addSpotifyLibraryItems(uris) {
+    for (let offset = 0; offset < uris.length; offset += 40) {
+      await query('addToLibrary', { libraryItemUris: uris.slice(offset, offset + 40), interactionId: null });
+      transferProgress(`Сохраняем в Spotify: ${Math.min(offset + 40, uris.length)} из ${uris.length}.`);
+    }
+  }
+
+  async function createSpotifyPlaylist(name) {
+    const headers = await waitForSession();
+    const delta = {
+      ops: [{
+        kind: 'UPDATE_LIST_ATTRIBUTES',
+        updateListAttributes: { newAttributes: { values: { name, formatAttributes: [], pictureSize: [] }, noValue: [] } },
+      }],
+      info: { source: { client: 'WEBPLAYER' } },
+    };
+    const response = await originalFetch.call(window, 'https://spclient.wg.spotify.com/playlist/v2/playlist', {
+      method: 'POST', credentials: 'include',
+      headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(delta),
+    });
+    if (!response.ok) throw new Error(`Spotify: не удалось создать плейлист (HTTP ${response.status}).`);
+    const payload = await response.json();
+    const rawUri = String(payload?.uri || payload?.playlist?.uri || '');
+    const playlistUri = rawUri.startsWith('spotify:playlist:')
+      ? rawUri
+      : rawUri.match(/(?:playlist\/|playlist:)([A-Za-z0-9]{22})/)?.[1]
+        ? `spotify:playlist:${rawUri.match(/(?:playlist\/|playlist:)([A-Za-z0-9]{22})/)[1]}`
+        : '';
+    if (!playlistUri) throw new Error('Spotify создал плейлист, но не вернул его URI для проверки.');
+    try {
+      await addSpotifyPlaylistToLibrary(playlistUri);
+    } catch (error) {
+      error.partialPlaylistUri = playlistUri;
+      throw error;
+    }
+    return playlistUri;
+  }
+
+  async function addSpotifyPlaylistToLibrary(playlistUri) {
+    const headers = await waitForSession();
+    const meResponse = await originalFetch.call(window, 'https://api.spotify.com/v1/me', {
+      method: 'GET', credentials: 'include', headers: { ...headers, Accept: 'application/json' },
+    });
+    if (!meResponse.ok) throw new Error(`Spotify не вернул профиль владельца (HTTP ${meResponse.status}).`);
+    const me = await meResponse.json();
+    const username = String(me?.id || '');
+    if (!/^[A-Za-z0-9]{1,64}$/.test(username)) throw new Error('Spotify не вернул ID пользователя для списка плейлистов.');
+    const body = {
+      deltas: [{
+        ops: [{ kind: 'ADD', add: { addLast: true, items: [{ uri: playlistUri, attributes: { timestamp: String(Date.now()), formatAttributes: [], availableSignals: [] } }] } }],
+        info: { source: { client: 'WEBPLAYER' } },
+      }],
+      wantResultingRevisions: false,
+      wantSyncResult: false,
+      nonces: [],
+    };
+    const response = await originalFetch.call(window, `https://spclient.wg.spotify.com/playlist/v2/user/${encodeURIComponent(username)}/rootlist/changes`, {
+      method: 'POST', credentials: 'include',
+      headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`Spotify: созданный плейлист не добавлен в библиотеку (HTTP ${response.status}).`);
+  }
+
+  async function addSpotifyPlaylistItems(playlistUri, uris, onWritten = () => {}) {
+    for (let offset = 0; offset < uris.length; offset += 100) {
+      await query('addToPlaylist', {
+        playlistUri,
+        playlistItemUris: uris.slice(offset, offset + 100),
+        newPosition: { moveType: 'BOTTOM_OF_PLAYLIST', fromUid: null },
+        interactionId: null,
+      });
+      onWritten(Math.min(offset + 100, uris.length));
+      transferProgress(`Добавляем треки в плейлист Spotify: ${Math.min(offset + 100, uris.length)} из ${uris.length}.`);
+    }
+  }
+
+  function assertCompletePlan(plan) {
+    const hasConfirmedEmptyPlaylist = Array.isArray(plan?.collectionMappings)
+      && plan.collectionMappings.some((mapping) => mapping?.completeness?.confirmed === true && mapping.sourceItemCount === 0);
+    if (plan?.type !== 'music-transfer-plan' || plan?.target?.provider !== 'spotify'
+      || !Array.isArray(plan.operations) || (!plan.operations.length && !hasConfirmedEmptyPlaylist)
+      || plan.operations.some((operation) => operation?.target?.provider !== 'spotify' || !operation?.target?.providerId)
+      || !Array.isArray(plan.completeness?.source) || !plan.completeness.source.length
+      || plan.completeness.source.some((status) => status?.confirmed !== true)) {
+      throw new Error('План Spotify неполный или не подтверждена полнота библиотеки источника.');
+    }
+  }
+
+  async function executeTransfer(plan) {
+    assertCompletePlan(plan);
+    const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites');
+    const wantedFavoriteUris = [...new Set(favoriteOperations.map((operation) => String(operation.target.providerId)))];
+    const existingFavorites = await readFavorites();
+    const existingFavoriteUris = new Set(existingFavorites.tracks.map((track) => track.id));
+    const missingFavorites = wantedFavoriteUris.filter((uri) => !existingFavoriteUris.has(uri));
+    if (missingFavorites.length) await addSpotifyLibraryItems(missingFavorites);
+    const verifiedFavorites = await readFavorites();
+    const verifiedFavoriteUris = new Set(verifiedFavorites.tracks.map((track) => track.id));
+    const unverifiedFavorites = wantedFavoriteUris.filter((uri) => !verifiedFavoriteUris.has(uri));
+    const report = {
+      status: 'complete',
+      favorites: {
+        requested: wantedFavoriteUris.length,
+        added: missingFavorites.length,
+        alreadyPresent: wantedFavoriteUris.length - missingFavorites.length,
+        verified: wantedFavoriteUris.length - unverifiedFavorites.length,
+      },
+      playlists: [],
+    };
+    const operationsByCollection = new Map();
+    for (const operation of plan.operations.filter((item) => item.operation === 'add_to_playlist')) {
+      const key = String(operation.source?.collectionId || operation.source?.collectionName || 'Плейлист');
+      if (!operationsByCollection.has(key)) operationsByCollection.set(key, []);
+      operationsByCollection.get(key).push(operation);
+    }
+    const mappings = new Map((plan.collectionMappings || []).map((mapping) => [String(mapping.sourceId || mapping.sourceName), mapping]));
+    for (const [sourceKey, mapping] of mappings) {
+      const operations = operationsByCollection.get(sourceKey) || [];
+      const isConfirmedEmptyPlaylist = mapping.completeness?.confirmed === true && mapping.sourceItemCount === 0;
+      if (!operations.length && !isConfirmedEmptyPlaylist) continue;
+      const name = String(mapping.targetName || mapping.sourceName || operations[0]?.source?.collectionName || 'Music Import');
+      const ordered = operations.slice().sort((a, b) => Number(a.source?.position || 0) - Number(b.source?.position || 0));
+      const uris = ordered.map((operation) => String(operation.target.providerId));
+      let playlistUri = '';
+      let written = 0;
+      try {
+        playlistUri = await createSpotifyPlaylist(name);
+        if (uris.length) await addSpotifyPlaylistItems(playlistUri, uris, (count) => { written = count; });
+        const verified = await readPlaylist({ id: playlistUri, title: name, trackCount: null });
+        const actual = verified.tracks.map((track) => track.id);
+        const exact = actual.length === uris.length && actual.every((uri, index) => uri === uris[index]);
+        report.playlists.push({ name, uri: playlistUri, requested: uris.length, written, verified: exact ? actual.length : 0, exactOrder: exact });
+        if (!exact) throw new Error(`Spotify не подтвердил порядок или состав плейлиста «${name}».`);
+      } catch (error) {
+        const failure = { name, uri: playlistUri || error?.partialPlaylistUri || null, requested: uris.length, written, verified: 0, exactOrder: false, error: error instanceof Error ? error.message : 'Ошибка записи плейлиста.' };
+        throw Object.assign(error instanceof Error ? error : new Error(failure.error), {
+          transferReport: { ...report, status: 'partial_failure', playlists: [...report.playlists, failure] },
+        });
+      }
+    }
+    if (unverifiedFavorites.length) throw Object.assign(new Error('Spotify не подтвердил часть добавленных лайков.'), { transferReport: { ...report, status: 'partial_failure' } });
+    return report;
+  }
+
+  async function handleCommand(event) {
+    const requestId = String(event.data.requestId || '');
+    activeCommandId = requestId;
+    try {
+      const result = event.data.action === 'search-tracks'
+        ? await searchCatalog(event.data.query)
+        : await executeTransfer(event.data.plan);
+      post('command-result', { requestId, ok: true, result });
+    } catch (error) {
+      post('command-result', { requestId, ok: false, error: error instanceof Error ? error.message : 'Команда Spotify не выполнена.', report: error?.transferReport || null });
+    } finally {
+      if (activeCommandId === requestId) activeCommandId = '';
+    }
+  }
+
   async function scanLibrary() {
     if (scanPromise) return scanPromise;
     scanPromise = (async () => {
@@ -249,6 +451,11 @@
 
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
+    if (event.data.type === 'command') {
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(event.data.requestId || '')) || !['search-tracks', 'execute-transfer'].includes(event.data.action)) return;
+      void handleCommand(event);
+      return;
+    }
     if (event.data.type !== 'start-library-scan') return;
     try {
       post('scan-progress', { phase: 'reading', message: 'Читаем лайки и плейлисты Spotify…' });

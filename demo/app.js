@@ -311,10 +311,21 @@
     },
   };
 
+  const spotifyCatalogAdapter = {
+    id: 'spotify',
+    maxConcurrentSearches: 2,
+    async searchTracks(track) {
+      const response = await requestExtensionCommand('search-tracks', { query: (track.query || `${track.title} ${track.artist}`).trim() }, 'spotify');
+      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Spotify.');
+      return response.results;
+    },
+  };
+
   function targetAdapter() {
     if (state.targetProvider === 'apple-music') return appleCatalogAdapter;
     if (state.targetProvider === 'yandex-music') return yandexCatalogAdapter;
     if (state.targetProvider === 'zvuk') return zvukCatalogAdapter;
+    if (state.targetProvider === 'spotify') return spotifyCatalogAdapter;
     throw new Error('Для выбранного сервиса назначения адаптер ещё не подключён.');
   }
 
@@ -664,16 +675,16 @@
       const plan = buildPlan();
       const sourceComplete = plan.completeness.source.length > 0
         && plan.completeness.source.every((status) => status?.confirmed === true);
-      if (['yandex-music', 'zvuk'].includes(state.targetProvider) || (state.targetProvider === 'apple-music' && sourceComplete)) {
+      if (['yandex-music', 'zvuk', 'spotify'].includes(state.targetProvider) || (state.targetProvider === 'apple-music' && sourceComplete)) {
         if (plan.completeness.source.some((status) => status?.confirmed !== true)) {
           throw new Error('Для записи нужен полный snapshot. Пример и ручной CSV остаются в preview-only режиме.');
         }
         const playlistCount = plan.collectionMappings.length;
-        const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
+        const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', zvuk: 'Звук', spotify: 'Spotify' })[state.targetProvider] || state.targetProvider;
         if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
         $('#importBtn').disabled = true;
         $('#importBtn').textContent = 'Записываем и сверяем…';
-        const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk' })[state.targetProvider];
+        const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk', spotify: 'spotify' })[state.targetProvider];
         const response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider);
         if (!response?.ok) {
           if (response?.report) {

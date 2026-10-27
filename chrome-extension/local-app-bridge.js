@@ -5,10 +5,10 @@
   if (!allowedOrigins.has(location.origin) || location.pathname !== '/') return;
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (!['music-importer:yandex-progress', 'music-importer:apple-progress', 'music-importer:zvuk-progress'].includes(message?.type)) return false;
+    if (!['music-importer:yandex-progress', 'music-importer:apple-progress', 'music-importer:zvuk-progress', 'music-importer:spotify-progress'].includes(message?.type)) return false;
     window.postMessage({
       source: marker,
-      type: message.type === 'music-importer:apple-progress' ? 'apple-progress' : message.type === 'music-importer:zvuk-progress' ? 'zvuk-progress' : 'yandex-progress',
+      type: message.type === 'music-importer:apple-progress' ? 'apple-progress' : message.type === 'music-importer:zvuk-progress' ? 'zvuk-progress' : message.type === 'music-importer:spotify-progress' ? 'spotify-progress' : 'yandex-progress',
       requestId: String(message.requestId || ''),
       progress: message.progress || null,
     }, location.origin);
@@ -79,6 +79,32 @@
         }, location.origin);
       } catch {
         window.postMessage({ source: marker, type: 'apple-command-response', requestId, ok: false, error: 'Не удалось связаться с расширением Apple Music.' }, location.origin);
+      }
+      return;
+    }
+
+    if (event.data.type === 'spotify-command') {
+      const action = String(event.data.action || '');
+      if (!['search-tracks', 'execute-transfer'].includes(action)) return;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'music-importer:spotify-command',
+          requestId,
+          action,
+          query: String(event.data.query || '').slice(0, 400),
+          plan: action === 'execute-transfer' ? event.data.plan : undefined,
+        });
+        window.postMessage({
+          source: marker,
+          type: 'spotify-command-response',
+          requestId,
+          ok: response?.ok === true,
+          error: response?.error || null,
+          results: response?.results || null,
+          report: response?.report || null,
+        }, location.origin);
+      } catch {
+        window.postMessage({ source: marker, type: 'spotify-command-response', requestId, ok: false, error: 'Не удалось связаться с расширением Spotify.' }, location.origin);
       }
       return;
     }

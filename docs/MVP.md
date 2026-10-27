@@ -19,9 +19,9 @@
 - Первичный порог авто-подбора консервативный и пока не откалиброван на реальных библиотеках: exact ISRC принимается автоматически; по метаданным — только при уверенно высоком score и заметном отрыве от второго кандидата. Совпадение версий (live/remix/remaster и др.) проверяется отдельно. Массовый перенос тысяч записей ещё не подтверждён.
 - Matcher, `demo/transfer-core.js` и `demo/transfer-engine.js` отделяют модель данных, план и orchestration от сервисов: общий поиск объединяет повторы и ограничивает конкуренцию, общий reader проходит cursor-страницы и сохраняет playlist positions. Модель допускает любой из четырёх сервисов как источник/назначение; target adapters подключаются поэтапно.
 - Общий executor задаёт целевой поток: требует подтверждённой полноты снимка, явного согласия и read-back. Yandex writer проверяет существующие likes, добавляет недостающие, создаёт приватные плейлисты, вставляет треки партиями с актуальной revision и сравнивает ID/order после записи. Повторный запуск после частичной ошибки может создать дубликат плейлиста; проверяйте целевой аккаунт перед повтором.
-- План представляет mixed-перенос всей библиотеки: favorites идут отдельными `add_to_favorites`, playlist items — в соответствующие target playlists. Apple, Yandex и Zvuk writers сверяют лайки, ID и порядок обратным чтением; все требуют полной исходной библиотеки и явного подтверждения, live-write evidence пока нет.
+- План представляет mixed-перенос всей библиотеки: favorites идут отдельными `add_to_favorites`, playlist items — в соответствующие target playlists. Apple, Yandex, Zvuk и Spotify writers сверяют лайки, ID и порядок обратным чтением; все требуют полной исходной библиотеки и явного подтверждения, live-write evidence пока нет.
 - Apple Music source reader использует `inFavorites`, сохраняет повторы/порядок плейлистов и останавливается при неподтверждённой полноте. Apple target writer использует официальный REST API из first-party page session, fixture-tested; live scan, CORS/auth setup и write propagation ещё не проверены. См. [`APPLE_TRANSFER.md`](APPLE_TRANSFER.md).
-- Для Яндекса read route shapes и CORS подтверждены из авторизованной страницы и публичного terminal path; full extension scan и write/read-back пока fixture-only. Локальный Zvuk target writer использует GraphQL operations из community client, но deployed mutation contract и live write ещё не подтверждены. Spotify destination writer остаётся впереди.
+- Для Яндекса read route shapes и CORS подтверждены из авторизованной страницы и публичного terminal path; full extension scan и write/read-back пока fixture-only. Локальный Zvuk target writer использует GraphQL operations из community client, но deployed mutation contract и live write ещё не подтверждены. Spotify target writer добавлен на основе частных Web Player API: поиск, лайки, создание плейлистов, root-list insert и read-back покрыты fixtures, live API не запускали. См. [`SPOTIFY_TRANSFER.md`](SPOTIFY_TRANSFER.md).
 
 ## Запуск
 
@@ -37,7 +37,7 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 
 ## Ручная проверка
 
-В браузере проверены preview-поиск для 6 демо-треков, формирование и скачивание provider-neutral JSON-плана; preview не пишет в аккаунт. Дополнительно загружен JSON fixture в формате Zvuk playlist export: оба трека распознаны, порядок/тип коллекции показаны, ошибок консоли нет. Apple source/target commands проходят изолированные fixtures, но локальный extension→app handoff и live Apple write требуют обновлённого unpacked extension и авторизованной вкладки.
+В браузере проверены preview-поиск для 6 демо-треков, формирование и скачивание provider-neutral JSON-плана; preview не пишет в аккаунт. Дополнительно загружен JSON fixture в формате Zvuk playlist export: оба трека распознаны, порядок/тип коллекции показаны, ошибок консоли нет. Provider source/target commands проходят изолированные fixtures, но локальный extension→app handoff и live writes требуют обновлённого unpacked extension и авторизованных вкладок. При текущем осмотре Chrome страница на `127.0.0.1:8001` не получила `extension-ready`; extension bridge не работает или не установлен в этой версии Chrome. Настройки Chrome не изменялись, account writes не отправлялись.
 
 ## Текущая проверка авто-подбора (2026-10-28)
 
@@ -47,6 +47,6 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 
 ## Статус охвата
 
-Проект не поддерживает заявленный полный охват: все 12 directed pairs не реализованы и live transfer ещё не прошёл проверку на аккаунте. Три экспериментальных target adapters имеют fixture coverage, но не live-verified.
+Все 12 source/target combinations теперь подключены на уровне readers, search adapters и writers, но ни одно из 12 направлений не прошло live end-to-end проверку. Четыре target adapters имеют fixture coverage, но не live-verified.
 
 Подробности Yandex reader и неопровергнутые runtime/CORS ограничения: [`YANDEX_CONNECTOR.md`](YANDEX_CONNECTOR.md).
