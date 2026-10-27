@@ -236,7 +236,7 @@ Live проверки касались только чтения. Для наш�
 
 ## Device login и GraphQL из source `zvuk/kithara`
 
-В GitHub-организации `Zvuk LLC` найден Rust workspace [`zvuk/kithara`](https://github.com/zvuk/kithara), HEAD `1e49fd342bcb614dba31db8c8a6d675b9dbeaf42` от 27.10.2026; GitHub metadata указывает Apache-2.0. Организация GitHub в настоящее время не отмечена как verified, поэтому это сильный source reference под именем компании, но не опубликованный/гарантированный API-контракт. Просмотрены `kithara-app-zvuk` auth/client source и tests; live login или запросы с пользовательским токеном не запускались. Все API запросы этого crate получают настроенный `User-Agent`; значения его client identity нужно считать частью сервиса-зависимого поведения и не подменять без проверки.
+В GitHub-организации `Zvuk LLC` найден Rust workspace [`zvuk/kithara`](https://github.com/zvuk/kithara), HEAD `1e49fd342bcb614dba31db8c8a6d675b9dbeaf42` от 27.10.2026; GitHub metadata указывает Apache-2.0. Организация GitHub в настоящее время не отмечена как verified, поэтому это сильный source reference под именем компании, но не опубликованный/гарантированный API-контракт. Просмотрены `kithara-app-zvuk` auth/client source и tests; live QR-start проверен ниже, но пользовательская авторизация и вызовы с выданным access token не завершались. Все API запросы этого crate получают настроенный `User-Agent`; значения его client identity нужно считать частью сервиса-зависимого поведения и не подменять без проверки.
 
 В отличие от web-session подхода, клиент реализует QR device sign-in, при котором пароль и MFA вводятся в открытой сервисной странице:
 
@@ -249,6 +249,12 @@ Live проверки касались только чтения. Для наш�
 | Отключить/revoke | `POST https://zvuk.com/api/tiny/logout` с `X-Auth-Token`; source отзывает сессию и удаляет локальный секрет независимо от ответа сервиса. |
 
 Token сохраняется через абстракцию `Secrets`; README Kithara описывает OS keystore, когда включена feature `keystore`, иначе конфигурационный secrets overlay. Встроенная сессионная авторизация подходит под «войти в аккаунт у сервиса», не требует нашего OAuth Client ID и предоставляет явный logout endpoint. Это пока только кодовая подсказка: QR endpoints, consent, expiry, revoke и платформенный secret store нужно проверить на отдельном аккаунте до выбора как production flow.
+
+### Live QR-start probe из Chrome (28.10.2026)
+
+Без чтения Chrome cookies/storage из уже открытой страницы `https://zvuk.com/` выполнен same-origin `POST /api/tiny/login/qr/session` с новым случайным `device_id`. Браузер получил `200 application/json`; у `result` были ключи `device_code`, `user_code`, `expires_in`, `qr_authorization_url`, `expires_in=300`. Значения кодов и URL не записывались и не включались в вывод. Чистый terminal Python `urllib` POST на тот же маршрут без browser context/cookies получил `418 text/html`; body отброшен. Это подтверждает только запуск QR-сессии из browser origin, не выпуск access token.
+
+Открытие выданного URL привело на `https://id.zvuk.com/` с экраном входа по номеру телефона и SMS-коду. Видимая форма сообщает о принятии условий сервиса и обработке персональных данных при продолжении; рекламная подписка показана отдельным checkbox. Уже активная сессия `zvuk.com` не перевела этот экран автоматически в подтверждение устройства. Не вводились телефон/OTP, не принимались условия и не нажималась кнопка входа; poll не завершался, user access token не получен, account/library не менялись. Поэтому QR-start API живой из Chrome, а «один клик без дополнительного входа» не доказан; flow остаётся незавершённым до пользовательского входа/подтверждения в этой странице. Неодобренные device sessions истекают по указанному 300-секундному сроку.
 
 | Задача | GraphQL operation из source |
 |---|---|
