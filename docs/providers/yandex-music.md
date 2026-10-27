@@ -6,6 +6,21 @@
 
 Основной кандидат — [MarshalX/yandex-music-api](https://github.com/MarshalX/yandex-music-api), LGPL-3.0. В проверенном срезе GitHub: последний опубликованный релиз `v3.2.2`, исходный commit `9ca132e` (2026-10-11), репозиторий обновлялся 2026-10-26. Поддерживает sync/async клиент; OpenAPI справочник, генерируемый из реализации библиотеки, описывает около 150 операций и 220 схем. Сверяйте детали с конкретной версией перед реализацией.
 
+### Страничный мост к очереди: `Night-Soft/YmExternalAPI`
+
+В актуальном на 27.10.2026 публичном checkout [`Night-Soft/YmExternalAPI`](https://github.com/Night-Soft/YmExternalAPI/tree/a61c8011affeda77c855dcb1f96a9a4b3e000783) (версия 1.3.2, HEAD `a61c8011affeda77c855dcb1f96a9a4b3e000783`, push 2026-08-31) найден вариант взаимодействия с уже открытой страницей без чтения browser cookies или OAuth bearer. Расширение объявляет content script в `world: MAIN` на `document_start`, перехватывает webpack runtime и достаёт внутренние controller/store; публичных `host_permissions`/`permissions` в manifest нет. Это всё равно доступ к внутренним нестабильным объектам сайта, а не официальный стабильный API.
+
+| Метод страницы | Что возвращает / делает | Ограничение для экспорта |
+|---|---|---|
+| `externalAPI.getTracksList()` | `Tracks.converted` для `Controller.state.queueState.entityList.value`; у элемента `title`, `version`, `cover`, `duration`, `liked`, `disliked`, `link`, первый album, artists | Текущий список/очередь плеера; нет track ID, total, cursor, revision или доказанного обхода всей библиотеки лайков |
+| `externalAPI.getSourceInfo()` | Метаданные текущего источника воспроизведения | Само по себе не перечисляет пользовательскую коллекцию |
+| `externalAPI.populate(fromIndex, after?, before?)` | Подгружает unloaded entities текущей очереди; defaults: 25 после и 15 перед индексом; возвращает Promise | Это hydrate по индексам очереди, а не page API коллекции; границы и наличие полного liked playlist зависят от source context. `ordered` указан в README как не реализованный |
+| `externalAPI.toggleLike()` / `toggleDislike()` | Меняет лайк/дизлайк текущего трека через внутренний likeStore | Изменяющие операции; не вызывать в read-only connector |
+
+Source scan pinned HEAD не нашёл использования `chrome.cookies`, `document.cookie`, Web Storage, Authorization bearer или извлечения OAuth token. Поле `liked` формируется через внутренний `likeStore`, но наличие этого флага у элементов текущей очереди не означает, что `getTracksList()` возвращает все лайки. В manifest нет `LICENSE`, а GitHub license metadata пустая: код нельзя включать в наш продукт до выяснения лицензии. Browser-проверка публичного GitHub README подтвердила заявленное предупреждение о неофициальности; clone/source review в терминале подтверждает структуру выше. Расширение не устанавливалось и на пользовательском аккаунте не запускалось.
+
+Практическая ценность — минимальный прототип user-in-page connector: на вкладке пользователя считывать нормализованные поля очереди и отправлять приложению только данные треков. Перед применением к лайкам нужно на фиктивном/тестовом контексте определить, как пользователь может явно открыть полный liked-list source, измерить доступную длину, проверить пропуски и выяснить, можно ли надёжно получить ID. Не добавлять автоматический `play`, `toggleLike` или другие действия над аккаунтом.
+
 Полный индекс всех операций pinned OpenAPI snapshot вынесен в [Yandex Music community API inventory](yandex-openapi-inventory.md): он содержит 150 методов по 22 категориям, включая likes/dislikes, playlist, library/profile, search, track/album/artist, radio, history и account-settings routes. Спецификация задаёт server `https://api.music.yandex.net` и глобальный `Authorization: OAuth <token>`; device-code/token endpoints явно без этой схемы.
 
 Host difference: library/OpenAPI snapshot использует `api.music.yandex.net`, а ранее наблюдавшийся Chrome и authenticated terminal traffic для account/likes/details шёл на `api.music.yandex.ru` и отвечал `200`. No-auth `/search` отдельно ответил `200 application/json` на обоих доменах 27.10.2026. Это не доказывает, что все routes взаимозаменяемы; сохранять фактический host как часть проверенного request profile и перепроверять перед реализацией.
