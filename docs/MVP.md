@@ -1,6 +1,6 @@
 # Локальный прототип переноса между сервисами
 
-Целевая функция — перенос лайков и плейлистов в любом направлении между Spotify, Apple Music, Яндекс Музыкой и Звуком. Experimental source readers есть для всех четырёх сервисов. Apple Music и Яндекс Музыка имеют fixture-tested target writers; Apple живой перенос в аккаунт ещё не проверен. Ни один из 12 направленных маршрутов ещё не прошёл end-to-end live transfer.
+Целевая функция — перенос лайков и плейлистов в любом направлении между Spotify, Apple Music, Яндекс Музыкой и Звуком. Experimental source readers есть для всех четырёх сервисов. Apple Music, Яндекс Музыка и Звук имеют fixture-tested target writers; Spotify target writer отсутствует. Ни один из 12 направленных маршрутов ещё не прошёл end-to-end live transfer.
 
 ## Что можно попробовать
 
@@ -19,9 +19,9 @@
 - Первичный порог авто-подбора консервативный и пока не откалиброван на реальных библиотеках: exact ISRC принимается автоматически; по метаданным — только при уверенно высоком score и заметном отрыве от второго кандидата. Совпадение версий (live/remix/remaster и др.) проверяется отдельно. Массовый перенос тысяч записей ещё не подтверждён.
 - Matcher, `demo/transfer-core.js` и `demo/transfer-engine.js` отделяют модель данных, план и orchestration от сервисов: общий поиск объединяет повторы и ограничивает конкуренцию, общий reader проходит cursor-страницы и сохраняет playlist positions. Модель допускает любой из четырёх сервисов как источник/назначение; target adapters подключаются поэтапно.
 - Общий executor задаёт целевой поток: требует подтверждённой полноты снимка, явного согласия и read-back. Yandex writer проверяет существующие likes, добавляет недостающие, создаёт приватные плейлисты, вставляет треки партиями с актуальной revision и сравнивает ID/order после записи. Повторный запуск после частичной ошибки может создать дубликат плейлиста; проверяйте целевой аккаунт перед повтором.
-- План представляет mixed-перенос всей библиотеки: favorites идут отдельными `add_to_favorites`, playlist items — в соответствующие target playlists. Apple writer добавляет favorites и приватные плейлисты, затем сверяет ID и порядок обратным чтением; Yandex writer использует private/community API. Оба требуют полной исходной библиотеки и явного подтверждения, оба пока без live-write evidence.
+- План представляет mixed-перенос всей библиотеки: favorites идут отдельными `add_to_favorites`, playlist items — в соответствующие target playlists. Apple, Yandex и Zvuk writers сверяют лайки, ID и порядок обратным чтением; все требуют полной исходной библиотеки и явного подтверждения, live-write evidence пока нет.
 - Apple Music source reader использует `inFavorites`, сохраняет повторы/порядок плейлистов и останавливается при неподтверждённой полноте. Apple target writer использует официальный REST API из first-party page session, fixture-tested; live scan, CORS/auth setup и write propagation ещё не проверены. См. [`APPLE_TRANSFER.md`](APPLE_TRANSFER.md).
-- Для Яндекса read route shapes и CORS подтверждены из авторизованной страницы и публичного terminal path; full extension scan и write/read-back пока fixture-only. Локальный Zvuk connector собирает лайки и плейлисты; Spotify/Звук destination writers остаются впереди.
+- Для Яндекса read route shapes и CORS подтверждены из авторизованной страницы и публичного terminal path; full extension scan и write/read-back пока fixture-only. Локальный Zvuk target writer использует GraphQL operations из community client, но deployed mutation contract и live write ещё не подтверждены. Spotify destination writer остаётся впереди.
 
 ## Запуск
 
@@ -47,6 +47,6 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 
 ## Статус охвата
 
-Проект не поддерживает заявленный полный охват: все 12 directed pairs не реализованы и live transfer ещё не прошёл проверку на аккаунте. Один экспериментальный target adapter (Яндекс) имеет fixture coverage, но не live-verified.
+Проект не поддерживает заявленный полный охват: все 12 directed pairs не реализованы и live transfer ещё не прошёл проверку на аккаунте. Три экспериментальных target adapters имеют fixture coverage, но не live-verified.
 
 Подробности Yandex reader и неопровергнутые runtime/CORS ограничения: [`YANDEX_CONNECTOR.md`](YANDEX_CONNECTOR.md).

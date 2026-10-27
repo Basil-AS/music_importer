@@ -100,7 +100,7 @@
       const artist = escapeHTML(track.artist);
       const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? 'Не найдено' : track.match ? (track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? 'Проверьте' : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : track.searched && track.matches.length ? 'review' : 'pending';
-      const targetName = state.targetProvider === 'yandex-music' ? 'Яндекс Музыка' : 'Apple Music';
+      const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
       const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
@@ -301,9 +301,20 @@
     },
   };
 
+  const zvukCatalogAdapter = {
+    id: 'zvuk',
+    maxConcurrentSearches: 2,
+    async searchTracks(track) {
+      const response = await requestExtensionCommand('search-tracks', { query: (track.query || `${track.title} ${track.artist}`).trim() }, 'zvuk');
+      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Звука.');
+      return response.results;
+    },
+  };
+
   function targetAdapter() {
     if (state.targetProvider === 'apple-music') return appleCatalogAdapter;
     if (state.targetProvider === 'yandex-music') return yandexCatalogAdapter;
+    if (state.targetProvider === 'zvuk') return zvukCatalogAdapter;
     throw new Error('Для выбранного сервиса назначения адаптер ещё не подключён.');
   }
 
@@ -345,11 +356,12 @@
     $('#searchBtn').textContent = `Найти в ${label}`;
     $('#storefront').hidden = state.targetProvider !== 'apple-music';
     $('#storefront').previousElementSibling.hidden = state.targetProvider !== 'apple-music';
-    $('#importBtn').innerHTML = state.targetProvider === 'yandex-music'
-      ? 'Перенести в Яндекс Музыку <span aria-hidden="true">→</span>'
-      : state.targetProvider === 'apple-music'
-        ? 'Перенести в Apple Music <span aria-hidden="true">→</span>'
-        : 'Сформировать план <span aria-hidden="true">→</span>';
+    $('#importBtn').innerHTML = ({
+      'yandex-music': 'Перенести в Яндекс Музыку <span aria-hidden="true">→</span>',
+      'apple-music': 'Перенести в Apple Music <span aria-hidden="true">→</span>',
+      zvuk: 'Перенести в Звук <span aria-hidden="true">→</span>',
+      spotify: 'Перенести в Spotify <span aria-hidden="true">→</span>',
+    })[state.targetProvider] || 'Сформировать план <span aria-hidden="true">→</span>';
     $('#targetCollection').textContent = state.collectionType === 'library'
       ? 'Лайки и плейлисты'
       : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
@@ -460,7 +472,8 @@
       toast(failed ? 'Часть запросов не прошла — можно повторить' : `Совпадений в каталоге: ${withResults}`);
     } finally {
       state.searching = false;
-      $('#searchBtn').textContent = `Найти в ${state.targetProvider === 'yandex-music' ? 'Яндекс Музыке' : 'Apple Music'}`;
+      const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыке', spotify: 'Spotify', zvuk: 'Звуке' };
+      $('#searchBtn').textContent = `Найти в ${labels[state.targetProvider] || state.targetProvider}`;
       renderTracks();
     }
   }
@@ -651,16 +664,17 @@
       const plan = buildPlan();
       const sourceComplete = plan.completeness.source.length > 0
         && plan.completeness.source.every((status) => status?.confirmed === true);
-      if (state.targetProvider === 'yandex-music' || (state.targetProvider === 'apple-music' && sourceComplete)) {
+      if (['yandex-music', 'zvuk'].includes(state.targetProvider) || (state.targetProvider === 'apple-music' && sourceComplete)) {
         if (plan.completeness.source.some((status) => status?.confirmed !== true)) {
           throw new Error('Для записи нужен полный snapshot. Пример и ручной CSV остаются в preview-only режиме.');
         }
         const playlistCount = plan.collectionMappings.length;
-        const providerName = state.targetProvider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыка';
+        const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
         if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
         $('#importBtn').disabled = true;
         $('#importBtn').textContent = 'Записываем и сверяем…';
-        const response = await requestExtensionCommand('execute-transfer', { plan }, state.targetProvider === 'apple-music' ? 'apple' : 'yandex');
+        const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk' })[state.targetProvider];
+        const response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider);
         if (!response?.ok) {
           if (response?.report) {
             state.report = { ...plan, mode: 'account-write', execution: response.report };

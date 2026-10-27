@@ -252,6 +252,68 @@ function messageMatchesPage(type, kind) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === 'zvuk:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://zvuk.com') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
+        type: 'music-importer:zvuk-progress',
+        requestId: String(message.requestId || ''),
+        progress: message.progress || null,
+      }).catch(() => null)));
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'music-importer:zvuk-command') {
+      let origin = '';
+      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Некорректная команда Звука.' });
+        return;
+      }
+      if (message.action === 'execute-transfer') {
+        const plan = message.plan;
+        if (plan?.type !== 'music-transfer-plan' || plan?.target?.provider !== 'zvuk'
+          || !Array.isArray(plan.operations)
+          || plan.operations.some((operation) => operation?.target?.provider !== 'zvuk' || !operation?.target?.providerId)
+          || !Array.isArray(plan.completeness?.source) || !plan.completeness.source.length
+          || plan.completeness.source.some((status) => status?.confirmed !== true)) {
+          sendResponse({ ok: false, error: 'План Звука неполный или содержит другую цель.' });
+          return;
+        }
+      }
+      const tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте вкладку Звука и войдите в аккаунт, затем повторите.' });
+        return;
+      }
+      try {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'zvuk:command',
+          requestId: String(message.requestId),
+          action: message.action,
+          query: String(message.query || '').slice(0, 400),
+          plan: message.action === 'execute-transfer' ? message.plan : undefined,
+        });
+        sendResponse(response || { ok: false, error: 'Звук не вернул результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Звука. Перезагрузите её и повторите.' });
+      }
+      return;
+    }
+
     if (message?.type === 'apple:transfer-progress') {
       let origin = '';
       try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
