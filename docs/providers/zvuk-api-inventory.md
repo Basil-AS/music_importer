@@ -106,6 +106,19 @@ Live проверки касались только чтения. Для наш�
 
 Пассивное наблюдение загрузки страницы в этой проверке показало CDN/Next.js assets, но не дало пригодной трассы GraphQL вызова: method, operation, status и response shape повторно не подтверждены. Поэтому эту вкладку можно считать доказательством доступной авторизованной UI-сессии, но не новой сетевой фиксацией API. В отдельном чистом Python `urllib` без cookies/token три read-only запроса — `GET /api/tiny/profile`, `GET /api/v2/tiny/profile` и `POST /api/v1/graphql` с `{ __typename }` — каждый получили `418 text/html`. Это подтверждает текущий no-session WAF/challenge; оно не опровергает ранее зафиксированный authenticated cursor replay. Ни cookies, ни token, ни пользовательские карточки/ID в файлы не записывались.
 
+### Живая трасса `/collection` в активной Chrome-сессии (27.10.2026)
+
+В подключённой вкладке Звука после перехода на видимую страницу `/collection` пассивно записаны два успешных чтения с `POST https://zvuk.com/api/v1/graphql`, оба HTTP `200`:
+
+| Operation | Переменные запроса | Безопасно сохранённая форма ответа |
+|---|---|---|
+| `getCollectionCount` | GraphQL variables отсутствуют | `data.collectionCount.tracks: number` |
+| `getPaginatedCollectionAll` | `after`, `limit`, `withArtists`, `withBooks`, `withPlaylists`, `withPodcasts`, `withReleases`; начальный запрос передал `limit=15`, курсор не передавался | `data.paginatedCollection` содержит `artists`, `books`, `playlists`, `podcasts`, `releases`; у секций форма `items[]` + `page.{endCursor,hasNextPage}` |
+
+На первом ответе `getPaginatedCollectionAll` отдельная секция `tracks` в форме ответа не наблюдалась. Поэтому этот запрос подтверждает загрузку разделов коллекции и их cursor-пагинацию, но сам по себе не является экспортом понравившихся треков; для них остаются отдельные `getPaginatedCollection`/`getCollectionIds` пути из предыдущих capture. `getCollectionCount` возвращает поле числа треков, но фактическое значение не сохранялось и этот счётчик нельзя использовать как checksum полноты.
+
+Из сетевой трассы оставлены только operation names, имена переменных, типы/имена полей и HTTP status. Значения cookies, токенов, идентификаторов, названий, количества записей и cursor не выводились и не сохранялись; запросы были read-only.
+
 ## Продуктовый вывод
 
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.

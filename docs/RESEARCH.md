@@ -114,6 +114,13 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Сразу после этого чистый terminal без cookies/token проверил оба profile route и безопасный GraphQL `__typename`; все три ответа были `418 text/html`. Они совпадают с прежним WAF-наблюдением. Authenticated terminal replay в этой итерации не запускался; предыдущий успешный cursor GraphQL replay остаётся отдельной записью выше.
 - Chrome check оставил только подтверждение auth context/schema, а не содержимое коллекции. Ни лайки, ни настройки аккаунта не менялись.
 
+## Zvuk `/collection` live GraphQL capture (27.10.2026)
+
+- В активной Chrome-сессии после открытия `/collection` зафиксированы `POST /api/v1/graphql` operations `getCollectionCount` и `getPaginatedCollectionAll`, оба HTTP 200.
+- `getPaginatedCollectionAll` принял ключи `after`, `limit`, `withArtists`, `withBooks`, `withPlaylists`, `withPodcasts`, `withReleases`; начальная страница использовала `limit=15`. Ответ содержал cursor-страницы `items`/`page.{endCursor,hasNextPage}` для artists/books/playlists/podcasts/releases; отдельная tracks-секция в этой операции не появилась.
+- `getCollectionCount` имеет форму `collectionCount.tracks: number`; фактическое значение не записывалось и прежние live сверки показывают, что count не является надёжным checksum.
+- Для трассы сохранены только route/operation/status, ключи переменных и безопасная схема полей; секреты, записи коллекции, IDs и cursor не выводились и не сохранялись. Никаких мутаций не выполнялось. Подробная запись: `docs/providers/zvuk-api-inventory.md`.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
