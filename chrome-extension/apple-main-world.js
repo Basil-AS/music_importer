@@ -224,9 +224,13 @@
     const term = String(query || '').trim().slice(0, 400);
     if (!/^[a-z]{2}$/.test(country)) throw new Error('Укажите двухбуквенный storefront Apple Music.');
     if (!term) throw new Error('Введите название песни или исполнителя.');
-    const params = new URLSearchParams({ term, types: 'songs', limit: '25' });
-    const result = await request(`/v1/catalog/${country}/search?${params}`, { allowCatalog: true });
-    const songs = result?.results?.songs?.data;
+    const isrcQuery = /^isrc:([a-z0-9]{12})$/i.exec(term);
+    const params = isrcQuery
+      ? new URLSearchParams({ 'filter[isrc]': isrcQuery[1].toUpperCase(), limit: '25' })
+      : new URLSearchParams({ term, types: 'songs', limit: '25' });
+    const path = isrcQuery ? `/v1/catalog/${country}/songs?${params}` : `/v1/catalog/${country}/search?${params}`;
+    const result = await request(path, { allowCatalog: true });
+    const songs = isrcQuery ? result?.data : result?.results?.songs?.data;
     if (!Array.isArray(songs)) throw new Error('Каталог Apple Music вернул неожиданный формат поиска.');
     return songs.map(normalizeCatalogSong);
   }

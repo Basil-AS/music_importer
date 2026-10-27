@@ -143,7 +143,9 @@
       renderTracks();
     }));
     $$('.track-query').forEach((input) => input.addEventListener('input', () => {
-      state.tracks[Number(input.dataset.index)].query = input.value;
+      const track = state.tracks[Number(input.dataset.index)];
+      track.query = input.value;
+      track.manualQuery = true;
     }));
     $$('.track-search').forEach((button) => button.addEventListener('click', () => {
       searchOne(state.tracks[Number(button.dataset.index)]);
@@ -162,6 +164,7 @@
     state.tracks = list.map((track) => ({
       ...track,
       query: `${track.title} ${track.artist}`.trim(),
+      manualQuery: false,
       matches: [],
       match: null,
       selected: false,
@@ -350,6 +353,26 @@
     }).filter((track) => track.title && track.artist);
   }
 
+  function exactIsrcQuery(track, provider) {
+    if (track.manualQuery || !['apple-music', 'spotify'].includes(provider)) return '';
+    const isrc = window.MusicMatcher.normalizeISRC(track.isrc || '');
+    return /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc) ? `isrc:${isrc}` : '';
+  }
+
+  function candidateHasIsrc(candidate, isrc) {
+    return window.MusicMatcher.normalizeISRC(candidate?.isrc || candidate?.ISRC || candidate?.externalIds?.isrc || '') === isrc;
+  }
+
+  async function searchWithExactIsrc(track, provider, search) {
+    const isrcQuery = exactIsrcQuery(track, provider);
+    const metadataQuery = (track.query || `${track.title} ${track.artist}`).trim();
+    if (!isrcQuery) return search(metadataQuery);
+    const isrc = isrcQuery.slice('isrc:'.length);
+    const exactCandidates = await search(isrcQuery);
+    if (exactCandidates.some((candidate) => candidateHasIsrc(candidate, isrc))) return exactCandidates;
+    return search(metadataQuery);
+  }
+
   const appleCatalogAdapter = {
     id: 'apple-music',
     maxConcurrentSearches: 2,
@@ -364,12 +387,14 @@
         const payload = await response.json();
         return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
       }
-      const response = await requestExtensionCommand('search-tracks', {
-        query: (track.query || `${track.title} ${track.artist}`).trim(),
-        storefront: context.storefront || $('#storefront').value,
-      }, 'apple');
-      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Apple Music.');
-      return response.results.filter((item) => item.trackId && item.trackViewUrl).slice(0, 25);
+      return searchWithExactIsrc(track, 'apple-music', async (query) => {
+        const response = await requestExtensionCommand('search-tracks', {
+          query,
+          storefront: context.storefront || $('#storefront').value,
+        }, 'apple');
+        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Apple Music.');
+        return response.results.filter((item) => item.trackId && item.trackViewUrl).slice(0, 25);
+      });
     },
   };
 
@@ -397,9 +422,11 @@
     id: 'spotify',
     maxConcurrentSearches: 2,
     async searchTracks(track) {
-      const response = await requestExtensionCommand('search-tracks', { query: (track.query || `${track.title} ${track.artist}`).trim() }, 'spotify');
-      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Spotify.');
-      return response.results;
+      return searchWithExactIsrc(track, 'spotify', async (query) => {
+        const response = await requestExtensionCommand('search-tracks', { query }, 'spotify');
+        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Spotify.');
+        return response.results;
+      });
     },
   };
 
@@ -541,7 +568,7 @@
           storefront: $('#storefront').value,
           accountWrite: state.sourceSnapshot?.completeness?.confirmed === true,
         },
-        keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${exactIsrcQuery(track, state.targetProvider) || String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
         onProgress: async (group) => {
           for (const track of group.tracks) {
             track.searching = false;

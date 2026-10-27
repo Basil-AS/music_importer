@@ -95,6 +95,7 @@
     return {
       id: String(track.id || ''),
       title: String(track.title || ''),
+      isrc: String(track.isrc || track.ISRC || track.externalIds?.isrc || track.external_ids?.isrc || ''),
       duration: Number(track.duration || 0),
       explicit: Boolean(track.explicit),
       availability: track.availability ?? null,

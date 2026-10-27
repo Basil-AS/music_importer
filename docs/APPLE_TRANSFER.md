@@ -11,7 +11,8 @@ Status: experimental implementation; fixture-tested, not live-verified against a
 
 ## API operations
 
-- Catalog: `GET /v1/catalog/{storefront}/search?term=…&types=songs&limit=25`.
+- Catalog metadata search: `GET /v1/catalog/{storefront}/search?term=…&types=songs&limit=25`.
+- Exact catalog lookup: `GET /v1/catalog/{storefront}/songs?filter[isrc]={isrc}` when the source track has a valid ISRC; if Apple returns no exact match, the adapter falls back to title/artist search. Apple documents this route in [Get Multiple Catalog Songs by ISRC](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-isrc); a single ISRC can still return multiple catalog songs.
 - Favorites: `POST /v1/me/favorites?ids[songs]=…`.
 - Create playlist: `POST /v1/me/library/playlists` with `attributes.name` and `attributes.isPublic=false`.
 - Append playlist songs: `POST /v1/me/library/playlists/{id}/tracks` with `{ "data": [{ "id": "catalog-song-id", "type": "songs" }] }`.

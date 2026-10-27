@@ -71,6 +71,7 @@
       artistName: artists.join(', '),
       collectionName: String(release.title || ''),
       trackTimeMillis: Number.isFinite(duration) ? duration : null,
+      isrc: String(item?.isrc || item?.ISRC || item?.externalIds?.isrc || item?.external_ids?.isrc || item?.recording?.isrc || ''),
       trackViewUrl: `https://zvuk.com/track/${encodeURIComponent(id)}`,
     };
   }
