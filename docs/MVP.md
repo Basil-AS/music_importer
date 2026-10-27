@@ -20,7 +20,7 @@
 - Общий executor задаёт целевой поток: требует подтверждённой полноты снимка, явного согласия и read-back. Yandex writer проверяет существующие likes, добавляет недостающие, создаёт приватные плейлисты, вставляет треки партиями с актуальной revision и сравнивает ID/order после записи. Повторный запуск после частичной ошибки может создать дубликат плейлиста; проверяйте целевой аккаунт перед повтором.
 - План может представлять один mixed-перенос всей библиотеки: likes идут отдельными `add_to_favorites`, playlist items — в соответствующие target playlists; executor читает и сверяет оба типа назначения независимо. Это пока preview/core слой, реальные сервисные записи не подключены.
 - При цели Apple Music план по-прежнему `preview-only`; Apple target write не подключён. Для цели Яндекс Музыка отдельное подтверждение запускает экспериментальную запись только для полного снимка из account connector.
-- Spotify и Яндекс получили experimental source connectors из активных вкладок; их live completeness/CORS всё ещё требует проверки установленным расширением. Яндекс target writer собран по частному/community API-контракту и проверен только моками.
+- Spotify и Яндекс получили experimental source connectors из активных вкладок. Для Яндекса из авторизованной страницы и публичного terminal запроса подтверждены API response shapes и CORS для основного read path/metadata hydration; extension bridge и full-library completeness всё ещё требуют проверки установленным расширением. Yandex target writer собран по частному/community API-контракту и проверен только моками.
 - Локальный Zvuk connector собирает лайки и плейлисты и сверяет totals. Apple account source, Apple writer, Spotify writer и Zvuk writer остаются впереди.
 
 ## Запуск

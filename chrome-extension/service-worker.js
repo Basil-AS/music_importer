@@ -339,6 +339,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           && payload?.completeness?.confirmed === true
           && payload?.completeness?.favoritesConfirmed === true
           && payload?.completeness?.catalogConfirmed === true
+          && (provider !== 'yandex-music' || payload?.completeness?.playlistCatalogKindsConfirmed === true)
           && payload?.completeness?.playlistItemsConfirmed === true
           && Array.isArray(payload?.tracks)
           && payload?.completeness?.favoritesCount === payload.tracks.length

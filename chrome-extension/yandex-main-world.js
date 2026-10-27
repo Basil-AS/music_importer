@@ -1,7 +1,7 @@
 (() => {
   const marker = 'music-importer-yandex';
   const api = 'https://api.music.yandex.ru';
-  const batchSize = 100;
+  const batchSize = 25;
   let scanPromise = null;
 
   function post(type, detail = {}) {
@@ -216,8 +216,8 @@
     const initial = await readPlaylistDetail(uid, kind);
     let expectedPosition = initial.total;
     let written = 0;
-    for (let offset = 0; offset < items.length; offset += 50) {
-      const batch = items.slice(offset, offset + 50);
+    for (let offset = 0; offset < items.length; offset += 25) {
+      const batch = items.slice(offset, offset + 25);
       const current = await readPlaylistDetail(uid, kind);
       if (current.total !== expectedPosition) throw new Error('Плейлист изменился во время записи; остановил импорт для защиты порядка.');
       const tracks = batch.map((operation) => {
@@ -304,6 +304,18 @@
       const playlistResult = await request(`/users/${encodeURIComponent(uid)}/playlists/list`);
       const playlistRows = playlistListFrom(playlistResult);
       if (!playlistRows) throw new Error('Яндекс Музыка вернула неизвестный формат списка плейлистов.');
+      const kindsResult = await request(`/users/${encodeURIComponent(uid)}/playlists/list/kinds`);
+      if (!Array.isArray(kindsResult)) throw new Error('Яндекс Музыка не вернула независимый список playlist kinds.');
+      const expectedKinds = kindsResult.map((kind) => String(kind));
+      const listedKinds = playlistRows.map((playlist) => String(playlist.kind ?? playlist.id ?? ''));
+      const expectedSorted = expectedKinds.slice().sort();
+      const listedSorted = listedKinds.slice().sort();
+      if (expectedKinds.some((kind) => !kind) || listedKinds.some((kind) => !kind)
+        || new Set(expectedKinds).size !== expectedKinds.length
+        || expectedKinds.length !== listedKinds.length
+        || expectedSorted.some((kind, index) => kind !== listedSorted[index])) {
+        throw new Error('Список Яндекс Музыки и независимый список playlist kinds не совпали.');
+      }
       const unique = new Set();
       const playlists = [];
       for (const [index, playlist] of playlistRows.entries()) {
@@ -323,6 +335,7 @@
           favoritesCount: favorites.count,
           favoritesRevision: favorites.revision,
           catalogConfirmed: true,
+          playlistCatalogKindsConfirmed: true,
           playlistItemsConfirmed: playlists.every((playlist) => playlist.complete),
           playlistItemsTotal: playlists.length,
         },

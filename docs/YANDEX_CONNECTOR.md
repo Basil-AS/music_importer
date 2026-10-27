@@ -2,7 +2,7 @@
 
 ## Назначение и статус
 
-Добавлен экспериментальный read-only connector для уже открытой авторизованной вкладки `music.yandex.ru`. Он читает понравившиеся треки и пользовательские плейлисты для передачи в общий importer. Используются private/community API маршруты из исследования; это не официальный third-party API и не стабильная production интеграция. В этой итерации вызовы проверены только на mock responses, не на пользовательской сессии.
+Добавлен экспериментальный read-only connector для уже открытой авторизованной вкладки `music.yandex.ru`. Он читает понравившиеся треки и пользовательские плейлисты для передачи в общий importer. Используются private/community API маршруты из исследования; это не официальный third-party API и не стабильная production интеграция. Browser main-world direct fetch response shapes подтверждены для read routes, а полная работа самого extension bridge всё ещё требует live-проверки.
 
 ## Запросы
 
@@ -10,9 +10,10 @@
 
 1. `GET https://api.music.yandex.ru/account/status` — получить UID текущего аккаунта в памяти страницы.
 2. `GET /users/{uid}/likes/tracks?if-modified-since-revision=0` — прочитать полный массив short track refs и revision.
-3. `POST /tracks` — гидрировать карточки ID form-urlencoded полем `track-ids`, партиями по 100, без лимита на весь список.
+3. `POST /tracks` — гидрировать карточки ID form-urlencoded полем `track-ids`, партиями по 25, без лимита на весь список. Batch size 25 выбран по ранее подтверждённым terminal responses; больший размер не используем.
 4. `GET /users/{uid}/playlists/list` — получить каталог пользовательских плейлистов.
-5. `GET /users/{ownerUid}/playlists/{kind}` — читать треки каждого плейлиста; для short refs повторно вызывается `/tracks`.
+5. `GET /users/{uid}/playlists/list/kinds` — независимо прочитать kinds и сверить их полный набор с playlist catalog response.
+6. `GET /users/{ownerUid}/playlists/{kind}` — читать треки каждого плейлиста; для short refs повторно вызывается `/tracks`.
 
 Cookie значения и access tokens не читаются JavaScript-кодом, не складываются в extension storage и не отправляются в приложение. Браузер сам прикладывает cookie к запросу домена Яндекса. Локальное приложение получает только метаданные после завершения скана.
 
@@ -20,18 +21,18 @@ Cookie значения и access tokens не читаются JavaScript-код
 
 - Likes принимаются только если ответ содержит revision, все short refs имеют уникальные IDs, и `/tracks` вернул каждую карточку.
 - Для каждого playlist `tracks.length` сравнивается с provider `trackCount`; позиции назначаются по исходному порядку API, повторы сохраняются, пустые playlist остаются в snapshot.
-- Гидратация идёт партиями по 100 с короткой паузой. Повреждённый JSON, неполные batches, API errors, отсутствие аккаунта, unknown shape или mismatch останавливают скан и не передают неполный snapshot в matcher.
-- Каталог пользовательских плейлистов приходит одним ответом endpoint без известной cursor-пагинации. Независимый total каталога в исследованном контракте не описан; это ограничение надо проверить на аккаунте до заявления полной синхронизации.
+- Гидратация идёт партиями по 25 с короткой паузой. Повреждённый JSON, неполные batches, API errors, отсутствие аккаунта, unknown shape или mismatch останавливают скан и не передают неполный snapshot в matcher.
+- Каталог пользовательских плейлистов приходит одним массивом без cursor-пагинации; полный набор сверяется со вторым endpoint `list/kinds`. Несовпадение kinds или их дубликаты останавливают скан.
 
 ## Ограничения и дальнейшая проверка
 
-- CORS и поведение запросов из `music.yandex.ru` в `api.music.yandex.ru` ещё не подтверждены на runtime; API может потребовать заголовки, которые устанавливает сам web player.
+- Из открытой авторизованной вкладки напрямую проверены HTTP 200 и response shapes для `/account/status`, liked tracks, playlist list, playlist kinds, playlist detail, catalog search и `POST /tracks` hydration. Это подтверждает CORS для этих запросов, но не весь extension bridge, массовую гидратацию пользовательского каталога или все edge cases.
 - Likes endpoint не описывает pagination. Пока source service возвращает весь список одним response, код сверяет все уникальные refs с гидратированными карточками и сохраняет revision; этот контракт остаётся private.
 - Этот документ описывает только reader: он выполняет GET и metadata POST. Yandex target writer реализован отдельно; см. [`YANDEX_TRANSFER.md`](YANDEX_TRANSFER.md). Live mutation всё ещё не проверялась.
-- Для проверки откройте Яндекс Музыку в Chrome, выберите её как источник и нажмите «Подтянуть из расширения». Если API не допускает page-context fetch, ошибка будет показана, а snapshot не будет считаться полным.
+- Для проверки connector откройте Яндекс Музыку в Chrome, выберите её как источник и нажмите «Подтянуть из расширения». Extension bridge и full-library scan должны быть отдельно проверены после перезагрузки unpacked extension; до этого runtime connector остаётся experimental.
 
 Исследовательские детали и ранее подтверждённые request shapes: [`providers/yandex-music.md` в API research](https://github.com/Basil-AS/music_importer/blob/feature/music-service-api-research/docs/providers/yandex-music.md).
 
-## Browser read-only shape check (2026-10-28)
+## Browser and terminal read-only shape check (2026-10-28)
 
-В отдельной вкладке Chrome без изменения исходной страницы проверена существующая авторизованная cookie-сессия: `/account/status` вернул JSON с `result.account`, likes route — `result.library.{uid,revision,playlistUuid,tracks}`, а `/users/{uid}/playlists/list` — массив playlist objects с `uid`, `kind`, `title`, `trackCount`. Запрос карточки одного playlist вернул `trackCount` и `tracks[]` элементов с вложенным `track` и `originalIndex`. Коллекции не экспортировались и не сохранялись; UID, playlist kinds, названия, track IDs и размеры библиотек не включались в рабочий каталог или PR. Это подтверждает live GET response shapes, но не cross-origin fetch/CORS и не POST hydration из main-world connector.
+Из уже авторизованной страницы Chrome выполнены browser-credentialed fetches через `window.fetch`: `/account/status`, likes, playlist list, `list/kinds` и один playlist detail вернули HTTP 200. Likes ответ имеет `result.library.{uid,revision,playlistUuid,tracks}`, playlist catalog и independent kinds оба возвращают массивы, detail содержит `trackCount` и `tracks[]`. Отдельно публичный catalog search (`type=track`) вернул HTTP 200, а `POST /tracks` с form-urlencoded `track-ids` успешно гидрировал один публичный search result (HTTP 200). В terminal без credentials те же public search + one-track hydration вернули HTTP 200; ответы совпали по форме. Скрипты возвращали только статусы, типы и имена полей: UID, playlist kinds, названия, user track IDs и account collection sizes не сохранялись и не включались в PR. Это проверяет CORS/route shapes для чтения и metadata hydration, но не весь extension→app bridge и не hydration всей пользовательской библиотеки.
