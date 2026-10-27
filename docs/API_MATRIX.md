@@ -37,7 +37,8 @@ Spotify archive — отдельный offline export path, не HTTP API: фа�
 | Прочитать Favorite Songs для read-back | `GET /v1/me/library/playlists` → найти системный Favorite Songs → `GET /v1/me/library/playlists/{id}/tracks` | Official API требует оба токена; web-player в live probe использовал `Authorization` и `Media-User-Token` | Browser/terminal read-only дал `200` на список playlist и один Favorite Songs item; per-account playlist ID не сохранять |
 | Поставить Favorite | `POST https://api.music.apple.com/v1/me/favorites?ids[songs]=<catalog-id>` | Developer Token + Music User Token | Official; Apple указывает `202 Accepted`; ни одной записи в этом проекте не отправляли |
 | Library add или обычный playlist | `POST /v1/me/library?ids[songs]=...`; playlist: `POST /v1/me/library/playlists`, затем `POST /v1/me/library/playlists/{id}/tracks` | Developer Token + Music User Token | Official; это не эквивалент Favorite Songs |
-| Проверить локальные Favorites | AppleScript `count of (every track whose favorited is true)` | macOS Music.app automation; HTTP auth не требуется | Clean terminal read-only query успешно выполнен; число и записи не сохранялись. Write `set favorited ... to true` ещё не проверяли |
+| Проверить локальные Favorites | AppleScript `count of (every track whose favorited is true)` | macOS Music.app automation; HTTP auth не требуется | Clean terminal read-only query успешно выполнен; число и записи не сохранялись |
+| Выставить Favorite локально | AppleScript `set favorited of <track from Music.app playlist> to true` | macOS Automation permission для управления Music.app; HTTP/developer token не нужны | Публичный MIT how-to содержит идемпотентный пример с проверкой уже избранных и `favorited=true`; live write в нашем аккаунте не выполнялся. Входной track должен уже присутствовать в Music.app, поэтому это только destination step, не API для поиска/импорта каталога |
 
 ## Яндекс Музыка
 
