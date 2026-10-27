@@ -8,6 +8,10 @@ Apple API различает developer token, подписанный разра�
 
 Создание ключа и developer token нужно проверить для локального личного сценария отдельно. Apple Developer Program сейчас указан как $99 за год; бесплатная регистрация разработчика существует, но наличие бесплатной учётной записи само по себе не доказывает, что можно выпустить нужный MusicKit private key. Не считать бесплатность подтверждённой до практической проверки конкретного token flow.
 
+### Встроенный перенос в Apple Music
+
+Apple поддерживает отдельный официальный пользовательский transfer flow в приложении и на `music.apple.com`. Apple пишет, что source liked/loved songs попадают в Favorite Songs; пользователю нужно подписаться на Apple Music, включить Sync Library и авторизоваться в source service. Совместимые источники и переносимые типы данных выбираются провайдером и могут различаться. Для вариантов, требующих проверки, Apple даёт 30 дней на разбор; сам перенос выполняется сторонним провайдером. Это первый кандидат для пробного Spotify → Apple переноса, если Spotify есть в списке источников для конкретного аккаунта и региона. Официальная поддержка Apple указывает, что transfer недоступен в материковом Китае, Мьянме и России; в других регионах доступность может отличаться.
+
 ## Каталог, библиотека, избранное
 
 - Поиск: Apple Music API Catalog search по storefront, искать песню/артиста/альбом; затем подтвердить совпадение ISRC/метаданными.
@@ -29,5 +33,9 @@ Apple API различает developer token, подписанный разра�
 - [Get all library songs](https://developer.apple.com/documentation/applemusicapi/get-all-library-songs)
 - [Create a library playlist](https://developer.apple.com/documentation/applemusicapi/create-a-new-library-playlist)
 - [Apple Developer Program fee](https://developer.apple.com/help/account/membership/program-enrollment)
+- [Apple Music transfer from other services](https://support.apple.com/en-us/118249)
+- [Transfer in the Music app](https://support.apple.com/en-ca/guide/iphone/iph103c19002/ios)
 
-Проверено по официальной документации; токен/живые пользовательские операции и стоимость credentials для локального прототипа ещё не проверялись.
+**Уточнение к найденным сторонним скриптам:** `ComputerPers/YandexMusic_to_AppleMusic` показывает два способа добавления: AppleScript добавляет песню в библиотеку/свой плейлист, API-вариант вызывает `POST /v1/me/library` (добавить в библиотеку). Просмотренный код не вызывает `/v1/me/favorites`, поэтому его успешная работа не означает, что лайки перенесены в Favorite Songs. Его `extract_tokens.py` автоматически читает Chrome/Safari cookie-хранилище и сохраняет приватный Music User Token; это не официальный MusicKit authorization flow. Не использовать извлечение cookie как архитектурный образец.
+
+Проверено по официальной документации и исходникам; пользовательские операции не запускались.

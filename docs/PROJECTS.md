@@ -6,11 +6,16 @@
 
 | Проект | Что умеет / польза для нас | Ограничения по текущим данным |
 |---|---|---|
+| [Apple Music: Transfer Music from Other Services](https://support.apple.com/en-us/118249) | Встроенный официальный перенос из доступных источников; Apple подтверждает, что лайки/избранное source становятся элементами Favorite Songs. Доступен на iOS/iPadOS, Android и web | Нужна подписка Apple Music и Sync Library; поддерживаемые источники/объекты зависят от провайдера и региона. Поставляет third party; не доступен в материковом Китае, Мьянме и России. Сначала проверить список источников в аккаунте |
 | [ZvukDownloader](https://github.com/Basil-AS/ZvukDownloader) | Данный пользователем код; разбирает API Звука, профиль, релизы, треки, плейлисты, stream, тексты | Скрипт для скачивания локального аудио. Cookie `auth` извлекается вручную; в просмотренном коде нет методов импорта/экспорта лайков. Отличная база для каталожного адаптера, но не готовый переносчик |
 | [sberzvuk-api](https://github.com/Aiving/sberzvuk-api) | TypeScript клиент: анонимный токен, поиск, track/album/playlist и stream через GraphQL | Не нашёл likes/favorites; анонимный токен урезан. Полезен для каталоговых запросов и понимания GraphQL |
+| [zvuk-music](https://github.com/trudenboy/zvuk-music) | Python, MIT, опубликован на PyPI (`0.6.3` на 07.10.2026); `get_liked_tracks`, `like_track`, `unlike_track`; sync/async клиенты и CLI | Неофициально исследованный API. Нужен токен авторизованного аккаунта. README противоречиво говорит про платную подписку в целом и отдельно про премиальные аудиокачества. Проверить чтение лайков без подписки; для миграции не нужны stream/download методы |
 | [yandex-music-api](https://github.com/MarshalX/yandex-music-api) | Наиболее полная библиотека Яндекс Музыки; Device Flow, чтение/запись лайков, OpenAPI | Неофициальная, reverse-engineered; внешние OAuth client credentials; LGPL-3.0. Возможны изменения сервиса |
-| [SongMirror](https://github.com/ahnafnafee/songmirror) | Самостоятельно размещаемый проект для множества сервисов, включая Spotify и Apple; заявляет sync/transfer и ISRC matching. Ценно как архитектурный ориентир | README сообщает, что Apple Music destination и часть library browsing зависят от платного CloudLibrary privilege. Нужно проверить код/лицензию и текущую матрицу доступа; бесплатность и импорт Apple Favorites не считать подтверждёнными |
-| [Songport](https://github.com/xlollx/Songport) | Android, локальная обработка, в списке коннекторов Spotify и Apple Music; заявлены отсутствие серверного аккаунта и отсутствие лимитов | По README возможности liked songs как источника/назначения перечислены не для всех сервисов, Apple Music там не очевидна. Проверить матрицу коннекторов, легитимность Spotify-входа и умеет ли писать именно Apple Favorite Songs |
+| [YandexMusic_to_AppleMusic](https://github.com/ComputerPers/YandexMusic_to_AppleMusic) | Небольшой macOS/Python pipeline: экспорт Яндекс лайков, поиск Apple каталога, добавление через Music.app/AppleScript или API; полезные примеры экспорта и отчёта несовпадений | Добавляет в Apple Library/playlist, а не в `Favorite Songs`. В API режиме использует Developer + Media User Token; `extract_tokens.py` извлекает токен из Chrome/Safari cookies — не перенимать этот подход. Небольшой проект, лицензия не указана |
+| [Myp3a/mixxer](https://github.com/Myp3a/mixxer) | MIT Python-проект: Spotify, Yandex, Apple, VK; настраиваемый matcher/threshold, отдельный плейлист или library; Yandex adapter использует `users_likes_tracks()` | Последний коммит 2024-08-05. Apple adapter пишет в Library/playlist, не Favorite Songs; использует Apple user token. Устаревшие зависимости/методы и ручная конфигурация; референс матчинг-пайплайна, не готовый мигратор |
+| [Spotify data export](https://support.spotify.com/us/article/data-rights-and-privacy-settings/) | Бесплатный официальный архив личных данных; Spotify указывает, что раздел `Your Library` содержит сохранённые песни и их URIs. Хороший backup/fallback без Web API quota | Архив нужно запросить и дождаться; это исходные метаданные, а не автоматическая запись в Apple. Для приложения нужен parser скачанного пользователем ZIP/JSON |
+| [SongMirror](https://github.com/ahnafnafee/songmirror) | Самостоятельно размещаемый проект для многих сервисов, включая Spotify и Apple; заявляет transfer/ISRC matching и поддержку built-in favorites. Ценно как архитектурный ориентир | README говорит, что Apple Music destination и часть library browsing требуют платного CloudLibrary privilege. Spotify default использует `sp_dc` cookie и внутренний web API. Не путь для повторения в нашем приложении |
+| [Songport](https://github.com/xlollx/Songport) | Android, локальная обработка, Spotify и Apple Music в списке коннекторов | Текущая матрица перечисляет Liked Songs source/target для Spotify, Deezer и локальных источников, но Apple favorites target не заявлен. Spotify Web route неофициальный, может нарушать условия Spotify и сломаться |
 | [jMusic](https://github.com/JotaMelo/jMusic) | Узкий Spotify → Apple Music, открытый код и потенциально самый простой референс для одного направления | Не общий мультисервисный движок; Apple auth/ограничения и актуальную работоспособность нужно проверить на исходниках/устройстве |
 | [yandex-music-api OpenAPI](https://ym.marshal.dev/api/) | Машиночитаемая документация на более чем сотню методов, подходящая для изучения и прототипирования | Это community spec, генерируемая из неофициальной реализации |
 
@@ -26,7 +31,10 @@
 ## Что можно взять в наш проект
 
 - Переиспользовать типы и запросы в `ZvukDownloader`/`sberzvuk-api` как исследовательскую базу, но отделить чтение каталога от скачивания аудио.
+- Для Звука начать с read-only `trudenboy/zvuk-music`: это первый найденный актуальный коннектор с методами лайков и MIT лицензией.
 - Использовать `yandex-music-api` как эталон списка методов/моделей, начиная с read-only выгрузки лайков.
+- Для Spotify сначала проверить Apple built-in transfer и при необходимости официальный Spotify data export; Web API оставить вариантом при выполнении условий Spotify.
+- `YandexMusic_to_AppleMusic` и `mixxer` могут ускорить экспорт и catalogue matching, но их операции Apple Library не равны записи в Favorite Songs.
 - Изучить SongMirror для нормализации данных и сопоставления, но не строить на нём ожидание, что путь Apple Music останется полностью бесплатным.
 - Сначала реализовать небольшую собственную локальную миграцию с форматом промежуточного экспорта и ручным подтверждением несовпадений. Приватные API оставить изолированными адаптерами, чтобы замена одного провайдера не меняла ядро.
 
@@ -34,8 +42,13 @@
 
 - [ZvukDownloader](https://github.com/Basil-AS/ZvukDownloader)
 - [sberzvuk-api](https://github.com/Aiving/sberzvuk-api)
+- [zvuk-music](https://github.com/trudenboy/zvuk-music)
 - [yandex-music-api](https://github.com/MarshalX/yandex-music-api)
+- [YandexMusic_to_AppleMusic](https://github.com/ComputerPers/YandexMusic_to_AppleMusic)
+- [Myp3a/mixxer](https://github.com/Myp3a/mixxer)
 - [SongMirror](https://github.com/ahnafnafee/songmirror)
 - [Songport](https://github.com/xlollx/Songport)
 - [jMusic](https://github.com/JotaMelo/jMusic)
 - [Spotify Web API examples](https://github.com/spotify/web-api-examples)
+- [Spotify data export](https://support.spotify.com/us/article/data-rights-and-privacy-settings/)
+- [Apple Music transfer support article](https://support.apple.com/en-us/118249)

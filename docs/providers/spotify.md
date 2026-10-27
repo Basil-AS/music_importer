@@ -19,6 +19,10 @@
 
 В официальном migration guide для Development Mode указаны Premium у владельца приложения и до пяти пользователей на приложение для новых/не-grandfathered apps. Это означает, что персональный перенос потенциально реалистичен при соблюдении требований, но публичный бесплатный сервис на одном dev client ID — не рабочее предположение. Прежде чем строить продуктовую авторизацию, проверить условия Spotify для конкретного типа приложения/аккаунта.
 
+## Бесплатный архив аккаунта как запасной источник
+
+Spotify позволяет запросить машиночитаемую копию личных данных из Account Privacy. В описании архива `Your Library` включает сохранённые треки, эпизоды, шоу, артистов и альбомы, в том числе URIs; это полезный офлайн backup и fallback, если Web API dev mode не подходит. Архив не пишет ничего в Apple Music и требует времени на подготовку; для нашего инструмента нужен локальный parser фактически выданного Spotify ZIP/JSON и корректное сопоставление записей.
+
 ## Источники
 
 - [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization)
@@ -27,5 +31,7 @@
 - [Get a User's Saved Tracks](https://developer.spotify.com/documentation/web-api/reference/get-users-saved-tracks)
 - [Save Items to Library](https://developer.spotify.com/documentation/web-api/reference/save-library-items)
 - [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
+- [Spotify data rights and export](https://support.spotify.com/us/article/data-rights-and-privacy-settings/)
+- [Understanding your Spotify data](https://support.spotify.com/mt/article/understanding-your-data/)
 
 Проверено по документации; живой OAuth/пагинацию в собственном аккаунте ещё не запускали.
