@@ -11,6 +11,18 @@
 
 Ниже указываются только имена заголовков и шаблоны параметров. Access tokens, cookies, account IDs, реальные URI, cursors и записи пользовательской коллекции в этот файл не переносить.
 
+## Clean terminal probes без авторизации (27.10.2026)
+
+Только публичный поиск или безопасный GraphQL `__typename`; без cookies, bearer, custom User-Agent, аккаунтных данных и mutations.
+
+| Сервис / запрос | Результат | Что подтверждает |
+|---|---|---|
+| Apple iTunes Search `GET https://itunes.apple.com/search?term=...&media=music&entity=song&limit=1&country=ae` | `200`, JSON-like body (`text/javascript`), один результат; поля включают `trackId`, `trackName`, `artistName`, `trackTimeMillis` | Публичный fallback для поиска/сопоставления. `trackId` не следует автоматически считать Apple Music catalog ID для `/v1/me/favorites` |
+| Apple Music catalog `GET https://api.music.apple.com/v1/catalog/ae/search?types=songs&term=...` | `401` без developer token | Официальный catalog REST не является анонимным поиском |
+| Spotify Web API `GET https://api.spotify.com/v1/search?q=...&type=track&limit=1` | `401` без bearer | Официальный Spotify catalog search требует авторизацию в проверенном текущем маршруте |
+| Яндекс `GET https://api.music.yandex.net/search?text=...&type=track&page=0` | `200 application/json`; `result` содержит `tracks`, `page`, `perPage` | Публичный каталоговый поиск доступен без OAuth в этом probe; это не открывает user likes |
+| Звук GraphQL `POST https://zvuk.com/api/v1/graphql`, `query SafeProbe { __typename }` | `418 text/html` | Чистый стандартный HTTP-клиент попал в anti-bot/WAF boundary; это не доказывает отсутствия GraphQL маршрута и не является основанием обходить защиту |
+
 ## Spotify
 
 | Назначение | Запрос | Авторизация и параметры | Подтверждение / ограничения |

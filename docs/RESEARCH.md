@@ -199,3 +199,9 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Its `CheckToken` reads `/api/v2/tiny/profile` and checks registration, subscription service/status and expiration before this product's imports. That establishes Beatstash's own subscription gate, not a Zvuk API gate for read-only collection calls. The documented login copies `/api/tiny/profile` token into the Telegram bot; source encrypts stored secrets with AES-256-GCM, but the credential still leaves the user's device.
 - The client uses a persistent cookie jar and a fixed browser User-Agent; source comments say this gets past an anti-bot redirect. This was only static code review, not executed or recommended for our implementation. Mock tests exist; no live Zvuk calls, audio requests, or user-library changes were made.
 - Added the audit to `docs/providers/zvuk-api-inventory.md`, `docs/providers/zvuk.md`, `docs/API_MATRIX.md`, and `docs/PROJECTS.md`.
+
+## Public catalog access boundary probes (2026-10-27)
+
+- Ran five credential-free terminal requests using Python stdlib, default User-Agent, no cookies/bearer, and no saved response bodies. Apple iTunes Search returned `200` with one result and track metadata keys; Apple Music catalog REST returned `401`; Spotify Web API Search returned `401`; Yandex `.net` public Search returned `200` with `result.tracks`; Zvuk safe GraphQL `__typename` returned `418 text/html`.
+- This separates public catalog lookups from user/account APIs: Yandex and Apple iTunes Search are useful no-auth match candidates, while the official Spotify and Apple Music catalog APIs were not anonymous in this probe. A `418` at Zvuk is consistent with the previously observed clean-CLI WAF boundary, not evidence the private endpoint is absent.
+- All requests were read-only, no account records were retrieved, and no secrets or response bodies were persisted. Results added to `docs/API_MATRIX.md`.
