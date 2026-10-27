@@ -4,6 +4,7 @@
 
 ## Исследование
 
+- [Сводная таблица API-маршрутов, авторизации и проверок](docs/API_MATRIX.md)
 - [Обзор API, авторизации и ограничений сервисов](docs/RESEARCH.md)
 - [API-заметки: SberZvuk / Звук](docs/providers/zvuk.md)
 - [API-заметки: Spotify](docs/providers/spotify.md)
