@@ -72,6 +72,8 @@ Live UI-проверка в текущей авторизованной вкла
 
 GitHub license metadata у репозитория отсутствует, в проверенном checkout файла `LICENSE` нет. Исходник и UI просмотрены статически; приложение, Shortcut, account auth и live favorite writes не запускались. Поэтому это ценная независимая демонстрация, что локальный setter правдоподобен, но не доказательство успешного массового импорта или облачной синхронизации на нашей машине.
 
+На текущем macOS `osacompile` успешно скомпилировал оба сторонних скрипта `read_loved.applescript` и `mark_loved.applescript` против установленного словаря Music.app; временные `.scpt` артефакты удалены после проверки. Скрипты не запускались. Это закрывает только синтаксис/терминологию текущего AppleScript environment, не Automation permission, поиск совпадений, setter runtime, Library import или iCloud/Apple Music sync.
+
 ### Наблюдаемая авторизация Apple Music web player
 
 В текущей авторизованной вкладке `music.apple.com` сетевые запросы к `amp-api.music.apple.com` несут заголовки `Authorization: Bearer …` и `Media-User-Token: …`. Это web-player пара токенов, полученная штатным клиентом сайта; она технически отличается от созданного нами developer JWT, хотя API использует тот же HTTP Bearer заголовок. Не выдавать её за документированный сторонний OAuth flow.
