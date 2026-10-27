@@ -8,6 +8,14 @@ Apple API различает developer token, подписанный разра�
 
 Для выпуска developer token Apple документирует Media Services private key и прямо говорит, что для запросов Apple Music API разработчик должен быть участником Apple Developer Program. Текущая официальная цена членства — $99 в год (региональные цены могут отличаться). Бесплатная регистрация Apple Developer не равна членству в программе. Поэтому официальный REST-клиент с собственным developer token не подходит под требование «не платить» для индивидуального проекта; локальный Music.app путь ниже остаётся бесплатным кандидатом.
 
+### Публичный iTunes Search API как no-auth matcher fallback
+
+Отдельный legacy endpoint `https://itunes.apple.com/search` принимает обычный HTTP GET без developer token и без Apple Music User Token. В чистой terminal-проверке 27.10.2026 запрос `term=Jack+Johnson&media=music&entity=song&country=us&limit=1` вернул HTTP 200 и JSON с `resultCount` и `results[]`; карточка содержит `trackId`, `trackName`, `artistName`, `collectionId`, `collectionName`, `trackTimeMillis`, `trackViewUrl` и другие store metadata. В этой конкретной карточке поля `isrc` не было. Секреты и пользовательская коллекция не участвовали.
+
+В Chrome открылась официальная архивная страница Apple с тем же endpoint, примерами `term`/`limit`/`entity`/`country` и датой обновления 2017-09-19. Прямой переход в браузере на сам `itunes.apple.com/search` был остановлен как `ERR_BLOCKED_BY_CLIENT`; это browser-side отказ, не HTTP-ответ сервера. Поэтому доступность endpoint подтверждена именно чистым terminal-запросом, а Chrome использовался для проверки официальной схемы и примеров.
+
+Официальная документация Search API находится в архиве Apple (последнее обновление страницы — 2017-09-19), показывает `term`, `entity`, `country` и `limit`, а также обычный JSON результат; максимальные актуальные request/rate limits по найденной официальной странице не установлены. Поэтому отправлять умеренный поток запросов, обрабатывать 429/ошибки и не делать предположений о лимитах. Поиск полезен как бесплатная выдача кандидатов для ручной проверки по названию/артисту/альбому, но отсутствие ISRC и возможность версий/ремастеров делают его менее точным, чем Apple Music API `filter[isrc]`. `trackId` из iTunes Store нельзя без отдельной проверки считать Apple Music catalog ID, пригодным для `/v1/me/favorites` или Library write. Мы не использовали preview/artwork URL и не делали write-запросов; условия Apple ограничивают использование promotional assets, см. [Search API Overview](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/).
+
 ### Локальный Music.app без MusicKit REST API
 
 Для macOS есть отдельный путь без MusicKit developer token: локальное приложение Music управляется AppleScript. В открытом проекте `ComputerPers/YandexMusic_to_AppleMusic` вариант `add_to_apple_music.py` добавляет предварительно найденные записи через Music.app/AppleScript; README указывает подписку Apple Music и авторизацию в приложении, но не developer key для этого варианта.
@@ -75,6 +83,9 @@ Live UI-проверка в текущей авторизованной вкла
 ## Источники
 
 - [Apple Music API overview](https://developer.apple.com/documentation/AppleMusicAPI)
+- [iTunes Search API overview (архивная документация)](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/)
+- [iTunes Search examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/SearchExamples.html)
+- [iTunes Search response fields](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/UnderstandingSearchResults.html)
 - [MusicKit](https://developer.apple.com/musickit/)
 - [User authentication / Music User Token](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit)
 - [Generating developer tokens](https://developer.apple.com/documentation/AppleMusicAPI/generating-developer-tokens)
