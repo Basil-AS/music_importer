@@ -19,6 +19,7 @@
 
 - В авторизованном Chrome Web Player список «Любимые треки» открылся через видимую страницу коллекции. При обновлении страницы браузер отправил `POST https://api-partner.spotify.com/pathfinder/v2/query`; среди имён GraphQL-операций наблюдались `fetchPlaylist` и `playlistPermissions`. Это внутренний контракт веб-клиента, не документированный Web API. Не закладывать его в переносчик: формат и доступ могут измениться без предупреждения.
 - Терминальный запрос без OAuth к `GET https://api.spotify.com/v1/me/tracks?limit=1` вернул `401 application/json`; аналогичный запрос каталожного поиска `/v1/search` без токена также вернул 401. Это подтверждает необходимость официального OAuth для Web API, а не доступ к данным без авторизации.
+- Чистый terminal-вызов внутреннего `GET https://open.spotify.com/get_access_token?reason=transport&productType=web_player` с Chrome-сессионными cookies и `app-platform: WebPlayer` вернул `403 text/html`; официальный `GET /v1/me/tracks` с токеном поэтому в этой проверке не выполнен. Browser-only `pathfinder` остаётся наблюдаемым, но не подтверждён как переносимый terminal API. Следующий валидный путь для Web API — отдельный OAuth Authorization Code with PKCE через зарегистрированное приложение, а не попытка обхода WAF.
 - Никакие лайки не менялись. Поля пользовательских записей и приватные идентификаторы не сохранялись.
 
 ## Важные текущие ограничения

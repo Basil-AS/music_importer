@@ -24,6 +24,8 @@
 ## Практическая проверка
 
 - В авторизованной вкладке Chrome видимый раздел коллекции «Мне нравится» открылся. Наблюдались `GET https://api.music.yandex.ru/playlist/lk.:liked-id` и `POST https://api.music.yandex.ru/tracks`, оба `200`. ID приватного плейлиста заменён шаблоном; параметры и тела с содержимым пользовательской коллекции не сохранялись.
+- Повторная read-only проверка из терминала с временной Chrome-сессией: `GET https://api.music.yandex.ru/account/status` вернул `200`; полученный в памяти UID использован только для `GET /users/{uid}/likes/tracks` (`200`). Список содержал записи `id`/track refs; приватный UID, названия и сами ID не печатались и не сохранялись.
+- По первой записи списка проверен `POST https://api.music.yandex.ru/tracks` с form body `track-ids=<id>` (формат из `_client/_batch.py`), ответ `200`, одна карточка. Вызов сначала был сформирован неверно как JSON-массив и вернул `400`; после сверки с реализацией исправлен на form-encoded `track-ids`. Тела ответов не сохранялись.
 - Из терминала публичный no-auth запрос `GET https://api.music.yandex.net/search?text=...&type=track&page=0` вернул `200 application/json`. Вывод ответа не раскрывался. Это подтверждает доступность поискового каталога без аккаунта в проверенном случае, но ничего не говорит о доступе к лайкам.
 - Device Flow описан проектом: `POST https://oauth.yandex.ru/device/code`, затем polling `POST https://oauth.yandex.ru/token`; фактический вход и получение токена в терминале не запускались. Запись/снятие лайков не вызывались.
 
@@ -39,4 +41,4 @@
 - [OpenAPI reference](https://ym.marshal.dev/api/)
 - [Device auth docs](https://ym.marshal.dev/token)
 
-Изучено по исходникам community-библиотеки, её OpenAPI и read-only проверкам браузерного UI/публичного поиска. Это не контракт Яндекса; OAuth и мутации на аккаунте не запускались.
+Изучено по исходникам community-библиотеки, её OpenAPI, браузерному UI и terminal HTTP-пробам с пользовательской сессией. Это не контракт Яндекса; OAuth Device Flow и мутации на аккаунте не запускались.
