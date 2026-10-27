@@ -1,5 +1,15 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
+const APP_TAB_URLS = [
+  'http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*',
+  'http://localhost:8000/*', 'http://localhost:8001/*',
+  'https://basil-as.github.io/music_importer/*',
+];
+const APP_ORIGINS = new Set([
+  'http://127.0.0.1:8000', 'http://127.0.0.1:8001',
+  'http://localhost:8000', 'http://localhost:8001',
+  'https://basil-as.github.io',
+]);
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 
@@ -306,7 +316,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
       await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
         type: 'music-importer:zvuk-progress',
         requestId: String(message.requestId || ''),
@@ -319,7 +329,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'music-importer:zvuk-command') {
       let origin = '';
       try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -368,7 +378,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
       await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
         type: 'music-importer:spotify-progress',
         requestId: String(message.requestId || ''),
@@ -381,7 +391,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'music-importer:spotify-command') {
       let origin = '';
       try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -429,7 +439,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
       await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
         type: 'music-importer:apple-progress',
         requestId: String(message.requestId || ''),
@@ -442,7 +452,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'music-importer:apple-command') {
       let origin = '';
       try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -487,7 +497,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
       await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
         type: 'music-importer:yandex-progress',
         requestId: String(message.requestId || ''),
@@ -500,7 +510,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'music-importer:yandex-command') {
       let origin = '';
       try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -549,7 +559,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'music-importer:get-all-libraries') {
       let origin = '';
       try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
         sendResponse({ error: 'Команда доступна только локальному приложению.' });
         return;
       }

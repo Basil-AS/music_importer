@@ -1,8 +1,14 @@
 (() => {
   const marker = 'music-importer-local-app';
-  const allowedOrigins = new Set(['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001']);
+  const allowedPaths = new Map([
+    ['http://127.0.0.1:8000', new Set(['/'])],
+    ['http://127.0.0.1:8001', new Set(['/'])],
+    ['http://localhost:8000', new Set(['/'])],
+    ['http://localhost:8001', new Set(['/'])],
+    ['https://basil-as.github.io', new Set(['/music_importer/', '/music_importer/index.html'])],
+  ]);
 
-  if (!allowedOrigins.has(location.origin) || location.pathname !== '/') return;
+  if (!allowedPaths.get(location.origin)?.has(location.pathname)) return;
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!['music-importer:yandex-progress', 'music-importer:apple-progress', 'music-importer:zvuk-progress', 'music-importer:spotify-progress'].includes(message?.type)) return false;

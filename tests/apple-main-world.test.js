@@ -234,7 +234,7 @@ test('local app bridge identifies the installed extension without requesting acc
   };
   const context = {
     window, location, URL, Set, String, chrome: { runtime: {
-      getManifest: () => ({ version: '0.4.0' }),
+      getManifest: () => ({ version: '0.10.0' }),
       onMessage: { addListener() {} },
     } },
   };
@@ -246,6 +246,6 @@ test('local app bridge identifies the installed extension without requesting acc
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{
-    source: 'music-importer-local-app', type: 'extension-ready', requestId: 'fixture-request-0001', version: '0.4.0',
+    source: 'music-importer-local-app', type: 'extension-ready', requestId: 'fixture-request-0001', version: '0.10.0',
   }]);
 });

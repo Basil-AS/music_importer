@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Music Importer — local account connector",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Read and transfer signed-in music libraries locally for Music Importer.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
-  "host_permissions": ["https://zvuk.com/*", "https://open.spotify.com/*", "https://music.yandex.ru/*", "https://api.music.yandex.ru/*", "https://music.apple.com/*", "http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": ["https://zvuk.com/*", "https://open.spotify.com/*", "https://music.yandex.ru/*", "https://api.music.yandex.ru/*", "https://music.apple.com/*", "http://127.0.0.1/*", "http://localhost/*", "https://basil-as.github.io/*"],
   "action": {
     "default_title": "Music Importer",
     "default_popup": "popup.html"
@@ -64,7 +64,7 @@
       "world": "ISOLATED"
     },
     {
-      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "matches": ["http://127.0.0.1/*", "http://localhost/*", "https://basil-as.github.io/music_importer/*"],
       "js": ["local-app-bridge.js"],
       "run_at": "document_start",
       "world": "ISOLATED"
