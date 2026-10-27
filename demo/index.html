@@ -13,6 +13,16 @@
     @media(max-width:580px){.shell{padding:0 18px 45px}.topbar{height:62px}.top-right .local-pill{display:none}.hero{padding:37px 0 26px}.hero-art{width:82px;height:82px}.disc{width:61px;height:61px}.disc:after{width:20px;height:20px;box-shadow:inset 0 0 0 6px #17171c}.hero p{font-size:14px}.steps{padding:15px 0;margin-bottom:17px}.step{font-size:0;gap:6px}.step-num{font-size:11px}.step:not(:last-child):after{min-width:14px}.notice{align-items:flex-start;font-size:12px}.layout{gap:13px}.card{padding:16px;border-radius:15px}.sources{gap:7px}.source{padding:10px 8px}.source-top{gap:6px}.source-icon{width:24px;height:24px}.source h3{font-size:11px}.connect{font-size:10px}.track{grid-template-columns:30px minmax(68px,.7fr) minmax(115px,1.3fr) 32px;gap:7px}.cover{width:30px;height:30px}.badge{display:none}.track-name{font-size:11px}.track-artist{font-size:10px}.match select{font-size:10px;padding:6px 4px}.side-col{grid-template-columns:1fr}.footer{flex-direction:column}.action-row{flex-wrap:wrap}.catalog-tools .quiet{width:100%;margin-left:0}}
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important}}
   </style>
+  <style>
+    .track-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 0}
+    .track-tools[hidden]{display:none}
+    .track-tools label{font-size:11px;color:var(--muted)}
+    .track-tools input{accent-color:var(--green);margin-right:7px}
+    .track-pages{display:flex;align-items:center;gap:8px}
+    .track-pages button{padding:6px 10px}
+    .track-pages button:disabled{opacity:.4;cursor:default}
+    @media(max-width:580px){.track-tools{align-items:flex-start}.track-pages{width:100%;justify-content:space-between}}
+  </style>
 </head>
 <body>
   <div class="shell">
@@ -50,6 +60,10 @@
           <div class="card-head"><div><h2 id="review-heading">Сверка с каталогом</h2><p class="card-sub" id="reviewSub">Загрузите список и найдите версии песен</p></div><span class="count" id="matchCount">ожидает список</span></div>
           <div class="catalog-tools"><label for="storefront">Регион Apple</label><select id="storefront" aria-label="Страна каталога Apple"><option value="AE">ОАЭ</option><option value="US">США</option><option value="GB">Великобритания</option><option value="CA">Канада</option><option value="AU">Австралия</option></select><button class="secondary" type="button" id="searchBtn" disabled>Найти совпадения</button><span class="quiet" id="searchStatus" aria-live="polite">Поиск не запускался</span></div>
           <p class="quiet match-hint">Если выдача неточная, поправьте поисковый запрос у трека и нажмите «Искать».</p>
+          <div class="track-tools" id="trackTools" hidden>
+            <label><input type="checkbox" id="needsReviewOnly">Только без уверенного совпадения</label>
+            <div class="track-pages"><button class="secondary" type="button" id="previousTrackPage" aria-label="Предыдущая страница">←</button><span class="quiet" id="trackPageStatus" aria-live="polite"></span><button class="secondary" type="button" id="nextTrackPage" aria-label="Следующая страница">→</button></div>
+          </div>
           <div class="track-list" id="trackList"><div class="empty">Покажем демо-лайки, чтобы начать сверку</div></div>
           <div class="review-tools"><button class="linkbtn" type="button" id="toggleAll">Снять выбор со всех</button><span class="quiet" id="selectedCount">0 выбрано</span></div>
           <div class="action-row"><button class="secondary" type="button" id="resetBtn">Сбросить список</button><span class="quiet">Можно исключить любой трек</span></div>

@@ -9,7 +9,9 @@
     { title: 'Blinding Lights', artist: 'The Weeknd', album: '' },
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
+  const trackPageSize = 50;
   const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, extensionAvailable: false };
+  let trackPage = 0;
   let extensionCheckInProgress = false;
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -88,14 +90,36 @@
   }
 
   function renderTracks() {
-    if (!state.tracks.length) {
+    const needsReviewOnly = $('#needsReviewOnly').checked;
+    const reviewable = state.tracks.some((track) => track.searched || track.searchError);
+    const needsReview = (track) => track.searchError || (track.searched && !track.match);
+    const indexedTracks = state.tracks.map((track, index) => ({ track, index }));
+    const displayedTracks = needsReviewOnly ? indexedTracks.filter(({ track }) => needsReview(track)) : indexedTracks;
+    const pageCount = Math.max(1, Math.ceil(displayedTracks.length / trackPageSize));
+    trackPage = Math.min(trackPage, pageCount - 1);
+    const first = trackPage * trackPageSize;
+    const visibleTracks = displayedTracks.slice(first, first + trackPageSize);
+    const tools = $('#trackTools');
+    const reviewFilter = $('#needsReviewOnly');
+    tools.hidden = state.tracks.length <= trackPageSize && !needsReviewOnly;
+    reviewFilter.disabled = !reviewable || state.searching;
+    $('#trackPageStatus').textContent = displayedTracks.length
+      ? `Показаны ${first + 1}–${Math.min(first + trackPageSize, displayedTracks.length)} из ${displayedTracks.length}${needsReviewOnly ? ' · требуют внимания' : ''}`
+      : needsReviewOnly ? 'Все записи имеют совпадения' : '0 записей';
+    $('#previousTrackPage').disabled = trackPage === 0;
+    $('#nextTrackPage').disabled = trackPage >= pageCount - 1;
+
+    if (!state.tracks.length || !visibleTracks.length) {
       const playlistCount = state.sourceSnapshot?.collections?.filter((collection) => collection.type === 'playlists').length || 0;
-      $('#trackList').innerHTML = playlistCount ? `<div class="empty">Загружено плейлистов: ${playlistCount}. Треки для сопоставления не найдены.</div>` : '<div class="empty">Загрузите пример или свой список треков</div>';
+      $('#trackList').innerHTML = needsReviewOnly && state.tracks.length
+        ? '<div class="empty">Все записи имеют совпадения; проверка не требуется.</div>'
+        : playlistCount && !state.tracks.length ? `<div class="empty">Загружено плейлистов: ${playlistCount}. Треки для сопоставления не найдены.</div>`
+          : '<div class="empty">Загрузите пример или свой список треков</div>';
       updateCounts();
       return;
     }
 
-    $('#trackList').innerHTML = state.tracks.map((track, index) => {
+    $('#trackList').innerHTML = visibleTracks.map(({ track, index }) => {
       const title = escapeHTML(track.title);
       const artist = escapeHTML(track.artist);
       const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? 'Не найдено' : track.match ? (track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? 'Проверьте' : 'Не искали';
@@ -134,6 +158,7 @@
   }
 
   function loadTracks(list, label, metadata = {}) {
+    trackPage = 0;
     state.tracks = list.map((track) => ({
       ...track,
       query: `${track.title} ${track.artist}`.trim(),
@@ -529,7 +554,7 @@
           }
           completed += group.tracks.length;
           $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
-          renderTracks();
+          if (completed % (trackPageSize * 2) < group.tracks.length || completed >= state.tracks.length) renderTracks();
         },
       });
       const withResults = state.tracks.filter((track) => track.searched && track.matches.length).length;
@@ -697,6 +722,7 @@
   $('#searchBtn').addEventListener('click', searchCatalog);
   $('#targetProvider').addEventListener('change', () => {
     state.targetProvider = $('#targetProvider').value;
+    trackPage = 0;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
     state.report = null;
     $('#report').classList.remove('show');
@@ -706,6 +732,7 @@
   });
   $('#storefront').addEventListener('change', () => {
     if (!state.loaded) return;
+    trackPage = 0;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
     state.report = null;
     $('#report').classList.remove('show');
@@ -721,8 +748,24 @@
     renderTracks();
   });
 
+  $('#needsReviewOnly').addEventListener('change', () => {
+    trackPage = 0;
+    renderTracks();
+  });
+  $('#previousTrackPage').addEventListener('click', () => {
+    trackPage = Math.max(0, trackPage - 1);
+    renderTracks();
+    $('#trackTools').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  $('#nextTrackPage').addEventListener('click', () => {
+    trackPage += 1;
+    renderTracks();
+    $('#trackTools').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
   $('#resetBtn').addEventListener('click', () => {
     state.tracks = [];
+    trackPage = 0;
     state.loaded = false;
     state.report = null;
     $('#report').classList.remove('show');
