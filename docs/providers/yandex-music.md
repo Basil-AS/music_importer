@@ -14,10 +14,10 @@
 
 В этой версии библиотека реализует следующие HTTP-шаблоны (это reverse-engineered контракт библиотеки, не официальная спецификация Яндекса):
 
-- `GET /users/{user_id}/likes/tracks` — список лайкнутых треков (`users_likes_tracks()`); если `user_id` не передан, библиотека использует UID текущего аккаунта. Поддерживается параметр `if-modified-since-revision`; полный набор данных и поведение при отсутствии изменений нужно проверять на используемой версии.
-- `POST /users/{user_id}/likes/tracks/add-multiple`, JSON-поле `track-ids` — добавить лайк одному или нескольким трекам (`users_likes_tracks_add`).
-- `POST /users/{user_id}/likes/tracks/remove`, JSON-поле `track-ids` — снять лайк (`users_likes_tracks_remove`).
-- `POST /tracks` — получить карточки по набору ID; библиотека передаёт `with-positions`.
+- `GET /users/{user_id}/likes/tracks` — список лайкнутых треков (`users_likes_tracks()`); если `user_id` не передан, библиотека использует UID текущего аккаунта. Метод по умолчанию отправляет `if-modified-since-revision=0`. Код и community OpenAPI не описывают `offset`, `limit` или cursor для этой операции.
+- Ответ описан как `TracksList { uid, revision, tracks[] }`, где элементы — `TrackShort`; у модели нет page/cursor полей. `revision` описан авторами как актуальность списка, но его семантика в коде помечена TODO. Следовательно, выгрузку нельзя считать полной только по наличию ответа: отдельно сверять browser-side count, число коротких refs и последующие metadata responses.
+- `POST /users/{user_id}/likes/tracks/add-multiple` и `/remove` — изменить лайк (`users_likes_tracks_add`/`_remove`). Community OpenAPI указывает `application/x-www-form-urlencoded` и поле `track-ids` (описанное как string), не JSON. Библиотека принимает ID как list/string/int и передаёт словарь через `requests` `data=`; точный сериализованный формат нескольких ID не закреплён как стабильный контракт.
+- `POST /tracks` — получить карточки по набору ID; community OpenAPI также помечает тело как `application/x-www-form-urlencoded`, поля `track-ids` и `with-positions`. В ранее проверенном единичном terminal-запросе form body `track-ids=<id>` вернул карточку; JSON-array формат дал `400`.
 
 Реализация `_like_action` считает операцию успешной по наличию `revision` в ответе для треков. В изученном исходнике не обнаружено зафиксированного стабильного максимального размера пачки: его нельзя предполагать, нужно выяснять тестом и учитывать ответы сервиса.
 
@@ -43,6 +43,7 @@
 - Повторная read-only проверка из терминала с временной Chrome-сессией: `GET https://api.music.yandex.ru/account/status` вернул `200`; полученный в памяти UID использован только для `GET /users/{uid}/likes/tracks` (`200`). Список содержал записи `id`/track refs; приватный UID, названия и сами ID не печатались и не сохранялись.
 - По первой записи списка проверен `POST https://api.music.yandex.ru/tracks` с form body `track-ids=<id>` (формат из `_client/_batch.py`), ответ `200`, одна карточка. Вызов сначала был сформирован неверно как JSON-массив и вернул `400`; после сверки с реализацией исправлен на form-encoded `track-ids`. Тела ответов не сохранялись.
 - Из терминала публичный no-auth запрос `GET https://api.music.yandex.net/search?text=...&type=track&page=0` вернул `200 application/json`. Вывод ответа не раскрывался. Это подтверждает доступность поискового каталога без аккаунта в проверенном случае, но ничего не говорит о доступе к лайкам.
+- Новая попытка проверить тот же browser playlist route напрямую из терминала с выбранными cookies `Session_id`, `sessionid2`, `yandex_login` и `yandexuid` завершилась `ConnectionResetError` до получения HTTP-статуса. Cookies были в одноразовом файле `0600`, удалённом в `finally`; не трактовать это как отказ авторизации. Ранее подтверждённый `200` для account status и likes использовал community OAuth bearer token, не этот cookie-only путь.
 - Device Flow описан проектом: `POST https://oauth.yandex.ru/device/code`, затем polling `POST https://oauth.yandex.ru/token`; фактический вход и получение токена в терминале не запускались. Запись/снятие лайков не вызывались.
 
 ## Оценка
