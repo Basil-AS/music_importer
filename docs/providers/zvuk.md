@@ -8,18 +8,20 @@
 - [oklookat/synchro](https://github.com/oklookat/synchro) и его Go-зависимость [oklookat/gozvuk](https://github.com/oklookat/gozvuk), snapshot исходников 2024/2023 годов.
 - [Aiving/sberzvuk-api](https://github.com/Aiving/sberzvuk-api), исходники TypeScript и docs.
 - [trudenboy/zvuk-music](https://github.com/trudenboy/zvuk-music), исходники, GraphQL operation-файлы, README, MIT license; на дату проверки PyPI показывал версию `0.6.3` (7 октября 2026).
-- Контрольные checkout исходников на 27.10.2026: `Basil-AS/ZvukDownloader` `922e258`, `trudenboy/zvuk-music` `ed491f6`.
+- Контрольные checkout исходников на 27.10.2026: `Basil-AS/ZvukDownloader` `922e258` (GitHub metadata не обнаружила license; README заявляет MIT, но в checkout нет `LICENSE`), `Aiving/sberzvuk-api` `3c157f8`, `trudenboy/zvuk-music` `ed491f6`.
 - Официальная справка Звука о переносе [«Как перенести музыку в Звук?»](https://help.zvuk.com/article/42207), проверена 27.10.2026.
 
 ## Авторизация в найденных клиентах
 
 `ZvukDownloader` просит пользователя взять cookie с именем `auth` из браузера после входа на `zvuk.com`, либо получить токен из `/api/v2/tiny/profile`; затем отправляет cookie `auth=<значение>`. Это bearer-секрет активной сессии. В README/API notes есть команда передать его через CLI или хранить в `config.json`. Для нашего приложения нельзя выводить это значение в консоль/логи или коммитить конфиг. Не просить пароль пользователя и не пытаться извлекать cookie автоматически без отдельного безопасного потока.
 
+В просмотренном `ZvukDownloader` есть дополнительный риск: `aiohttp.TCPConnector(..., ssl=False)` отключает TLS-проверку сертификата для HTTP-сессии, через которую передаётся cookie `auth`. Его общий обработчик ошибок также логирует текст HTTP-ответа. Поэтому даже для локального чтения профиля не следует использовать этот клиент с реальным токеном без исправления TLS и очистки логов. Репозиторий не содержит файла `LICENSE`, несмотря на формулировку «MIT» в README.
+
 `sberzvuk-api` принимает токен конструктором и посылает его в заголовке `X-Auth-Token`. У библиотеки есть `getAnonymousToken()`, который вызывает `GET https://zvuk.com/api/tiny/profile` без входа и возвращает `result.token`; автор README сообщает об ограничениях анонимного токена, например отсутствии доступа к high bitrate.
 
-`zvuk-music` также принимает токен пользователя (в `X-Auth-Token`), имеет ограниченный anonymous access, sync/async Python-клиенты и MIT license. В `client.py` подтверждены `get_liked_tracks(order_by, direction)`, `like_track(id)`, `unlike_track(id)`, `get_collection()`, а в GraphQL operation-файлах — `userTracks` (возвращает track IDs и дату последнего изменения), `collection.addItem(id,type)` и `collection.removeItem(id,type)`. По README полноценные лайки/плейлисты требуют авторизованный токен. При этом англоязычный README сверху говорит «нужна платная подписка», а ниже описывает отдельно лишь подписочные качества FLAC/320 kbps; исходники не доказывают, что чтение лайков само требует платного плана. Это противоречие нужно проверить read-only на аккаунте без подписки, если такой аккаунт доступен.
+В checked-out TypeScript `src/graphql/execute.ts` запрос на GraphQL собран как `POST http://zvuk.com/api/v1/graphql` — схема `http`, не `https` — и вызывается с axios instance, где выставлен `X-Auth-Token`. GitHub показывает MIT, но этот код не следует запускать с авторизованным токеном до исправления endpoint на HTTPS и проверки redirect-поведения. Ни в его операциях `getSearch`, `getTracks`, `getFullTrack`, `getReleases`, `getPlaylists`, `getStream` не найдено чтения/изменения пользовательских лайков.
 
-**Найденная проблема безопасности:** в просмотренном `src/graphql/execute.ts` GraphQL запрос отправляется на `http://zvuk.com/api/v1/graphql` (HTTP), хотя токен добавлен в `X-Auth-Token`. Пока не проверено, как endpoint/redirect ведёт себя на сети; до аудита или исправления использовать эту библиотеку с авторизованным токеном не следует, поскольку заголовок может уйти по незашифрованному соединению.
+`zvuk-music` также принимает токен пользователя (в `X-Auth-Token`), имеет ограниченный anonymous access, sync/async Python-клиенты и MIT license. В `client.py` подтверждены `get_liked_tracks(order_by, direction)`, `like_track(id)`, `unlike_track(id)`, `get_collection()`, а в GraphQL operation-файлах — `userTracks` (возвращает track IDs и дату последнего изменения), `collection.addItem(id,type)` и `collection.removeItem(id,type)`. По README полноценные лайки/плейлисты требуют авторизованный токен. При этом англоязычный README сверху говорит «нужна платная подписка», а ниже описывает отдельно лишь подписочные качества FLAC/320 kbps; исходники не доказывают, что чтение лайков само требует платного плана. Это противоречие нужно проверить read-only на аккаунте без подписки, если такой аккаунт доступен.
 
 ## Подтверждённые в стороннем коде запросы
 
@@ -37,7 +39,7 @@
 | GraphQL `userTracks` | Список ID лайкнутых треков и время изменения элемента в `zvuk-music` |
 | GraphQL `collection.addItem` / `collection.removeItem` | Поставить/снять лайк; тип коллекции передаётся отдельным параметром |
 
-В TypeScript клиенте GraphQL operations включают `quickSearch`, `getTrack`, `getAlbum`, `getPlaylist`, `getStreamURL`. В переданном `ZvukDownloader` и в `Aiving/sberzvuk-api` не найдено чтения liked tracks или мутации like/unlike. Это пробел именно этих клиентов, а не самого API: в более новой `trudenboy/zvuk-music` найдены методы чтения и изменения коллекции.
+В TypeScript клиенте GraphQL operations включают `quickSearch`, `getTrack`, `getAlbum`, `getPlaylist`, `getStreamURL`. В переданном `ZvukDownloader` и в `Aiving/sberzvuk-api` не найдено чтения liked tracks или мутации like/unlike. Это пробел именно этих клиентов, а не самого API: в более новой `trudenboy/zvuk-music` найдены методы чтения и изменения коллекции. У `ZvukDownloader` дополнительно проверены `get_profile`, `get_tracks`, `get_releases`, `get_playlists`, `get_stream_url`, `get_lyrics` и GraphQL `get_artist_releases`; у них нет пользовательского collection API.
 
 `ZvukDownloader` в первую очередь предназначен для получения медиапотока и локальных FLAC/MP3 файлов. Для переноса библиотеки нам интересны каталог и лайки, а не скачивание аудио. Не использовать downloader как импортёр без отдельной проверки лицензионных условий и модели доступа.
 
