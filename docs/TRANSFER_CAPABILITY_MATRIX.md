@@ -40,7 +40,7 @@
 
 ## Приоритет реализации
 
-1. Завершить единый provider capability contract: `connect`, `discoverCollections`, `pageLikes`, `pagePlaylists`, `search/resolve`, `writeFavorites`, `create/addPlaylist`, `readBack`, `disconnect`.
+1. Завершить единый provider adapter contract: `connect`, paged `discoverCollectionPage`, `readCollectionPage`, `searchTracks`, `readDestination`, `writeFavorites`, `createPlaylist`, `writePlaylistItems`, `readBack`, `disconnect`. PR #2 содержит общий cursor reader/search orchestration, но ни один service-specific account adapter полного цикла ещё не подключён.
 2. Минимальные read-only adapters и fixture-based matching для Spotify, Apple, Yandex, Zvuk; каждый выводит нормализованные `TrackRef` плюс provider ID/ISRC/metadata/provenance.
 3. Устранить author-credential dependency: проверить local Chrome extension/native helper flow для private APIs, Spotify direct login alternatives и Apple Music.app destination; не считать GitHub Pages достаточным для чужих origin/auth.
 4. Пройти authenticated dry-run для всех четырёх source adapters и полный end-to-end transfer по одной паре с тестовым playlist/account; подтвердить read-back до включения массовых writes.
