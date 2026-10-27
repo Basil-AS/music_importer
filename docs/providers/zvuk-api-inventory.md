@@ -82,6 +82,12 @@ Live проверки касались только чтения. Для наш�
 
 Полный статический обход 100 JS chunks build `v8.20.1` из terminal прошёл без cookies: все 100 ответили `200`, суммарно около 2.17 MB. Кроме известных collection methods в нём встречались другие `getTracks` wrappers, но extracted route chunks не содержали явных GraphQL `operationName`/HTTP API path strings. Поэтому это расширяет карту клиентского слоя, но не заменяет live capture authenticated GraphQL variables и серверных ответов.
 
+### Повторная проверка текущей сборки и чистого CLI (27.10.2026)
+
+После нового открытия `/favorites` в подключённом Chrome UI снова показал `0 треков` и cookie consent; это анонимная вкладка, пользовательский список не проверен. Страница загрузила build `v8.20.1`; в текущем документе присутствовали 60 JS script URLs. Отдельно по публичному `_buildManifest.js` из терминала скачаны все 100 перечисленных JS assets (HTTP 200). Имена client-side методов, найденные в bundle scan: `getProfileFavoritesInfo`, `getPaginatedCollection`, `getCollectionIds`, `getCollectionCount`. Поиск литералов `/api/v1`, `/api/v2`, `/api/tiny` и query/mutation operation names в 100 исходниках не нашёл точек GraphQL транспорта; вероятно, transport и документы собираются/обфусцируются в другом runtime слое, поэтому это нельзя считать полным endpoint inventory или доказательством отсутствия `/api/v2`.
+
+Свежие credential-free terminal запросы к `GET /api/tiny/profile`, `GET /api/v2/tiny/profile` и безопасному `POST /api/v1/graphql` (`query { __typename }`) все вернули `418 text/html`. Ответы и пользовательские данные не сохранялись. Это подтверждает текущий CLI challenge на этих маршрутах, но не проверяет аутентифицированную работоспособность и не меняет вывод из прежнего авторизованного read-only cursor walk.
+
 ## Продуктовый вывод
 
 - User-only sign-in можно сделать как кнопку «Подключить Звук»: локально открыть сайт, пользователь входит только у провайдера, приложение получает минимальный session token из same-origin профиля или использует существующую browser session.
