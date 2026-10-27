@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function makePage(fixtures) {
+function makePage(fixtures, userTokenHeader = 'music-user-token') {
   const listeners = new Map();
   const messages = [];
   const requests = [];
@@ -33,7 +33,7 @@ function makePage(fixtures) {
     requests,
     async scan() {
       await window.fetch('https://amp-api.music.apple.com/v1/me/storefront', {
-        headers: { authorization: `Bearer ${token}`, 'music-user-token': token },
+        headers: { authorization: `Bearer ${token}`, [userTokenHeader]: token },
       });
       await listeners.get('message')({
         source: window,
@@ -44,7 +44,7 @@ function makePage(fixtures) {
     },
     async command(action, details = {}) {
       await window.fetch('https://amp-api.music.apple.com/v1/me/storefront', {
-        headers: { authorization: `Bearer ${token}`, 'music-user-token': token },
+        headers: { authorization: `Bearer ${token}`, [userTokenHeader]: token },
       });
       await listeners.get('message')({
         source: window, origin: location.origin,
@@ -105,6 +105,19 @@ test('Apple source reader refuses an incomplete library page', async () => {
   await page.scan();
   assert.ok(page.messages.some((message) => message.type === 'scan-error'));
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Apple page session preserves the observed Media-User-Token header spelling', async () => {
+  const page = makePage({
+    '/v1/me/library/songs?limit=100': { meta: { total: 0 }, next: null, data: [] },
+    '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
+  }, 'media-user-token');
+  await page.scan();
+
+  const libraryRequest = page.requests.find((request) => request.url.includes('/v1/me/library/songs'));
+  assert.equal(libraryRequest.headers.get('media-user-token'), page.token);
+  assert.equal(libraryRequest.headers.get('music-user-token'), null);
+  assert.ok(!JSON.stringify(page.messages).includes(page.token));
 });
 
 test('Apple catalog search returns catalog song IDs without exposing session headers', async () => {

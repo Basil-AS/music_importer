@@ -27,11 +27,12 @@
     if (url.hostname !== apiHost || !url.pathname.startsWith('/v1/')) return;
     const headers = headerBag(input, init);
     const authorization = headers.get('authorization');
-    const musicUserToken = headers.get('music-user-token');
-    if (!authorization?.startsWith('Bearer ') || !musicUserToken) return;
+    const userTokenHeader = headers.has('media-user-token') ? 'media-user-token' : 'music-user-token';
+    const userToken = headers.get(userTokenHeader);
+    if (!authorization?.startsWith('Bearer ') || !userToken) return;
 
     // Credentials stay only in this page closure. The extension and app receive normalized library data only.
-    sessionHeaders = { authorization, 'music-user-token': musicUserToken };
+    sessionHeaders = { authorization, [userTokenHeader]: userToken };
   }
 
   const originalFetch = window.fetch;
