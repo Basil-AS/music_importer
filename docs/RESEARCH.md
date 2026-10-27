@@ -177,3 +177,10 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Rechecked current GitHub HEAD `296e59e8530ed6e5268a24baa74f05482242dbd3`, MIT, version 1.0.4. The userscript intercepts `amp-api.music.apple.com/v1/me/library/songs` and `/albums`, replays missing song pages using offset/limit, and uses Apple Music UI actions for Library/playlist writes; it does not target `/v1/me/favorites` or write Favorite Songs.
 - Static review found import queue/progress and logs persisted in `music.apple.com` origin `localStorage`, plus matching `console.log` entries containing artist/album text. URL/network-call scan found no non-Apple data endpoint; this is source evidence, not a dynamic network test.
 - Added the local-data-retention and no-Favorites caveats to `docs/providers/apple-music.md` and `docs/PROJECTS.md`. The script was not installed or executed; no Apple account data was accessed.
+
+## Apple Music cross-Apple-ID GitHub candidate (2026-10-27)
+
+- GitHub search found `bit-of-a-shambles/apple-music-transfer`, HEAD `d610e2489ed20153bbb22fc4d4a557eb59451dd5` (2026-03-15), with no license metadata and no `LICENSE` file. Static source review only; the script was not run.
+- The CLI consumes old-account `Library.xml`, opens MusicKit user authorization for the target account, searches Apple catalog, writes to `/v1/me/library` in batches of 25, and creates library playlists. It also reads storefront and paginated library songs; the separate deduplicator deletes playlists by name through AppleScript.
+- The user token is returned to a loopback server as `?token=…`; the matcher lacks ISRC/review and falls back to the first result; no Favorite Songs endpoint or read-back exists. Useful as a local MusicKit authorization/Library API reference only; not a source-service likes importer and not suitable for source reuse absent licensing.
+- Added pinned source, routes, credential and write limitations to `docs/providers/apple-music.md` and `docs/PROJECTS.md`.
