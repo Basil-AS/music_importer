@@ -83,6 +83,20 @@ MIT TypeScript-клиент проверен на HEAD `3c157f8114b236ccc2d15d12
 
 README автора предупреждает, что отдельные сохранённые ID могут вернуть пустые track objects; в миграторе проверять присутствие непустого ID/title и учитывать неразрешённые записи отдельно, не считать размер массива гидратированных карточек числом исходных лайков. Repo также содержит `addItemToCollection`/`removeItemFromCollection` и другие мутации, но ни одна не нужна source-export этапу. Snapshot подтверждает существование старого non-paginated community path, не его работоспособность на текущем backend. В этой среде Go CLI/test suite не запускались; live auth повторно не выполнялся. Это независимая старая сверка к `trudenboy/zvuk-music`, а не замена актуальному `getPaginatedCollection` из веб-клиента.
 
+### Независимый cursor-reference: `TypeHintsFun/sber-zvuk-downloader`
+
+Проверен публичный snapshot [`43c0f8da5acab344f50da85128725f8a6a6d9c90`](https://github.com/TypeHintsFun/sber-zvuk-downloader/tree/43c0f8da5acab344f50da85128725f8a6a6d9c90), последний commit 09.02.2026; GitHub не показывает SPDX license и в репозитории нет файла `LICENSE`. Это небольшой downloader, но его favorites code — независимый reference к вебовской пагинации:
+
+| Часть | Контракт, видимый в коде |
+|---|---|
+| GraphQL transport | `POST https://zvuk.com/api/v1/graphql`, JSON `{operationName, query, variables}`, заголовки `X-Auth-Token`, `x-app-name`, `Accept: application/graphql-response+json, application/json`; клиент также отправляет browser cookies и `Origin`/`Referer`/`User-Agent`. |
+| Любимые треки | `getPaginatedCollection(limit, after)` → `paginatedCollection.tracks.items` с `id`, `title`, `artists.title`; следующая страница определяется по `page.endCursor`; в коде установлен размер страницы `100`. В query нет `hasNextPage` или `collectionCount`, а loop останавливается на пустых items либо отсутствующем cursor. Нет защиты от повторного cursor, сохранения checkpoint или сравнения полного набора с контрольным ответом. |
+| Плейлисты | Сначала `collection.playlists { id, title }`, затем `playlistTracks(id, limit, offset)` по страницам по 100; проход завершается пустой или короткой страницей. Ошибки transport/JSON для GraphQL перехватываются и возвращают `{}`, поэтому caller может принять ошибку за конец списка. |
+| Каталог и аудио | `mediaContents(ids, quality, encodeType)` для `stream`/`streamV3`; после получения ссылки скрипт скачивает аудио. Для миграции метаданных stream/download операция не нужна; извлечённая favorites карточка не запрашивает album, duration, ISRC или availability для качественного matching. |
+| Авторизация и эксплуатация | README предлагает вручную копировать набор cookie из DevTools в `COOKIES_DICT`; `auth` затем используется и как cookie, и как `X-Auth-Token`. Также предлагается подставлять браузерный User-Agent и `wafv=human`, объясняя это прохождением anti-fraud/WAF, и добавлены случайные паузы для снижения риска IP block. Это credential-copy/WAF-evasion подход, не переносить в наш клиент; код не запускался и network probes с этими данными не выполнялись. |
+
+Этот проект — дополнительное подтверждение shape cursor query, но не надёжный exporter: весь список накапливается в RAM, API errors маскируются под пустые ответы, нет проверки конца страниц и точной сверки, а README рекомендует ограничивать загрузки 200–300 треками за сеанс. Он также скачивает аудио и не содержит matcher/Apple writer. Для нашей задачи из него полезен только static query reference; безлицензионный код и ручной cookie/WAF путь не использовать как основу.
+
 ### Изменения данных — live mutations не выполнялись
 
 | Mutation | Переменные | Эффект |
