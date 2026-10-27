@@ -349,9 +349,18 @@
     if (!file) return;
     try {
       const text = (await file.text()).replace(/^\uFEFF/, '');
-      const tracks = file.name.toLowerCase().endsWith('.json') ? normalizeJSON(JSON.parse(text)) : parseCSV(text);
+      let label = file.name;
+      let tracks;
+      if (file.name.toLowerCase().endsWith('.json')) {
+        const payload = JSON.parse(text);
+        tracks = normalizeJSON(payload);
+        const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+        if (payload?.service && sourceLabels[payload.service]) label = `${sourceLabels[payload.service]} · ${payload.collection?.name || 'избранное'}`;
+      } else {
+        tracks = parseCSV(text);
+      }
       if (!tracks.length) throw new Error('В файле не нашёл треков с названием и исполнителем');
-      loadTracks(tracks, file.name);
+      loadTracks(tracks, label);
     } catch (error) {
       toast(error.message || 'Не удалось прочитать файл');
     } finally {
