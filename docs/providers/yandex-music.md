@@ -10,6 +10,26 @@
 
 Host difference: library/OpenAPI snapshot использует `api.music.yandex.net`, а ранее наблюдавшийся Chrome и authenticated terminal traffic для account/likes/details шёл на `api.music.yandex.ru` и отвечал `200`. No-auth `/search` отдельно ответил `200 application/json` на обоих доменах 27.10.2026. Это не доказывает, что все routes взаимозаменяемы; сохранять фактический host как часть проверенного request profile и перепроверять перед реализацией.
 
+### Независимый Go-клиент `DECE2183/yamusic-tui`
+
+Закреплён публичный [`DECE2183/yamusic-tui`](https://github.com/DECE2183/yamusic-tui/tree/4d543ae9029618dd510f9b21599988eaab45845a) на HEAD `4d543ae9029618dd510f9b21599988eaab45845a` (GPL-3.0; commit 2026-10-26, release `v0.8.0` от 2026-09-11). README браузером подтвердил, что это активный неофициальный TUI; в README прямо сказано, что приложение требует пользовательский token, а интерфейс предлагает его вставить. OAuth authorization в обычном сценарии приложения нет.
+
+`api/api.go` даёт ещё один source cross-check маршрутов и HTTP-форм:
+
+| Операция | Метод и путь | Форма / ограничения в checked source |
+|---|---|---|
+| Проверить статус, получить UID | `GET /account/status` | `Authorization: OAuth <token>` |
+| Получить лайки треков | `GET /users/{uid}/likes/tracks` | `LikesDesc.Library.Tracks`; без cursor, revision или client-side pagination |
+| Гидрировать короткие track refs | `POST /tracks` | form-urlencoded `track-ids=<...>&with-positions=false`; метод получает весь slice одним запросом, chunking не выполняет |
+| Список и карточка плейлистов | `GET /users/{uid}/playlists/list`; `GET /users/{uid}/playlists/{kind}` | API user `uid` и playlist `kind`; отдельный путь `GET /users/{uid}/playlists?kinds=...&mixed=...&rich-tracks=true` загружает playlist tracks |
+| Лайки альбомов и поиск | `GET /users/{uid}/likes/albums`; `GET /search?text=...&page=0&type=...` | Один response на каждый вызов; search types задаются клиентом |
+| Поставить/снять like | `POST /users/{uid}/likes/tracks/add-multiple`; `POST /users/{uid}/likes/tracks/remove` | form-urlencoded `track-ids`; мутации не выполнялись |
+| Изменить playlist | `POST /users/{uid}/playlists/create`, `/name`, `/delete`, `/change-relative` | form-urlencoded title/visibility, name, revision/diff; мутации не выполнялись |
+
+Token хранится plaintext в `~/.config/yamusic-tui/config.yaml`: код запрашивает mode `0755` для directory и файла, что допускает group/world read, если права не урежет системный umask. В `api/constants.go` также есть неиспользуемый обычным UI deprecated password-grant helper и встроенные shared OAuth client credentials; значения не переносим. Клиент GPL-3.0, не Apple importer; его код полезен как маршрутный cross-check, но не как готовый auth connector или безопасное хранилище.
+
+Свежая проверка без авторизации: публичная GitHub-страница HEAD открылась в Chrome и показала release/README; затем чистый Python `urllib` GET дал `200 application/json` для `/account/status` и `403 application/json` для synthetic `/users/1/likes/tracks?if-modified-since-revision=0`. Тела ответов не читались и не сохранялись. `go version` не запустился (`go` отсутствует), поэтому Go tests/build не проверялись. Ни браузерные cookies/tokens, ни пользовательские данные не использовались.
+
 ### Public playlist routes из `YandexMusicExport`
 
 Статически просмотрен [YMusicExport/YandexMusicExport](https://github.com/YMusicExport/YandexMusicExport/tree/c80db0a54db7f1e67646695f1247292ab57e100b), HEAD `c80db0a54db7` от 16.05.2026, без declared license. В коде без auth headers используются два GET:
