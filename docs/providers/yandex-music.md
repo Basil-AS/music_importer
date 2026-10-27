@@ -21,6 +21,14 @@
 
 Реализация `_like_action` считает операцию успешной по наличию `revision` в ответе для треков. В изученном исходнике не обнаружено зафиксированного стабильного максимального размера пачки: его нельзя предполагать, нужно выяснять тестом и учитывать ответы сервиса.
 
+### Другой рабочий клиент: `yandex-music-transfer`
+
+В репозитории [yarikmsu/yandex-music-transfer](https://github.com/yarikmsu/yandex-music-transfer), HEAD `eb88366` (2026-10-20, MIT), exporter использует тот же список лайков, но отдельный legacy flow: пользователь получает access token по URL с `response_type=token` и client ID официального Android-приложения. README уточняет, что этот client ID не опубликован Яндексом для сторонних интеграций. Это не Device Flow из MarshalX-библиотеки и не официально зарегистрированное приложение нашего проекта.
+
+По исходнику `exporter/fetch_tracks.py` exporter вызывает `GET /account/status`, `GET /users/{uid}/likes/tracks`, `POST /tracks` с `application/x-www-form-urlencoded` и `track-ids=<comma-separated IDs>`, а для плейлистов — `GET /users/{uid}/playlists/list` и `GET /users/{uid}/playlists/{kind}`. Карточки лайков батчатся по 100; экспортируются CSV с ID и метаданными. Эти routes совпадают с нашими read-only terminal probes, но это только статическая сверка кода: данный exporter не запускали.
+
+Из этого проекта стоит взять формат полного offline экспорта/ручной сверки. Не перенимать implicit-token URL и постоянное хранение access token в `.env` как основную auth-архитектуру; предпочтительнее Device Flow с локальным защищённым token store и ясным revoke path.
+
 ## Практическая проверка
 
 - В авторизованной вкладке Chrome видимый раздел коллекции «Мне нравится» открылся. Наблюдались `GET https://api.music.yandex.ru/playlist/lk.:liked-id` и `POST https://api.music.yandex.ru/tracks`, оба `200`. ID приватного плейлиста заменён шаблоном; параметры и тела с содержимым пользовательской коллекции не сохранялись.

@@ -32,17 +32,29 @@ Apple поддерживает отдельный официальный пол�
 
 - Поиск: Apple Music API Catalog search по storefront, искать песню/артиста/альбом; затем подтвердить совпадение ISRC/метаданными.
 - Чтение библиотеки: `GET https://api.music.apple.com/v1/me/library/songs`; требует Music User Token, поддерживает пагинацию. Для catalog ID в library response может присутствовать `playParams.catalogId`.
-- Добавление в Favorite Songs: `POST https://api.music.apple.com/v1/me/favorites?ids=<catalog-id>` с developer + music user authorization. Документация указывает `202 Accepted`; если пользователь favorites song, она добавляется в `favorite songs` playlist. Для недоступных ID запрос может быть принят, но такие элементы игнорируются — поэтому успех HTTP сам по себе не равен успешному импорту.
+- Добавление в Favorite Songs: `POST https://api.music.apple.com/v1/me/favorites?ids[songs]=<catalog-id>` с developer + music user authorization. Документация указывает `202 Accepted`; если пользователь favorites song, она добавляется в `favorite songs` playlist. Недоступные IDs могут быть проигнорированы, поэтому успех HTTP сам по себе не равен успешному импорту. API разрешает bulk additions; проверенные сторонние проекты отправляют по одному треку.
 - Создание обычного плейлиста: `POST /v1/me/library/playlists`, добавление элементов в playlist поддерживается отдельно. Это не эквивалент добавлению в favorites.
 - Добавление ресурса в библиотеку `POST /v1/me/library` — отдельная операция от `/me/favorites`; нужно не смешивать понятия «в библиотеке» и «избранное».
+
+### Наблюдаемая авторизация Apple Music web player
+
+В текущей авторизованной вкладке `music.apple.com` сетевые запросы к `amp-api.music.apple.com` несут заголовки `Authorization: Bearer …` и `Media-User-Token: …`. Это web-player пара токенов, полученная штатным клиентом сайта; она технически отличается от созданного нами developer JWT, хотя API использует тот же HTTP Bearer заголовок. Не выдавать её за документированный сторонний OAuth flow.
+
+По прямому разрешению владельца аккаунта эту пару временно использовали в чистом терминальном HTTPS-клиенте только для чтения:
+
+- `GET /v1/me/library/playlists?limit=1` → `200`, JSON с `data`, `meta`, `next`.
+- `GET /v1/me/library/playlists/{favoritePlaylistId}/tracks?limit=1` для системного Favorite Songs → `200`, `data` типа `library-songs`, доступны поля вроде `name`, `artistName`, `albumName`, `durationInMillis` и `playParams`; присутствовал `next`.
+- В распакованном JWT без сохранения самого значения были claims `exp`, `iat`, `iss`, `root_https_origin`; при захвате срок до `exp` был около 63 дней. Это конкретная сессия, не гарантия срока для других токенов.
+
+Токены хранились только в одноразовом файле с mode `0600`, файл удалён сразу после каждого запроса; ответ обработан в памяти, названия и ID треков не записывались. Предыдущая проба с одним только `media-user-token` без bearer дала `401`; web-player bearer вместе с ним дал `200`. Это доказывает работоспособность конкретного чистого GET сейчас, но не даёт стабильной публичной авторизации. Никаких POST/DELETE к Apple не посылали.
 
 ## Практическая проверка
 
 - В авторизованной вкладке Music Web для storefront `tr` при открытии видимого раздела избранного браузер получил `200` от `GET https://amp-api.music.apple.com/v1/me/library` и `GET /v1/me/library/playlists/{id}`; запрос каталога `GET /v1/catalog/tr` также вернул `200`. Это подтверждает работу сессии веб-приложения в браузере, но не выдаёт поддерживаемый публичный способ получать его credentials.
 - Из терминала без пользовательской авторизации `GET https://api.music.apple.com/v1/me/library/songs?limit=1` и поиск `GET /v1/catalog/us/search?...` вернули `401`. Официальный REST-доступ требует developer token, а пользовательские `/me` операции — ещё и Music User Token.
-- Повторная чистая terminal-проверка с `media-user-token` из Chrome cookie и полным cookie-набором, но без developer `Authorization` bearer, снова вернула `401` на `/v1/me/library/songs?limit=1`. Одного Music User Token/cookie недостаточно; библиотека требует developer token в заголовке Authorization. Значения токенов не выводились и не сохранялись.
+- Повторная чистая terminal-проверка только с `media-user-token` из Chrome cookie, но без Authorization bearer, вернула `401` на `/v1/me/library/songs?limit=1`. Отдельная проверка выше с парой заголовков, скопированной по live-запросу web player, вернула `200` на список плейлистов и один элемент Favorite Songs.
 - Словарь установленного локального Music.app (`com.apple.Music.sdef`) объявляет свойство `favorited` как read/write для треков; persistent ID доступен только для чтения. Это локальное AppleScript-поверхностное API, отдельное от MusicKit REST. Оно делает локальный сценарий правдоподобным, но полноценную запись избранного ещё надо безопасно проверить на тестовом наборе.
-- Запись через браузерные или REST endpoints не выполнялась; ID пользователя и содержимое библиотеки в документацию не переносились.
+- Запись через браузерные или REST endpoints не выполнялась; account identifiers, playlist ID и содержимое коллекции в документацию не переносились.
 
 ## Ограничения для миграции
 
