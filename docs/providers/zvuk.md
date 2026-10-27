@@ -18,7 +18,7 @@
 
 `ZvukDownloader` просит пользователя взять cookie с именем `auth` из браузера после входа на `zvuk.com`, либо получить токен из `/api/v2/tiny/profile`; затем отправляет cookie `auth=<значение>`. Это bearer-секрет активной сессии. В README/API notes есть команда передать его через CLI или хранить в `config.json`. Для нашего приложения нельзя выводить это значение в консоль/логи или коммитить конфиг. Не просить пароль пользователя и не пытаться извлекать cookie автоматически без отдельного безопасного потока.
 
-**Chrome live-check 27.10.2026:** авторизованная сессия открыла JSON (`200`) на `GET /api/v2/tiny/profile` и `GET /api/tiny/profile`; оба содержат session token, но в разных местах схемы (`result.profile.token` и `result.token`). Значения и профильные поля не копировались в заметки. Чистые no-cookie terminal запросы к обоим путям и безопасный `POST /api/v1/graphql` с `query { __typename }` получили `418 text/html`. Ранее authenticated read-only GraphQL terminal replay с ephemeral session context вернул `200`.
+**Chrome live-check 27.10.2026:** авторизованная страница вызвала `GET /api/tiny/profile` с `x-app-instance` и `x-device-id`, без `Cookie` header; ответ `200 application/json` содержал `result.token`. Эти app/device headers видны в браузерном запросе, их значения не сохранялись. Терминальный профильный запрос без соответствующих browser headers ответил `307`; не следует считать это отказом авторизованной сессии. Ранее no-cookie GraphQL запросы без профиля/сессионного контекста получали `418 text/html`.
 
 В просмотренном `ZvukDownloader` есть дополнительный риск: `aiohttp.TCPConnector(..., ssl=False)` отключает TLS-проверку сертификата для HTTP-сессии, через которую передаётся cookie `auth`. Его общий обработчик ошибок также логирует текст HTTP-ответа. Поэтому даже для локального чтения профиля не следует использовать этот клиент с реальным токеном без исправления TLS и очистки логов. Репозиторий не содержит файла `LICENSE`, несмотря на формулировку «MIT» в README.
 
@@ -61,13 +61,13 @@
 
 | Метод/маршрут | Наблюдение |
 |---|---|
-| `GET /desktop-data/_next/data/v8.20.0/favorites.json` | JSON-данные страницы «Любимое», статус 200 |
+| `GET /desktop-data/_next/data/v8.20.1/favorites.json` | JSON-данные страницы «Любимое», статус 200 |
 | `POST /api/v1/graphql`, `getPaginatedCollection` | Выборка `data.paginatedCollection.tracks.items` и `tracks.page.endCursor`; в Chrome видны variable keys `limit` и `after`; проверенный `limit` — 30 |
 | `POST /api/v1/graphql`, `getCollectionCount` | Счётчик `collectionCount.tracks` |
-| `POST /api/v1/graphql`, `getCollectionIds` | Наблюдалась операция без variables, статус 200; назначение и response body не исследовались |
+| `POST /api/v1/graphql`, `getCollectionIds` | Операция без variables, статус 200; `collection.tracks[].id` даёт ID библиотеки для cross-check |
 | `POST /api/v1/graphql`, `getPersonalWave` | Данные персональной волны/плеера, включая фрагмент `PlayerTrackData`; это соседний запрос страницы, не источник списка лайков |
 | `GET /desktop-data/api/cookieAPI` | Внутренний маршрут сайта, статус 200; назначение и контракт не выяснялись, чтобы не читать/сохранять auth-данные |
-| `GET /desktop-data/_next/data/v8.20.0/{track,artist,release}/…json` | Догрузка данных карточек. Числовые идентификаторы аккаунта и каталога в документ не переносились |
+| `GET /desktop-data/_next/data/v8.20.1/{track,artist,release}/…json` | Догрузка данных карточек. Числовые идентификаторы аккаунта и каталога в документ не переносились |
 
 В свежем capture после reload и прокрутки страницы пойманы два вызова `getPaginatedCollection`: начальная порция и запрос с непустым `after`; оба ответили `200`. У ответа cursor-запроса форма `data.paginatedCollection.tracks.{items,page.endCursor}`. Событийная очередь CDP была ограничена/усечена, поэтому это проверка цепочки чтения, а не исчерпывающий список всех обращений сайта. В наблюдавшемся GraphQL request был `Cookie` header и не было `Authorization` или `X-Auth-Token` header; не переносить значения cookie в документацию.
 
@@ -79,16 +79,17 @@
 
 Дополнительная проверка 27.10.2026: открытая в Chrome страница `/collection` показала раздел коллекции с избранным без экрана входа, значит браузерная сессия была авторизована. Контроллер Chrome дал evaluate-контекст с `document` и `window`, но без `fetch` и `performance`; безопасный same-origin GraphQL вызов остановился с клиентским `TypeError` до отправки HTTP-запроса. Это ограничение контроллера, а не ответ Звука. Затем тот же безопасный `__typename` POST отправили из чистого терминала без cookies/токенов и получили `418 text/html`. Секреты и данные коллекции не извлекались и не сохранялись; никакие изменения не выполнялись.
 
-По явному запросу владельца сессии ранее выполнены read-only CLI-вызовы к `profile`, `getCollectionCount`, `userTracks` и cursor-пагинации `getPaginatedCollection`, используя cookie `auth` только в памяти/временном файле mode `0600`; файл удалён. Значение секрета, названия песен и ID не выводились и не сохранялись. GraphQL запросы вернули 200 без ошибок; `getCollectionCount` и фактический обход списка дали разные размеры. В пагинации обнаружились повторы ID; после cursor-обхода ответил пустой завершающий page. Для будущего экспортёра нужно дедуплицировать по track ID, не считать `collectionCount` контрольной суммой и отдельно сверять число элементов/уникальных ID. `GET /api/v2/tiny/profile` в CLI вернул redirect 307, поэтому для экспорта лайков этот профильный маршрут пока не нужен.
+**Полная browser pagination и terminal replay, 27.10.2026:** авторизованная страница `/favorites` последовательно запрашивала `getPaginatedCollection(limit=30, after=...)` при прокрутке. Все полученные страницы вернули `200`, последний ответ не содержал следующего cursor; по пути встречались повторные track IDs. Read-only обход тем же GraphQL запросом из терминала также дошёл до страницы без cursor, все page requests вернули `200`, а ошибки GraphQL отсутствовали. Терминальная сессия использовала только cookie `auth`, token из browser response `/api/tiny/profile` и виденные в browser request headers `x-app-instance`/`x-device-id`; token/header значения передавались через временный файл mode `0600`, удалённый сразу после probe. Прямой terminal profile GET без совпадающих browser headers дал `307`, а auth cookie без token/app headers ранее давала `418`.
 
-Дополнительная чистая HTTP-проверка из терминала: `POST https://zvuk.com/api/v1/graphql`, operation `userTracks`, с авторизационной cookie-сессией и токеном из неё в `X-Auth-Token` вернул `200` и `data.collection.tracks` без GraphQL errors. Запрос `getTracks(ids: [...])` для одной записи также вернул `200` и карточку. В первой попытке с неполным набором cookies WAF ответил `418`; с полным cookie jar того же домена read-only запрос прошёл. Для первой порции `getPaginatedCollection` (`limit=30`, `after=null`) попытка только с cookie `auth` получила `418`; с полным браузерным Cookie header и выбранными request headers тот же запрос вернул `200`. Отдельно cursor-запрос следующей порции с непустым `after` также повторён из терминала: `200`, JSON body распарсился, GraphQL errors отсутствовали, в `tracks` были `items` и `page.endCursor`. Значения и количество записей, сам cursor и cookies не печатались и не коммитились; временные файлы mode `0600` удалены.
+Для reconciliation terminal запрос `getCollectionIds` вернул тот же набор ID, что и union cursor-страниц; `getCollectionCount.tracks` не совпал с количеством уникальных cursor IDs. Точные объёмы и сами ID не сохранялись. Практический вывод: дедуплицировать export по track ID, сравнивать с `getCollectionIds`, а `getCollectionCount` не использовать как checksum. Это подтверждает читаемость всей коллекции в проверенной сессии, но не гарантирует одинаковую полноту на иных аккаунтах/регионах или при изменении частного API.
+
+Ранее отдельные terminal probes также подтвердили `userTracks` и `getTracks(ids: [...])` с `200`. Отличие от полной cursor-проверки выше — в этой перепроверке GraphQL page walk сработал с `auth` cookie и browser profile token/app headers без полного cookie jar. Все credential values удалены после запросов и не сохранялись.
 
 ### Следующая безопасная проверка
 
-1. Отдельно подтвердить пагинацию чтения на следующей странице списка, сохраняя только число элементов/наличие cursor, без идентификаторов и названий треков.
-2. Мутации `collection.addItem` / `collection.removeItem` пока не вызывать. Для их live-проверки понадобится отдельное явное решение на тестовом лайке, потому что это изменяет медиатеку.
-3. В готовом коннекторе получать секрет только из пользовательского ввода/keychain, не из Chrome профиля или session store; текущий временный CLI probe не превращать в credential-harvesting механизм.
-4. Проверить доступность чтения лайков без платного тарифа на аккаунте, где такой план не активен.
+1. Проверить доступность чтения лайков без платного тарифа на аккаунте, где такой план не активен; текущая сессия не доказывает subscription gate.
+2. Мутации `collection.addItem` / `collection.removeItem` пока не вызывать. Для их live-проверки понадобится отдельное решение на тестовом лайке, потому что это изменяет медиатеку.
+3. В приложении оформлять получение профиля/токена как локальную работу browser extension или явный user session bridge с минимальными cookies/headers; секреты держать в памяти или системном keychain, не логировать и не сохранять в репозитории.
 
 Не сохранять HAR, заголовки авторизации, cookies, значения token, GraphQL variables с пользовательскими данными и сырые ответы личной коллекции в репозиторий.
 
