@@ -93,6 +93,19 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 
 Повторная точечная проверка Spotify: в Chrome оставались cookies `sp_dc`/`sp_key`, а `/collection/tracks` отображал Liked Songs. Страница отправляла `GET /api/token` с query keys `reason`, `productType`, `totp`, `totpServer`, `totpVer`, но статусы исходных page requests не попали в CDP capture. Повторный in-page fetch и один clean terminal replay захваченного TOTP URL ответили HTTP 400 JSON с полем `error`, без access token; такой replay может не работать из-за срока действия или одноразового параметра и не доказывает ошибку исходного запроса страницы. Дополнительных DELETE-запросов при этой перезагрузке не наблюдалось. Cookies, TOTP-параметры и результаты удалены сразу после проверки; названия, ID и объём списка не сохранялись. Старый успешный terminal `fetchPlaylistContents` replay остаётся подтверждением чтения с уже полученным bearer; способ его обновления текущими данными не установлен.
 
+## Apple destination helper audit: bootleg (27.10.2026)
+
+- Найден и статически просмотрен MIT `moudlajs/bootleg`, HEAD `a384ff52ce6303e0e0567df7e2a2d92adef10ea0` от 2026-10-18: локальный Go CLI/MCP принимает текстовый список, ищет Apple catalog, имеет `-dry-run`, playlist/Library/Favourite targets и remove command.
+- `Favorite()` фактически вызывает `PUT /v1/me/ratings/songs/{catalog-id}` с `rating.value=1`; это официальный song-rating endpoint. У Apple есть отдельный `POST /v1/me/favorites`, который явно добавляет song в системный Favorite Songs. До read-back результат bootleg нельзя засчитывать как доказанную запись в Favorite Songs.
+- Для локального CLI пользователь вручную копирует пару Apple web-player `authorization` + `media-user-token` в `.env`; собственный Apple developer app не нужен, но это ручной перенос приватных session credentials. Hosted MCP требует отдельного облачного deployment и здесь не рассматривался как предпочтительный сценарий.
+- README, token/CLI docs и Apple client просмотрены локальным shallow clone в `/tmp`; приложение и учетные записи не запускались, write/remove не выполнялись. Это reference для matching/dry-run/error handling, не готовая авторизация «вошёл и готово».
+
+## Zvuk profile v1/v2 browser-to-CLI comparison (27.10.2026)
+
+- В авторизованной Chrome-вкладке открыты оба profile GET: versionless `/api/tiny/profile` и `/api/v2/tiny/profile`. Браузер показал JSON и подтвердил расположение session token в `result.token` и `result.profile.token` соответственно. Из страницы извлекались только названия полей и boolean-проверка; значения token/profile не выводились и не сохранялись.
+- Сразу после этого чистый terminal без cookies/token проверил оба profile route и безопасный GraphQL `__typename`; все три ответа были `418 text/html`. Они совпадают с прежним WAF-наблюдением. Authenticated terminal replay в этой итерации не запускался; предыдущий успешный cursor GraphQL replay остаётся отдельной записью выше.
+- Chrome check оставил только подтверждение auth context/schema, а не содержимое коллекции. Ни лайки, ни настройки аккаунта не менялись.
+
 ## Первичные источники
 
 - Spotify [Authorization](https://developer.spotify.com/documentation/web-api/concepts/authorization), [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [scopes](https://developer.spotify.com/documentation/web-api/concepts/scopes), [изменения февраля 2026](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).

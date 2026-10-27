@@ -58,6 +58,12 @@ Live UI-проверка в текущей авторизованной вкла
 - Отдельный personal rating API: `PUT /v1/me/ratings/songs/{catalog-id}` с `{ "type": "rating", "attributes": { "value": 1 } }` устанавливает оценку «нравится» (`1`; dislike `-1`); `GET` читает, `DELETE` убирает эту оценку. Документация описывает это как song rating, а не добавление в Favorite Songs. Не считать `rating=1` эквивалентом `favorited=true` без отдельного read-back через Favorites.
 - Это различие встретилось в свежем `nedu-m/spotify-to-apple-music`: команда называется `favourite`, но вызывает `PUT /me/ratings/songs/{id}`. Apple официально описывает отдельный `POST /v1/me/favorites?ids[songs]=...`, который добавляет песню в `favorite songs` playlist. Music.app SDEF также объявляет независимые свойства `rating` и boolean `favorited`.
 
+### Дополнительный Apple write-кандидат: bootleg
+
+В MIT Go-проекте [moudlajs/bootleg](https://github.com/moudlajs/bootleg) (HEAD `a384ff52`, 2026-10-18) локальный CLI умеет искать Apple catalog songs из текстового файла, показать dry-run и затем писать в playlist, Library или Favourite Songs. Статический просмотр `internal/applemusic/library.go` показывает, что `Favorite()` вызывает именно `PUT /v1/me/ratings/songs/{catalog-id}` с `attributes.value=1`; официальный контракт этого endpoint говорит только о rating «likes», тогда как отдельный `POST /v1/me/favorites` прямо обещает включить песню в `favorite songs` playlist. Значит слово Favourite в CLI пока не подтверждает нужное нам Apple-состояние; нужен read-back через Favorite Songs после одного тестового трека, но тестовую запись здесь не делали.
+
+Для Apple авторизации bootleg просит вручную скопировать из DevTools web-player `authorization` (developer token) и `media-user-token` в локальный `.env`. Это убирает собственный developer key, но остаётся частным web-player contract, копированием двух секретов и периодическим обновлением user token. Hosted MCP-вариант требует самостоятельной облачной установки, поэтому проще и безопаснее изучать локальный CLI как кодовый reference, а не запускать remote connector. В коде HTTP client задаёт оба токена заголовками, `Origin: https://music.apple.com` и редактирует их из `String`/`slog`; дополнительно проверить всю поверхность логирования до заимствования.
+
 ### Наблюдаемая авторизация Apple Music web player
 
 В текущей авторизованной вкладке `music.apple.com` сетевые запросы к `amp-api.music.apple.com` несут заголовки `Authorization: Bearer …` и `Media-User-Token: …`. Это web-player пара токенов, полученная штатным клиентом сайта; она технически отличается от созданного нами developer JWT, хотя API использует тот же HTTP Bearer заголовок. Не выдавать её за документированный сторонний OAuth flow.
@@ -85,6 +91,7 @@ Live UI-проверка в текущей авторизованной вкла
 ## Источники
 
 - [Apple Music API overview](https://developer.apple.com/documentation/AppleMusicAPI)
+- Apple [Add resource to favorites](https://developer.apple.com/documentation/applemusicapi/add-resource-to-favorites) и [Add a Personal Song Rating](https://developer.apple.com/documentation/applemusicapi/add-a-personal-content-rating-33dop)
 - [iTunes Search API overview (архивная документация)](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/)
 - [iTunes Search examples](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/SearchExamples.html)
 - [iTunes Search response fields](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/UnderstandingSearchResults.html)
