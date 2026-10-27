@@ -7,6 +7,8 @@
 - [Сводная таблица API-маршрутов, авторизации и проверок](docs/API_MATRIX.md)
 - [Обзор API, авторизации и ограничений сервисов](docs/RESEARCH.md)
 - [Целевой опыт и архитектурные ограничения продукта](docs/PRODUCT_DIRECTION.md)
+- [Способы входа через пользовательские аккаунты и локальное расширение](docs/LOGIN_MECHANISMS.md)
+- [Сравнение auth flow и локального хранения токенов](docs/AUTHENTICATION.md)
 - [Сопоставление треков, ISRC и ручная проверка кандидатов](docs/MATCHING.md)
 - [API-заметки: SberZvuk / Звук](docs/providers/zvuk.md)
 - [API-заметки: Spotify](docs/providers/spotify.md)
