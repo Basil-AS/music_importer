@@ -37,6 +37,7 @@ async function render() {
   $('#exportPlaylistsBtn').disabled = state.playlists.length === 0;
   $('#runPlaylistsBtn').disabled = state.automation?.active || !state.playlistPagesSeen || state.playlistListHasMore !== false || state.expectedPlaylistCount !== state.playlists.length || state.playlists.length === 0;
   $('#runPlaylistsBtn').textContent = state.automation?.active ? 'Сбор плейлистов выполняется…' : 'Собрать треки всех плейлистов';
+  $('#exportLibraryBtn').disabled = state.scan?.phase !== 'complete';
   $('#clearBtn').disabled = state.tracks.length === 0 && state.playlists.length === 0;
   $('#error').hidden = !state.error;
   $('#error').textContent = state.error || '';
@@ -100,6 +101,31 @@ $('#exportFavoritesBtn').addEventListener('click', async () => {
     tracks: state.tracks,
   };
   downloadJSON(payload, 'zvuk-favorites.json');
+});
+
+$('#exportLibraryBtn').addEventListener('click', async () => {
+  const state = await send('state');
+  const favoritesConfirmed = state.favoritesScanFinished && state.hasMore === false
+    && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+  const catalogConfirmed = state.playlistListHasMore === false
+    && Number.isInteger(state.expectedPlaylistCount) && state.expectedPlaylistCount === state.playlists.length;
+  const playlistItemsConfirmed = state.playlists.every((playlist) => playlist.complete);
+  const payload = {
+    schemaVersion: 1,
+    service: 'zvuk',
+    collection: { type: 'library', name: 'Вся библиотека' },
+    completeness: {
+      confirmed: state.scan?.phase === 'complete' && favoritesConfirmed && catalogConfirmed && playlistItemsConfirmed,
+      favoritesConfirmed,
+      favoritesCount: state.tracks.length,
+      catalogConfirmed,
+      playlistItemsConfirmed,
+      playlistItemsTotal: state.playlists.length,
+    },
+    tracks: state.tracks,
+    playlists: state.playlists,
+  };
+  downloadJSON(payload, 'zvuk-library.json');
 });
 
 $('#exportPlaylistsBtn').addEventListener('click', async () => {

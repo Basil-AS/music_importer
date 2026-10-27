@@ -230,10 +230,16 @@
     if (!Array.isArray(plan.operations) || plan.operations.some((operation) => !operation?.target?.providerId)) throw new Error('В плане есть операции без ID целевого трека');
     if (options.confirmed !== true) throw new Error('Перед записью пользователь должен явно подтвердить перенос');
     if (typeof adapter.readDestination !== 'function' || typeof adapter.readBack !== 'function') throw new Error('Адаптеру нужны чтение назначения и обратная сверка');
-    const writeFavorites = plan.target.collectionType === 'favorites';
-    if (!writeFavorites && plan.target.collectionType !== 'playlists') throw new Error('Неизвестный тип целевой коллекции');
+    const targetType = plan.target.collectionType;
+    if (!['favorites', 'playlists', 'library'].includes(targetType)) throw new Error('Неизвестный тип целевой коллекции');
+    const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || (targetType === 'favorites' && !operation.operation));
+    const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || (targetType === 'playlists' && !operation.operation));
+    if (favoriteOperations.length + playlistOperations.length !== plan.operations.length) throw new Error('План содержит неизвестный тип записи');
+    const playlistMappings = targetType === 'favorites' ? [] : (plan.collectionMappings || []);
+    const writeFavorites = favoriteOperations.length > 0;
+    const writePlaylists = playlistOperations.length > 0 || playlistMappings.length > 0;
     if (writeFavorites && typeof adapter.writeFavorites !== 'function') throw new Error('Адаптер не умеет добавлять треки в избранное');
-    if (!writeFavorites && (typeof adapter.createPlaylist !== 'function' || typeof adapter.writePlaylistItems !== 'function')) throw new Error('Адаптер не умеет создавать и наполнять плейлисты');
+    if (writePlaylists && (typeof adapter.createPlaylist !== 'function' || typeof adapter.writePlaylistItems !== 'function')) throw new Error('Адаптер не умеет создавать и наполнять плейлисты');
     const sourceCompleteness = plan.completeness?.source || [];
     if (!sourceCompleteness.length || sourceCompleteness.some((status) => status?.confirmed !== true)) throw new Error('Перенос остановлен: полнота исходной библиотеки не подтверждена');
 
@@ -259,18 +265,20 @@
         throw failure;
       }
     };
-    const existing = await adapter.readDestination({
-      collectionType: plan.target.collectionType,
-      collectionName: plan.target.collectionName,
-      signal: options.signal,
-    });
-    if (!completeRead(existing)) {
-      throw new Error('Перенос остановлен: не удалось подтвердить полный список уже сохранённых треков');
+    let existingFavorites = null;
+    let existingPlaylists = null;
+    if (writeFavorites) {
+      existingFavorites = await adapter.readDestination({ collectionType: 'favorites', collectionName: 'Любимое', signal: options.signal });
+      if (!completeRead(existingFavorites)) throw new Error('Перенос остановлен: не удалось подтвердить полный список уже сохранённых лайков');
+    }
+    if (writePlaylists) {
+      existingPlaylists = await adapter.readDestination({ collectionType: 'playlists', signal: options.signal });
+      if (!completeRead(existingPlaylists)) throw new Error('Перенос остановлен: не удалось подтвердить полный список целевых плейлистов');
     }
     if (writeFavorites) {
-      const present = destinationIds(existing);
-      const pending = plan.operations.filter((operation) => !present.has(String(operation.target?.providerId || '')));
-      report.alreadyPresent = plan.operations.length - pending.length;
+      const present = destinationIds(existingFavorites);
+      const pending = favoriteOperations.filter((operation) => !present.has(String(operation.target?.providerId || '')));
+      report.alreadyPresent += favoriteOperations.length - pending.length;
       for (let offset = 0; offset < pending.length; offset += batchSize) {
         if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');
         const batch = pending.slice(offset, offset + batchSize);
@@ -281,18 +289,19 @@
         report.writesPerformed += Number.isInteger(result?.writtenCount) ? result.writtenCount : batch.length;
         await runStep(`checkpoint_favorites:${offset}`, () => checkpoint({ phase: 'favorites', offset, count: batch.length }));
       }
-      const back = await runStep('read_back_favorites', () => adapter.readBack({ type: 'favorites', operations: plan.operations }, { signal: options.signal }));
+      const back = await runStep('read_back_favorites', () => adapter.readBack({ type: 'favorites', operations: favoriteOperations }, { signal: options.signal }));
       const readIds = destinationIds(back);
       report.verified = completeRead(back)
-        ? plan.operations.filter((operation) => readIds.has(String(operation.target.providerId))).length
+        ? favoriteOperations.filter((operation) => readIds.has(String(operation.target.providerId))).length
         : 0;
-    } else {
+    }
+    if (writePlaylists) {
       const groups = new Map();
-      for (const mapping of plan.collectionMappings || []) {
+      for (const mapping of playlistMappings) {
         const key = String(mapping.sourceId || mapping.sourceName || 'Перенесённая музыка');
         groups.set(key, []);
       }
-      for (const operation of plan.operations) {
+      for (const operation of playlistOperations) {
         const key = String(operation.source?.collectionId || operation.source?.collectionName || plan.target.collectionName || 'Перенесённая музыка');
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(operation);
@@ -305,7 +314,7 @@
         const playlist = await runStep(`create_playlist:${sourceKey}`, () => adapter.createPlaylist({
           name, sourceId: sourceMapping?.sourceId || operations[0]?.source?.collectionId || null,
           idempotencyKey: `${plan.createdAt}:playlist:${sourceKey}`,
-        }, { signal: options.signal, existing }));
+        }, { signal: options.signal, existing: existingPlaylists }));
         if (!playlist?.id) throw new Error(`Адаптер не вернул ID плейлиста «${name}»`);
         for (let offset = 0; offset < operations.length; offset += batchSize) {
           if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');

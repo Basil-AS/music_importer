@@ -18,6 +18,7 @@
       artists,
       album: String(track.album || '').trim() || null,
       durationMs: Number(track.durationMs) || null,
+      collectionType: track.sourceCollectionType || track.collectionType || (track.sourceCollectionId || track.collectionId ? 'playlists' : 'favorites'),
       collectionId: track.sourceCollectionId || track.collectionId ? String(track.sourceCollectionId || track.collectionId) : null,
       collectionName: track.sourceCollectionName || track.collectionName ? String(track.sourceCollectionName || track.collectionName) : null,
       position: Number.isInteger(track.sourcePosition) ? track.sourcePosition : Number.isInteger(position) ? position : null,
@@ -72,7 +73,9 @@
   }
 
   function createImportedSnapshot({ provider, tracks = [], playlists = [], collectionType = 'favorites', collectionName = null, completeness = {} }) {
-    if (collectionType !== 'playlists') {
+    if (!['favorites', 'playlists', 'library'].includes(collectionType)) throw new Error(`Неизвестный тип импортируемой коллекции: ${collectionType}`);
+    const isLibrary = collectionType === 'library';
+    if (collectionType === 'favorites') {
       return createSnapshot({
         provider,
         collections: [{
@@ -97,10 +100,11 @@
       ensureGroup(playlist.id, playlist.title || playlist.name, itemCount, playlist.complete === true);
     }
     for (const track of tracks) {
+      if (isLibrary && track.sourceCollectionType === 'favorites') continue;
       if (!track.sourceCollectionId && !track.sourceCollectionName) continue;
       ensureGroup(track.sourceCollectionId, track.sourceCollectionName, track.sourceCollectionItemCount, track.sourceCollectionComplete === true).tracks.push(track);
     }
-    if (!groups.size) ensureGroup(null, collectionName || 'Плейлисты');
+    if (!groups.size && !isLibrary) ensureGroup(null, collectionName || 'Плейлисты');
 
     const collections = [...groups.values()].map((group) => {
       group.tracks.sort((left, right) => (left.sourcePosition ?? 0) - (right.sourcePosition ?? 0));
@@ -115,6 +119,22 @@
         items: group.tracks.map((track, index) => ({ position: Number.isInteger(track.sourcePosition) ? track.sourcePosition : index, track })),
       };
     });
+    if (isLibrary) {
+      const favoriteTracks = tracks.filter((track) => track.sourceCollectionType === 'favorites');
+      const favoritesConfirmed = completeness.favoritesConfirmed === true;
+      const snapshotCollections = [{
+        id: null,
+        type: 'favorites',
+        name: 'Любимое',
+        itemCount: Number.isInteger(completeness.favoritesCount) ? completeness.favoritesCount : favoriteTracks.length,
+        completeness: {
+          confirmed: favoritesConfirmed,
+          totalCount: Number.isInteger(completeness.favoritesCount) ? completeness.favoritesCount : favoriteTracks.length,
+        },
+        items: favoriteTracks,
+      }, ...collections];
+      return createSnapshot({ provider, collections: snapshotCollections, completeness });
+    }
     return createSnapshot({ provider, collections, completeness });
   }
 
@@ -123,7 +143,7 @@
     requireValue(targetProvider, 'targetProvider');
     requireValue(targetCollectionType, 'targetCollectionType');
     if (!sourceIds.has(sourceSnapshot.provider) || !musicProviderIds.has(targetProvider)) throw new Error('Неизвестный сервис в плане переноса');
-    if (!collectionTypes.has(targetCollectionType)) throw new Error(`Неизвестный тип назначения: ${targetCollectionType}`);
+    if (!collectionTypes.has(targetCollectionType) && targetCollectionType !== 'library') throw new Error(`Неизвестный тип назначения: ${targetCollectionType}`);
 
     const prepared = (tracks || []).map((track, index) => ({ track, index }));
     const chosen = prepared.filter(({ track }) => track.selected && track.match);
@@ -184,7 +204,9 @@
           url: track.match.trackViewUrl || null,
           durationMs: track.match.trackTimeMillis || track.match.durationMs || null,
         },
-        operation: targetCollectionType === 'favorites' ? 'add_to_favorites' : 'add_to_playlist',
+        operation: targetCollectionType === 'library'
+          ? (track.sourceCollectionType === 'favorites' ? 'add_to_favorites' : 'add_to_playlist')
+          : targetCollectionType === 'favorites' ? 'add_to_favorites' : 'add_to_playlist',
         match: { method: track.matchReason || 'manual_review', confidence: track.matchConfidence || null, automatic: Boolean(track.autoMatched) },
       })),
       skipped: skipped.map(({ track }) => ({

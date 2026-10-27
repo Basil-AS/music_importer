@@ -39,7 +39,7 @@
     $('#missingStat').textContent = state.loaded ? missing : '—';
     $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков` : 'ожидает список';
     $('#selectedCount').textContent = `${selected} выбрано`;
-    const hasPlaylistMappings = state.collectionType === 'playlists' && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
+    const hasPlaylistMappings = ['playlists', 'library'].includes(state.collectionType) && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
     $('#importBtn').disabled = (selected === 0 && !hasPlaylistMappings) || state.searching;
     $('#searchBtn').disabled = !state.loaded || state.searching;
     $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
@@ -60,7 +60,8 @@
       const badgeClass = track.searchError ? 'error' : track.match ? '' : track.searched && track.matches.length ? 'review' : 'pending';
       const options = track.matches.map((match) => `<option value="${match.trackId}" ${track.match?.trackId === match.trackId ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
       const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение Apple Music для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в Apple Music ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
-      return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">♫</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${track.album ? `<div class="track-artist">${escapeHTML(track.album)}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
+      const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
+      return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">♫</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${collection}${track.album ? `<div class="track-artist">${escapeHTML(track.album)}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
     }).join('');
 
     $$('.track-match').forEach((select) => select.addEventListener('change', () => {
@@ -116,7 +117,7 @@
     $('#report').classList.remove('show');
     const playlistCount = state.sourceSnapshot.collections.filter((collection) => collection.type === 'playlists').length;
     $('#reviewSub').textContent = `${label} · ${list.length} треков${playlistCount ? ` · ${playlistCount} плейлистов` : ''} готовы к поиску`;
-    $('#targetCollection').textContent = state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
+    $('#targetCollection').textContent = state.collectionType === 'library' ? 'Избранное и плейлисты' : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#searchStatus').classList.remove('search-error');
     renderTracks();
@@ -183,6 +184,7 @@
   }
 
   function normalizeJSON(value) {
+    const isLibrary = value?.collection?.type === 'library';
     const playlistRows = Array.isArray(value?.playlists) ? value.playlists.flatMap((playlist) => {
       const playlistTracks = playlist.tracks || playlist.items || [];
       if (!Array.isArray(playlistTracks)) return [];
@@ -190,12 +192,18 @@
         ...row,
         __sourceCollectionId: playlist.id || '',
         __sourceCollectionName: playlist.title || playlist.name || '',
+        __sourceCollectionType: 'playlists',
         __sourceCollectionItemCount: Number.isInteger(playlist.trackCount) ? playlist.trackCount : playlistTracks.length,
         __sourceCollectionComplete: playlist.complete === true,
         __sourcePosition: Number.isInteger(row.position) ? row.position : index,
       }));
     }) : null;
-    const root = Array.isArray(value) ? value : playlistRows || value?.tracks || value?.items || value?.data;
+    const favoriteRows = isLibrary && Array.isArray(value.tracks) ? value.tracks.map((row) => ({ ...row, __sourceCollectionType: 'favorites' })) : null;
+    const root = Array.isArray(value)
+      ? value
+      : isLibrary
+        ? [...(favoriteRows || []), ...(playlistRows || [])]
+        : playlistRows || value?.tracks || value?.items || value?.data;
     if (!Array.isArray(root)) throw new Error('Ожидается массив треков или поле tracks/items/data');
     return root.map((row) => {
       const track = row?.track || row;
@@ -207,6 +215,7 @@
         isrc: String(track?.isrc || track?.ISRC || track?.externalIds?.isrc || track?.external_ids?.isrc || ''),
         durationMs: normalizeDuration(track?.durationMs || track?.duration_ms || track?.duration),
         sourceId: String(track?.id || track?.trackId || track?.track_id || track?.uri || ''),
+        sourceCollectionType: String(row?.__sourceCollectionType || track?.collectionType || (row?.__sourceCollectionId ? 'playlists' : 'favorites')),
         sourceCollectionId: String(row?.__sourceCollectionId || track?.playlistId || ''),
         sourceCollectionName: String(row?.__sourceCollectionName || track?.playlistName || ''),
         sourceCollectionItemCount: Number.isInteger(row?.__sourceCollectionItemCount) ? row.__sourceCollectionItemCount : null,
@@ -345,7 +354,7 @@
       sourceSnapshot: state.sourceSnapshot,
       targetProvider: 'apple-music',
       targetCollectionType: state.collectionType,
-      targetCollectionName: state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
+      targetCollectionName: state.collectionType === 'library' ? 'Любимое и плейлисты' : state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
       storefront: $('#storefront').value,
       tracks: state.tracks,
     });
