@@ -9,6 +9,12 @@
 3. Community-клиенты передают token в `X-Auth-Token`; веб-клиент использует same-origin cookie-сессию. Это bearer-секрет: хранить только локально в системном хранилище; не помещать в URL, логи, shell history или Git.
 4. Анонимный token упоминается в README `zvuk-music` и `sberzvuk-api`, но его получение из чистого CLI здесь не подтвердилось: без cookies три проверки получили `418 text/html` от защиты. Не трактовать WAF `418` как отсутствие API.
 
+### Перепроверка пользовательского `ZvukDownloader` (28.10.2026)
+
+`Basil-AS/ZvukDownloader` по-прежнему на HEAD `922e2587f52a411a05695fd6454bb6dd40afba5a` (latest push 2026-02-13). В `zvuk_multibot.py` найдены `get_profile`, `get_tracks(ids)`, `get_releases(ids)`, `get_playlists(ids)`, `get_stream_url`, `get_lyrics` и `get_artist_releases`; generic `graphql_query()` фактически используется для каталожного `getArtistReleases` с `limit/offset`. Поиск методов, GraphQL documents и CLI команд не обнаружил чтение `userCollection`/`userTracks`, cursor collection, Favorite Songs, like/unlike или экспорта списка пользовательских лайков. `get_playlists(ids)` гидрирует заданные playlist ID, а не запрашивает коллекцию аккаунта.
+
+Security cross-check source: `ZvukConfig.auth_token` попадает в `Cookie: auth=…`; CLI принимает `--token` либо читает plaintext `config.json`; `aiohttp.TCPConnector` задан с `ssl=False`; глобальный logger пишет и в `zvuk_multibot.log`, и в stdout, а общий request handler логирует полный текст каждого non-200 ответа. Публичный `API_DOCUMENTATION.md` содержит фиксированную token-shaped строку, объявленную обезличенным примером; значение не копировали и не проверяли. Поэтому этот проект не запускаем с реальной учетной сессией и не используем как source likes adapter; безопасная интеграция должна отдельно реализовать read-only collection operation, HTTPS verification, secret storage и redacted logs.
+
 ### Статический cross-check: `Aiving/sberzvuk-api`
 
 MIT TypeScript-клиент проверен на HEAD `3c157f8114b236ccc2d15d1215d3b7e069e1e754`; GitHub metadata показывает последнее обновление 2024-01-15. В README заявлен `getAnonymousToken()` через `GET https://zvuk.com/api/tiny/profile`. В каталоге находятся семь GraphQL documents: `getSearch`, `getSearchAll`, `getTracks`, `getFullTrack`, `getReleases`, `getPlaylists`, `getStream`; однако executor регистрирует только шесть (`getSearchAll` в него не импортирован). Ни одна из доступных операций не запрашивает `userCollection`, `userTracks`, `paginatedCollection` или liked tracks; это каталоговый/stream client, не likes exporter.
