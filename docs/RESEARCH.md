@@ -370,3 +370,11 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Apple matching uses `amp-api.music.apple.com`, ISRC lookup and web-session auth. Apple writes use `POST /me/library/playlists` and tracks routes: ordinary playlists, not Favorite Songs. No Yandex/Zvuk source connectors or `/v1/me/favorites` calls were found.
 - No runtime account login, build, provider call or library write was attempted; the app requires credentials and has no declared license. Useful as local transfer/review UX inspiration, not a direct solution for likes → Apple Favorites.
 - Updated [project catalog](PROJECTS.md). No credential values or account data were inspected.
+
+## Yandex Music Chrome playlist collector audit (2026-10-28)
+
+- GitHub browser README описывает Chrome side panel для выбора треков и экспорта CSV/raw JSON из Yandex playlists. GitHub API pinned HEAD bd48a4fbb74902baad4788a0960b7a0863ca8131 (last push 2026-06-02); license metadata empty, no LICENSE.
+- Static review of build/manifest.json, src/injected/index.js, src/background/index.js and src/content/index.js: MAIN-world script wraps page fetch; rich playlist mode changes GET /playlist/* by appending richTracks=true, clones/parses JSON and leaves the original response available to the player. Accumulation mode passively collects matching API responses while scrolling.
+- No chrome.cookies, document.cookie, Authorization/OAuth token or external upload path found. Raw API response data is stored in chrome.storage.local, and source clears it when side panel closes or the page reloads. Manifest includes Yandex host access, activeTab, downloads, storage, tabs, unlimitedStorage; no cookies permission.
+- The code appears to permit an already-rendered lk.<uuid> playlist URL because the page detector accepts /playlists/{id} and the interceptor accepts any /playlist/* request. However, README only claims ordinary playlist export; no authenticated liked-list run, count comparison, cursor/revision check or server-total reconciliation exists. The export is a promising read-only bridge, not verified full likes export.
+- No extension install, user account request or test run occurred. Updated Yandex provider note, project catalog and API matrix.

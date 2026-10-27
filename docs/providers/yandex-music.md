@@ -1,6 +1,6 @@
 # Яндекс Музыка API
 
-Статус: исходники актуальной community-библиотеки и её документация просмотрены 27.10.2026. API неофициальный и обратным проектированием восстановлен сообществом; официального открытого Web API для этой интеграции не найдено.
+Статус: исходники актуальной community-библиотеки и её документация просмотрены 28.10.2026. API неофициальный и обратным проектированием восстановлен сообществом; официального открытого Web API для этой интеграции не найдено.
 
 ## Библиотека и авторизация
 
@@ -205,3 +205,15 @@ Apple API-вариант проверяет `GET /v1/me/library/songs?limit=1`, 
 - [`ComputerPers/YandexMusic_to_AppleMusic` matcher at `41fdd0e`](https://github.com/ComputerPers/YandexMusic_to_AppleMusic/blob/41fdd0ed6e53dcc9a7056c5ad4fbc15f5c6b344f/match_apple_music.py)
 
 Изучено по исходникам community-библиотеки, её OpenAPI, browser extension и terminal HTTP-пробам с пользовательской сессией. Cookie-authenticated browser response для account status и likes просмотрен только по схеме; cookie-only terminal replay подтверждён с HTTP 200 через локальный Chrome cookie reader, а ответ обработан без вывода или сохранения записей. Device-code request запускался, но consent отменён до выдачи токена; OAuth extension flow не запускался из-за чрезмерно широких scopes. Мутации на аккаунте не запускались. Это не контракт Яндекса.
+
+## Chrome extension collector: krav-ets/yandex-music-exporter-extension
+
+В pinned HEAD bd48a4fbb74902baad4788a0960b7a0863ca8131 найден не OAuth/token extension, а локальный API-response collector.
+
+- Manifest MV3 запускает скрипт в MAIN world на document_start для music.yandex.ru/.com; host permissions ограничены этими доменами. Запрошены activeTab, downloads, storage, tabs, unlimitedStorage; cookies permission отсутствует.
+- В режиме playlist collector перехватывает вызов window.fetch текущей страницы, добавляет richTracks=true к любому GET URL с path /playlist, читает только response.clone().json() и отдаёт оригинальный response плееру. В режиме accumulation пассивно сохраняет JSON responses к Yandex URLs, похожим на tracks/playlist/likes/library, когда пользователь листает страницу.
+- Isolated content script принимает capture через same-origin postMessage, а service worker сохраняет сырые response bodies в chrome.storage.local; CSV содержит только title/artist/album, raw JSON export включает полные response payloads. Данные очищаются при закрытии панели/перезагрузке tab, а не отправляются на внешний server. Token/cookie values отдельно не читаются и не экспортируются.
+- Для liked list потенциально можно открыть music.yandex.ru/playlists/lk.<uuid> и проверить, отдаст ли web player GET /playlist/... с полной tracks[]; это предположение из URL/filter logic, README заявляет только playlists. trackCount отображается рядом с извлечённым количеством, но source не сравнивает значения и не сверяет revision/cursor. Полнота «Мне нравится» не доказана.
+- GitHub metadata/checkout не содержат license declaration/LICENSE. Публичный README в Chrome и pinned source в terminal просмотрены; расширение не установлено и не запускалось, поэтому live behavior private liked list не проверен.
+
+Это перспективный локальный page bridge: на вкладке пользователя считывает response API и отдаёт его локальному UI без копирования session secret. До прототипирования нужно проверить read-only liked page, совпадение объявленного total с items и полноту response; не вызывать операции, меняющие лайки.
