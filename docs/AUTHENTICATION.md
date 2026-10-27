@@ -1,6 +1,6 @@
 # Вход пользователя и хранение доступа
 
-Дата сверки: 27.10.2026. Этот документ отвечает на практический вопрос: можно ли дать пользователю кнопку «Войти» без передачи пароля импортёру и без зависимости от учётной записи разработчика проекта.
+Дата сверки: 28.10.2026. Этот документ отвечает на практический вопрос: можно ли дать пользователю кнопку «Войти» без передачи пароля импортёру и без зависимости от учётной записи разработчика проекта.
 
 Практическая схема локального браузерного коннектора и сравнительная матрица сервисов вынесена в [LOGIN_MECHANISMS.md](LOGIN_MECHANISMS.md).
 
@@ -13,7 +13,7 @@
 | Сервис | Что делает пользователь | Что использует интеграция | Нужны ли credentials приложения | Практическая оценка |
 |---|---|---|---|---|
 | Spotify | Войти и согласиться на `user-library-read` в Spotify | Официальный OAuth Authorization Code + PKCE; локальные access/refresh tokens | **Да.** Нужен Client ID из Developer Dashboard; секрет для PKCE не нужен. Development Mode требует Premium у владельца, allowlist до 5 пользователей на app; с 23.07.2026 разрешено до 25 Client IDs на developer account, но их request quota общая | Удобно для личного/малого теста, но shared app автора создаёт зависимость от его Premium, allowlist и общего quota pool. Extended Quota для массового сервиса требует одобрения организации и опубликованный порог 250k MAU. Без app — ручный экспорт `YourLibrary.json`; private Web Player API наблюдался, но нестабилен |
-| Apple Music | Разрешить доступ MusicKit на устройстве/в веб-приложении | Developer token + Music User Token для API персональных данных | **Да для REST API.** Developer token создаётся для участника Apple Developer Program с Media Services key. MusicKit на Apple/Web управляет пользовательским токеном автоматически, но developer token всё равно нужен для API | Сначала проверить локальный Music.app write path для Favorite Songs. Встроенный Apple Transfer — вариант без собственной интеграции, но не универсальный импортер |
+| Apple Music | Разрешить доступ MusicKit на устройстве/в веб-приложении | MusicKit автоматически управляет Music User Token; REST API также требует developer token | **Да для собственного MusicKit/API клиента.** Developer token требует Media Services private key и членство Apple Developer Program — 99 USD в год (или локальная цена). Бесплатная регистрация Apple Developer не выдаёт ключ для этого API. Встроенный перенос Apple — отдельный готовый пользовательский сценарий, которому не нужен наш developer token | Для проекта без расходов сначала проверить системный Apple Transfer и локальный Music.app write path. Не строить бесплатный веб-MVP на официальном Apple REST API без developer membership |
 | Яндекс Музыка | Локально использовать уже открытую Chrome-сессию; альтернативно — OAuth consent page | Cookie session с локальными `Session_id`, `sessionid2`, `i` или OAuth access token | **Нет для подтверждённого read-only cookie пути.** Официальный OAuth всё равно требует app ID; private API доступен по пользовательской web session | Terminal cookie-only `account/status` и likes прошли с 200 после выборочного чтения cookies из Chrome. Это самый прямой no-app вариант сейчас, но контракт частный; OAuth extension-клиент просит чрезмерные права и пересылает токен в Telegram |
 | Звук | Войти на домене zvuk.com либо подтвердить QR/device sign-in в сервисной странице | Web session; private device flow (`/api/tiny/login/qr/session` → poll `/token` → access token), затем GraphQL/Tiny | В исходнике `zvuk/kithara` app Client ID/secret не требуется; публичной third-party OAuth документации нет | Live QR-start из Chrome вернул `200` и `expires_in=300`; чистый terminal POST получил `418`. Authorization URL открыл отдельный `id.zvuk.com` вход по телефону/SMS; сессия `zvuk.com` не подтвердила устройство автоматически. До входа пользователя/проверки условий поток незавершён, access token не выдавался. См. [live probe](providers/zvuk-api-inventory.md#live-qr-start-probe-из-chrome-28102026). |
 
@@ -29,7 +29,9 @@
 
 ### Apple Music
 
-Apple различает developer token приложения и Music User Token пользователя. MusicKit может автоматически получить/обновлять пользовательский токен на поддерживаемых Apple/Web платформах после явного разрешения, но REST API всё равно требует developer token. Apple описывает выпуск developer token через MusicKit identifier и private key участника Apple Developer Program. Поэтому пользовательский логин сам по себе не даёт стороннему локальному CLI право вызывать API.
+Apple различает developer token приложения и Music User Token пользователя. MusicKit на Apple-платформах и в веб-приложении автоматически управляет пользовательским токеном после явного разрешения; это убирает ручное копирование user token, но не устраняет app credential. Каждый Apple Music API REST запрос требует подписанный ES256 developer token. Его `kid`/Team ID и Media Services private key создаются в developer account, а срок такого токена не может превышать шесть месяцев. Apple указывает годовую цену Developer Program 99 USD (локальная цена может отличаться). Поэтому официальный собственный REST-коннектор не соответствует требованию «не платить и не зависеть от автора» даже при обычной кнопке входа MusicKit.
+
+Исключение для пользовательского пути — встроенный Apple `Transfer Music`: Apple требует подписку Apple Music и Sync Library, а доступные source services определяет сам provider и регион. Это не API и не гарантирует поддержку Звука/Яндекса для каждого аккаунта. На macOS можно отдельно исследовать локальную запись через Music.app/AppleScript, которая не выдаёт приложению API developer token, но её ещё нужно проверить на настоящем Favorite Songs и облачной синхронизации.
 
 На macOS отдельный нативный путь — управлять локальной медиатекой через Music.app, если её API/автоматизация позволяют изменять именно Favorite Songs. Новый статически проверенный reference [`Skalas/music-sync`](https://github.com/Skalas/music-sync/tree/9f961d9e439885eaff6dff6da125e238f278da6e) реализует `favorited=true` с fallback на legacy `loved` и read-back после Shortcut import; это подтверждает наличие такого code path, но не live write/read-back на нашем Mac и не облачную синхронизацию. Старые поля «Loved» нельзя автоматически считать теми же Favorites.
 
@@ -90,6 +92,11 @@ Apple различает developer token приложения и Music User Toke
 
 ## Официальные источники
 
+- [Apple MusicKit](https://developer.apple.com/musickit/) (MusicKit на web и пользовательские Favorites)
+- [Apple developer-token authentication](https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens) (Media Services key, ES256, максимум 6 месяцев)
+- [Apple MusicKit user authentication](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit) (MusicKit автоматически управляет Music User Token)
+- [Apple Developer Program enrollment](https://developer.apple.com/help/account/membership/program-enrollment) (годовая стоимость)
+- [Apple Transfer Music support](https://support.apple.com/en-ae/118249) (источники выбирает music service/provider)
 - [Spotify Authorization Code with PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow)
 - [Spotify quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes)
 - [Spotify February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
