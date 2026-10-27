@@ -57,9 +57,20 @@ grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
 
 ## Практическая проверка
 
-- В авторизованном Chrome Web Player список «Любимые треки» открылся через видимую страницу коллекции. При обновлении страницы браузер отправил `POST https://api-partner.spotify.com/pathfinder/v2/query`; среди имён GraphQL-операций наблюдались `fetchPlaylist` и `playlistPermissions`. Это внутренний контракт веб-клиента, не документированный Web API. Не закладывать его в переносчик: формат и доступ могут измениться без предупреждения.
+- В авторизованном Chrome Web Player список «Любимые треки» открылся через видимую страницу коллекции. После перезагрузки страницы в read-only сетевом журнале наблюдались:
+
+  | Метод и маршрут | Наблюдаемая операция / форма | Статус |
+  |---|---|---|
+  | `POST https://api-partner.spotify.com/pathfinder/v2/query` | Persisted GraphQL `fetchPlaylistContents`; переменные включают `uri`, `limit`, `offset`, `includeEpisodeContentRatingsV2`. В ответе `data.playlistV2.content.items[]`, `pagingInfo {limit, offset}`, `totalCount`; у элементов есть `addedAt` и `itemV2.data` с полями трека. Значения URI, курсоров и содержимое не сохранялись. | 200 |
+  | `POST https://api-partner.spotify.com/pathfinder/v2/query` | `libraryV3`; переменные включают `limit`, `offset`, `folderUri`, `order`, `textFilter`; ответ содержит `data.me.libraryV3.items`, `pagingInfo`, `totalCount`. | 200 |
+  | `POST https://api-partner.spotify.com/pathfinder/v2/query` | `fetchPlaylist`, `fetchPlaylistMetadata`, `playlistPermissions`, `areEntitiesInLibrary`, `isCurated` и вспомогательные операции оформления страницы. | 200 |
+  | `POST https://spclient.wg.spotify.com/collection/v2/contains` | Проверка принадлежности записей коллекции; тело имеет поля `items`, `set`, `username`. Значения не сохранялись. | 200 |
+  | `POST https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata` | Дополнительные метаданные каталожных объектов. | 200 |
+  | `GET https://spclient.wg.spotify.com/library-import/v1/eligible` | Проверка доступности функции импорта библиотеки. | 200 |
+
+  На этих маршрутах нет публичного или стабильного контракта; GraphQL использует `extensions` для persisted query. Наблюдение подтверждает работу текущего web player, а не возможность без изменений воспроизводить запросы в стороннем клиенте. Ответы обрабатывались в памяти; не сохранялись URI, `username`, заголовки авторизации, содержимое списка, счётчики и ID. Перезагрузка страницы не меняла библиотеку.
 - Терминальный запрос без OAuth к `GET https://api.spotify.com/v1/me/tracks?limit=1` вернул `401 application/json`; аналогичный запрос каталожного поиска `/v1/search` без токена также вернул 401. Это подтверждает необходимость официального OAuth для Web API, а не доступ к данным без авторизации.
-- Чистый terminal-вызов внутреннего `GET https://open.spotify.com/get_access_token?reason=transport&productType=web_player` с Chrome-сессионными cookies и `app-platform: WebPlayer` вернул `403 text/html`; официальный `GET /v1/me/tracks` с токеном поэтому в этой проверке не выполнен. Browser-only `pathfinder` остаётся наблюдаемым, но не подтверждён как переносимый terminal API. Следующий валидный путь для Web API — отдельный OAuth Authorization Code with PKCE через зарегистрированное приложение, а не попытка обхода WAF.
+- Чистый terminal-вызов внутреннего `GET https://open.spotify.com/get_access_token?reason=transport&productType=web_player` с Chrome-сессионными cookies и `app-platform: WebPlayer` вернул `403 text/html`. Отдельно тот же read-only `POST /pathfinder/v2/query` с operation `fetchPlaylistContents`, текущим browser `Authorization` + `client-token` и минимально нужными web-player headers успешно повторён из обычного Python HTTP-клиента: `200 application/json`, ключ `data`, без GraphQL errors. В самом captured request cookie-заголовка не было. Ответ содержал список items и `pagingInfo` с `limit`/`offset` плюс `totalCount`; персональные значения не выводились и не сохранялись. Сессионные заголовки и исходный запрос находились в одноразовом файле `0600`, удалённом сразу после проверки. Это подтверждает чистый terminal replay именно текущего private Web Player API, не официального Web API и не стабильный способ получать/обновлять токен.
 - Никакие лайки не менялись. Поля пользовательских записей и приватные идентификаторы не сохранялись.
 
 ## Неофициальный Web Player API (по открытому исходному коду)
@@ -72,7 +83,7 @@ grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
 - Library directory/profile: `libraryV3`, `profileAttributes`.
 - Плейлисты: `fetchPlaylist`, `fetchPlaylistContents`, `addToPlaylist`, `removeFromPlaylist`.
 
-Это не официальный Web API и не гарантированная интеграция. `sp_dc` даёт доступ к пользовательской сессии, private endpoints/hashes могут измениться, а Spotify может отозвать сессию. По исходному коду pathfinder используется для чтения и записи Liked Songs без Developer Mode app; наш terminal-вызов web token endpoint с текущим Chrome-сеансом ответил `403`, поэтому этот путь остаётся только reference и в своё приложение пока не переносится.
+Это не официальный Web API и не гарантированная интеграция. В известных open-source реализациях `sp_dc` применяется для получения bearer; в нашей live-проверке текущий browser bearer/client-token уже работал при direct terminal replay, но отдельный web token endpoint вернул `403`. Private endpoints/hashes могут измениться, а Spotify может отозвать сессию. По исходному коду pathfinder используется для чтения и записи Liked Songs без Developer Mode app; это reference для анализа, не выбранный стабильный способ авторизации своего приложения.
 
 ## Важные текущие ограничения
 
@@ -80,7 +91,9 @@ grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
 
 ## Бесплатный архив аккаунта как запасной источник
 
-Spotify позволяет запросить машиночитаемую копию личных данных из Account Privacy. В описании архива `Your Library` включает сохранённые треки, эпизоды, шоу, артистов и альбомы, в том числе URIs; это полезный офлайн backup и fallback, если Web API dev mode не подходит. Архив не пишет ничего в Apple Music и требует времени на подготовку; для нашего инструмента нужен локальный parser фактически выданного Spotify ZIP/JSON и корректное сопоставление записей.
+Spotify позволяет запросить машиночитаемую копию личных данных из Account Privacy. В официальном описании `Your Library` включает сохранённые songs, episodes, shows, artists и albums; там же указано наличие имён сущностей, исполнителей/альбомов и Spotify URI. Это полезный offline backup и fallback, если Web API Development Mode не подходит, без регистрации Web API app и её Premium-ограничения. Архив не пишет ничего в Apple Music, может содержать другие чувствительные данные аккаунта и требует времени на подготовку; будущий parser должен локально читать только нужный JSON, не сохранять исходный ZIP в проекте и удалять его по завершении.
+
+По документации проверено только наличие `Your Library`; пользовательский ZIP не запрашивался. Точную JSON-схему, связь записей с конкретной коллекцией Liked Songs и полноту архива нужно проверить на отдельной копии/образце.
 
 ## Источники
 
@@ -95,6 +108,7 @@ Spotify позволяет запросить машиночитаемую ко�
 - [February 2026 Web API changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)
 - [Spotify data rights and export](https://support.spotify.com/us/article/data-rights-and-privacy-settings/)
 - [Understanding your Spotify data](https://support.spotify.com/mt/article/understanding-your-data/)
+- [Spotify Development Mode quota rules](https://developer.spotify.com/documentation/web-api/concepts/quota-modes)
 - [SongMirror Web Player adapter](https://github.com/ahnafnafee/songmirror/tree/main/songmirror/engine)
 - [SongMirror first-party request reference](https://github.com/ahnafnafee/songmirror/blob/main/docs/spotify-web-postman.md)
 
