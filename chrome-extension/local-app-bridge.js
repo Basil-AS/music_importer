@@ -20,6 +20,16 @@
     const requestId = String(event.data.requestId || '');
     if (!/^[a-z0-9-]{16,80}$/i.test(requestId)) return;
 
+    if (event.data.type === 'extension-ping') {
+      window.postMessage({
+        source: marker,
+        type: 'extension-ready',
+        requestId,
+        version: chrome.runtime.getManifest().version,
+      }, location.origin);
+      return;
+    }
+
     if (event.data.type === 'yandex-command') {
       const action = String(event.data.action || '');
       if (!['search-tracks', 'execute-transfer'].includes(action)) return;

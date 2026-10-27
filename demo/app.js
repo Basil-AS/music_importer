@@ -9,7 +9,8 @@
     { title: 'Blinding Lights', artist: 'The Weeknd', album: '' },
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
-  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, extensionAvailable: false };
+  let extensionCheckInProgress = false;
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
@@ -20,6 +21,47 @@
     element.classList.add('show');
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => element.classList.remove('show'), 3000);
+  }
+
+  function checkLocalExtension() {
+    const button = $('#extensionImportBtn');
+    const status = $('#extensionStatus');
+    if (extensionCheckInProgress) return;
+    if (!window.crypto?.randomUUID) {
+      status.textContent = 'Этот браузер не поддерживает проверку локального расширения. Используйте Chrome.';
+      button.textContent = 'Откройте в Chrome';
+      button.disabled = true;
+      return;
+    }
+    extensionCheckInProgress = true;
+    button.disabled = true;
+    button.textContent = 'Проверяем расширение…';
+    status.textContent = 'Проверяем связь с Music Importer в Chrome…';
+    const requestId = window.crypto.randomUUID();
+    let answered = false;
+    const timeout = setTimeout(() => {
+      if (answered) return;
+      window.removeEventListener('message', onMessage);
+      extensionCheckInProgress = false;
+      status.textContent = 'Chrome открыт, но Music Importer не ответил. Включите или обновите расширение, проверьте доступ к этому локальному адресу и нажмите «Повторить проверку».';
+      button.textContent = 'Повторить проверку';
+      button.disabled = false;
+    }, 1200);
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== location.origin
+        || event.data?.source !== 'music-importer-local-app'
+        || event.data?.type !== 'extension-ready' || event.data?.requestId !== requestId) return;
+      answered = true;
+      extensionCheckInProgress = false;
+      clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+      state.extensionAvailable = true;
+      status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}.`;
+      button.textContent = 'Подтянуть из расширения';
+      button.disabled = false;
+    };
+    window.addEventListener('message', onMessage);
+    window.postMessage({ source: 'music-importer-local-app', type: 'extension-ping', requestId }, location.origin);
   }
 
   function setStep(step) {
@@ -480,6 +522,10 @@
 
   $('#extensionImportBtn').addEventListener('click', async (event) => {
     const button = event.currentTarget;
+    if (!state.extensionAvailable) {
+      checkLocalExtension();
+      return;
+    }
     if (!window.crypto?.randomUUID) {
       toast('Этот браузер не поддерживает защищённый запрос к расширению.');
       return;
@@ -526,10 +572,14 @@
         playlists: response.payload.playlists,
       });
     } catch (error) {
+      if (/Расширение не ответило|Расширение недоступно|Расширение не подключено/i.test(error.message || '')) {
+        state.extensionAvailable = false;
+        $('#extensionStatus').textContent = 'Chrome открыт, но Music Importer не ответил. Обновите расширение и вкладку сервиса, затем нажмите «Повторить проверку».';
+      }
       toast(error.message || 'Не удалось получить данные из расширения.');
     } finally {
       button.disabled = false;
-      button.textContent = 'Подтянуть из расширения';
+      button.textContent = state.extensionAvailable ? 'Подтянуть из расширения' : 'Повторить проверку';
     }
   });
 
@@ -582,6 +632,8 @@
     updateCounts();
     toast('Список сброшен');
   });
+
+  checkLocalExtension();
 
   $('#importBtn').addEventListener('click', async () => {
     try {

@@ -94,3 +94,31 @@ test('Apple source reader refuses an incomplete library page', async () => {
   assert.ok(page.messages.some((message) => message.type === 'scan-error'));
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
+
+test('local app bridge identifies the installed extension without requesting account data', () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const messages = [];
+  let listener;
+  const location = { origin: 'http://127.0.0.1:8001', pathname: '/' };
+  const window = {
+    addEventListener(name, callback) { if (name === 'message') listener = callback; },
+    postMessage(data) { messages.push(data); },
+  };
+  const context = {
+    window, location, URL, Set, String, chrome: { runtime: {
+      getManifest: () => ({ version: '0.3.0' }),
+      onMessage: { addListener() {} },
+    } },
+  };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/local-app-bridge.js'), 'utf8'), context);
+  listener({
+    source: window,
+    origin: location.origin,
+    data: { source: 'music-importer-local-app', type: 'extension-ping', requestId: 'fixture-request-0001' },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{
+    source: 'music-importer-local-app', type: 'extension-ready', requestId: 'fixture-request-0001', version: '0.3.0',
+  }]);
+});
