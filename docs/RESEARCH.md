@@ -184,3 +184,10 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - The CLI consumes old-account `Library.xml`, opens MusicKit user authorization for the target account, searches Apple catalog, writes to `/v1/me/library` in batches of 25, and creates library playlists. It also reads storefront and paginated library songs; the separate deduplicator deletes playlists by name through AppleScript.
 - The user token is returned to a loopback server as `?token=…`; the matcher lacks ISRC/review and falls back to the first result; no Favorite Songs endpoint or read-back exists. Useful as a local MusicKit authorization/Library API reference only; not a source-service likes importer and not suitable for source reuse absent licensing.
 - Added pinned source, routes, credential and write limitations to `docs/providers/apple-music.md` and `docs/PROJECTS.md`.
+
+## Apple built-in transfer source/price scope recheck (2026-10-27)
+
+- Rechecked Apple's current UAE support guide, published 2026-03-31. Apple says the user needs an Apple Music subscription and Sync Library, signs into the source service directly, and liked/loved songs are transferred into Favorite Songs without removing them from the source service.
+- Transfer is explicitly provided by a third party. Apple says transfer scope varies by source, only user-created playlists transfer, alternate matches can be reviewed for 30 days, and the feature is unavailable in China mainland, Myanmar, and Russia. The public guide does not identify the third-party provider or publish a universal source list, price, or quota.
+- This corrects the project's earlier assumption that built-in transfer is a no-extra-fee option: pricing/unlimited status remain unverified. Existing live UI check still ended at `Transfer Service is Busy`; source availability and runtime transfer are not confirmed.
+- Updated `docs/providers/apple-music.md`, `docs/API_MATRIX.md`, and `docs/PROJECTS.md` with the dated official guide and limits.
