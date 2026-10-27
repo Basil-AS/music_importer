@@ -4,6 +4,8 @@
 
 Для быстрого просмотра конкретных migration-related HTTP и GraphQL вызовов см. [сводный каталог API-маршрутов](API_MATRIX.md); здесь остаются выводы, trade-offs и план незакрытых проверок.
 
+Для сравнения идентификаторов между source API и Apple catalog, ISRC fallback и безопасной ручной проверки есть отдельная [заметка по сопоставлению](MATCHING.md).
+
 Для Яндекс Музыки добавлен отдельный [полный индекс pinned community OpenAPI](providers/yandex-openapi-inventory.md): 150 HTTP operations из 144 path templates, сгруппированные по областям API.
 
 Для Spotify добавлен [полный индекс официального OpenAPI](providers/spotify-openapi-inventory.md): 96 операций из 70 path templates с OAuth scopes и флагами deprecation.
