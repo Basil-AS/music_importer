@@ -22,7 +22,7 @@
     </header>
 
     <section class="hero" aria-labelledby="title">
-      <div><div class="eyebrow">Ваша музыка — с вами</div><h1 id="title">Соберите свою библиотеку<br>в одном месте</h1><p>Перенесите любимые треки в Apple Music. Сначала проверим совпадения — вы решаете, что переносить.</p></div>
+      <div><div class="eyebrow">Ваша музыка — с вами</div><h1 id="title">Соберите свою библиотеку<br>в одном месте</h1><p>Переносите лайки и плейлисты между музыкальными сервисами. Сначала проверим совпадения — вы решаете, что переносить.</p></div>
       <div class="hero-art" aria-hidden="true"><div class="disc"></div></div>
     </section>
 
@@ -30,24 +30,25 @@
       <div class="step active" data-step="1"><span class="step-num">1</span>Источник</div><div class="step" data-step="2"><span class="step-num">2</span>Список</div><div class="step" data-step="3"><span class="step-num">3</span>Поиск</div><div class="step" data-step="4"><span class="step-num">4</span>Сверка</div><div class="step" data-step="5"><span class="step-num">5</span>План</div>
     </nav>
 
-    <div class="notice" role="note"><span class="info" aria-hidden="true">ⓘ</span><span><strong>Перенос в разработке.</strong> Сейчас доступны локальное чтение библиотеки Звука, экспериментальное чтение библиотек Spotify и Яндекс Музыки, поиск совпадений в каталоге Apple и экспорт плана. Запись в сервисы назначения ещё не подключена.</span></div>
+    <div class="notice" role="note"><span class="info" aria-hidden="true">ⓘ</span><span><strong>Перенос развивается по сервисам.</strong> Сейчас можно читать библиотеки Звука, Spotify и Яндекс Музыки. Первая запись в аккаунт назначения подключается для Яндекс Музыки; Apple Music пока работает в режиме плана. Spotify и Звук как цели ещё не подключены.</span></div>
 
     <main class="layout">
       <div class="main-col">
         <section class="card" aria-labelledby="source-heading">
-          <div class="card-head"><div><h2 id="source-heading">Откуда переносим?</h2><p class="card-sub">Выберите источник, где открыта ваша библиотека</p></div><span class="count">1 из 3</span></div>
+          <div class="card-head"><div><h2 id="source-heading">Откуда переносим?</h2><p class="card-sub">Выберите источник, где открыта ваша библиотека</p></div><span class="count">1 из 4</span></div>
           <div class="sources" role="group" aria-label="Выбор источника">
             <article class="source selected" data-source="Звук" data-provider="zvuk"><div class="source-top"><span class="source-icon" style="color:#ff675f">з</span><h3>Звук</h3></div><div class="source-status connected" aria-live="polite">Выбран · локальное расширение</div><button class="connect" type="button" disabled>✓ Выбрано</button></article>
             <article class="source" data-source="Spotify" data-provider="spotify"><div class="source-top"><span class="source-icon" style="color:#65d981">●</span><h3>Spotify</h3></div><div class="source-status" aria-live="polite">Не выбран</div><button class="connect" type="button">Выбрать</button></article>
             <article class="source" data-source="Яндекс Музыка" data-provider="yandex-music"><div class="source-top"><span class="source-icon" style="color:#ff6868">я</span><h3>Яндекс</h3></div><div class="source-status" aria-live="polite">Не выбран</div><button class="connect" type="button">Выбрать</button></article>
+            <article class="source" data-source="Apple Music" data-provider="apple-music"><div class="source-top"><span class="source-icon" style="color:#e7b7ff">♫</span><h3>Apple Music</h3></div><div class="source-status" aria-live="polite">Импорт из файла</div><button class="connect" type="button">Выбрать</button></article>
           </div>
           <div class="playlist-row"><span>Список для переноса</span><span>Треки из вашего CSV/JSON экспорта</span></div>
           <div class="action-row"><button class="primary" id="loadBtn" type="button">Загрузить пример <span aria-hidden="true">→</span></button><button class="secondary" id="extensionImportBtn" type="button">Подтянуть из расширения</button><label class="secondary" for="fileInput" style="cursor:pointer">Открыть CSV или JSON</label><input id="fileInput" type="file" accept=".csv,.json,text/csv,application/json" hidden><button class="linkbtn" id="templateBtn" type="button">Шаблон CSV</button></div><div class="quiet" style="margin-top:10px">Расширение читает активные локальные сессии Звука, Spotify и экспериментально Яндекс Музыки; библиотека остаётся на устройстве. Также поддерживаются CSV и JSON.</div>
         </section>
 
         <section class="card" id="reviewCard" aria-labelledby="review-heading">
-          <div class="card-head"><div><h2 id="review-heading">Сверка с каталогом Apple</h2><p class="card-sub" id="reviewSub">Загрузите список и найдите версии песен</p></div><span class="count" id="matchCount">ожидает список</span></div>
-          <div class="catalog-tools"><label for="storefront">Каталог</label><select id="storefront" aria-label="Страна каталога Apple"><option value="AE">ОАЭ</option><option value="US">США</option><option value="GB">Великобритания</option><option value="CA">Канада</option><option value="AU">Австралия</option></select><button class="secondary" type="button" id="searchBtn" disabled>Найти совпадения</button><span class="quiet" id="searchStatus" aria-live="polite">Поиск не запускался</span></div>
+          <div class="card-head"><div><h2 id="review-heading">Сверка с каталогом</h2><p class="card-sub" id="reviewSub">Загрузите список и найдите версии песен</p></div><span class="count" id="matchCount">ожидает список</span></div>
+          <div class="catalog-tools"><label for="storefront">Регион Apple</label><select id="storefront" aria-label="Страна каталога Apple"><option value="AE">ОАЭ</option><option value="US">США</option><option value="GB">Великобритания</option><option value="CA">Канада</option><option value="AU">Австралия</option></select><button class="secondary" type="button" id="searchBtn" disabled>Найти совпадения</button><span class="quiet" id="searchStatus" aria-live="polite">Поиск не запускался</span></div>
           <p class="quiet match-hint">Если выдача неточная, поправьте поисковый запрос у трека и нажмите «Искать».</p>
           <div class="track-list" id="trackList"><div class="empty">Покажем демо-лайки, чтобы начать сверку</div></div>
           <div class="review-tools"><button class="linkbtn" type="button" id="toggleAll">Снять выбор со всех</button><span class="quiet" id="selectedCount">0 выбрано</span></div>
@@ -58,15 +59,16 @@
       <aside class="side-col" aria-label="Настройки переноса">
         <section class="card side-card">
           <div class="card-head"><div><h2>Куда переносим</h2><p class="card-sub">Целевая библиотека</p></div></div>
-          <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title">Apple Music</div><div class="dest-sub" id="targetCollection">Избранные песни</div></div></div>
+          <label class="quiet" for="targetProvider">Музыкальный сервис</label><select id="targetProvider" aria-label="Сервис назначения" style="width:100%;margin-top:6px;background:#222329;border:1px solid #3a3b43;color:#dedde2;border-radius:8px;padding:9px"><option value="apple-music">Apple Music · план</option><option value="yandex-music">Яндекс Музыка · запись включена</option><option value="spotify" disabled>Spotify · адаптер готовится</option><option value="zvuk" disabled>Звук · адаптер готовится</option></select>
+          <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title" id="targetProviderName">Apple Music</div><div class="dest-sub" id="targetCollection">Избранные песни</div></div></div>
           <div class="check-row"><span>Совпадения найдены</span><span id="readyStat">—</span></div><div class="check-row"><span>Нужно проверить</span><span id="reviewStat" style="color:var(--amber)">—</span></div><div class="check-row"><span>Без совпадения</span><span id="missingStat" style="color:var(--red)">—</span></div>
           <button class="primary side-primary" id="importBtn" type="button" disabled>Сформировать план <span aria-hidden="true">→</span></button>
-          <div class="report" id="report" aria-live="polite"><h3>План готов</h3><div class="report-grid"><div class="metric"><b id="addedMetric">0</b><span>выбрано</span></div><div class="metric"><b id="skippedMetric">0</b><span>пропущено</span></div><div class="metric"><b>0</b><span>записано</span></div></div><div class="quiet" style="margin-top:10px">JSON содержит выбранные Apple Music ID и ссылки. Библиотека не менялась.</div><button class="linkbtn" id="downloadReport" type="button" style="margin-top:12px">Скачать JSON-план</button></div>
+          <div class="report" id="report" aria-live="polite"><h3>План готов</h3><div class="report-grid"><div class="metric"><b id="addedMetric">0</b><span>выбрано</span></div><div class="metric"><b id="skippedMetric">0</b><span>пропущено</span></div><div class="metric"><b>0</b><span>записано</span></div></div><div class="quiet" style="margin-top:10px">JSON-план содержит выбранные ID совпадений и исходные коллекции. До явного запуска библиотека не меняется.</div><button class="linkbtn" id="downloadReport" type="button" style="margin-top:12px">Скачать JSON-план</button></div>
         </section>
-        <section class="card side-card privacy"><div class="privacy-icon" aria-hidden="true">◈</div><h2>Вы управляете переносом</h2><p><strong>Сбор выполняется локально.</strong> Сессионные данные Spotify и Яндекс Музыки не сохраняются расширением. При поиске каталог Apple получает названия и исполнителей. Проект не передаёт библиотеку на свой сервер; запись в сервисы назначения ещё не подключена.</p></section>
+        <section class="card side-card privacy"><div class="privacy-icon" aria-hidden="true">◈</div><h2>Вы управляете переносом</h2><p><strong>Сбор и передача выполняются локально.</strong> Токены и cookie не сохраняются расширением. Поиск Apple отправляет названия и исполнителей Apple; поиск и запись в Яндекс выполняются из открытой авторизованной вкладки. Перед записью Яндекс покажет отдельное подтверждение.</p></section>
       </aside>
     </main>
-    <footer class="footer"><span>Локальный прототип · чтение источников развивается, запись в сервисы назначения впереди</span><a href="../README.md">О проекте</a></footer>
+    <footer class="footer"><span>Локальный прототип · подключение источников и целей развивается поэтапно</span><a href="../README.md">О проекте</a></footer>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

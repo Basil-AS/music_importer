@@ -251,6 +251,57 @@ function messageMatchesPage(type, kind) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === 'yandex:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://music.yandex.ru') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const appTabs = await chrome.tabs.query({ url: ['http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*', 'http://localhost:8000/*', 'http://localhost:8001/*'] });
+      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
+        type: 'music-importer:yandex-progress',
+        requestId: String(message.requestId || ''),
+        progress: message.progress,
+      }).catch(() => null)));
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'music-importer:yandex-command') {
+      let origin = '';
+      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || !['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(origin)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      if (!['search-tracks', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Неизвестная команда Яндекс Музыки.' });
+        return;
+      }
+      const tabs = await chrome.tabs.query({ url: 'https://music.yandex.ru/*' });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте Яндекс Музыку и войдите в аккаунт, затем повторите.' });
+        return;
+      }
+      try {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'yandex:command',
+          action: message.action,
+          requestId: String(message.requestId || ''),
+          query: message.query,
+          plan: message.plan,
+        });
+        sendResponse(response || { ok: false, error: 'Расширение Яндекс Музыки не вернуло результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Яндекс Музыки. Перезагрузите её.' });
+      }
+      return;
+    }
+
     if (message?.type === 'music-importer:get-library') {
       if (message.provider && message.provider !== 'zvuk') {
         sendResponse(await requestProviderLibrary(message.provider, message.refresh === true));

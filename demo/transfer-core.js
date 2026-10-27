@@ -198,6 +198,8 @@
         target: {
           provider: targetProvider,
           providerId: String(targetId(track)),
+          albumId: track.match.albumId === undefined && track.match.collectionId === undefined
+            ? null : String(track.match.albumId ?? track.match.collectionId),
           title: track.match.trackName || track.match.title,
           artists: track.match.artistName ? [track.match.artistName] : Array.isArray(track.match.artists) ? track.match.artists : [],
           album: track.match.collectionName || track.match.album || null,

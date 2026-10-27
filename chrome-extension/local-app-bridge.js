@@ -4,10 +4,49 @@
 
   if (!allowedOrigins.has(location.origin) || location.pathname !== '/') return;
 
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== 'music-importer:yandex-progress') return false;
+    window.postMessage({
+      source: marker,
+      type: 'yandex-progress',
+      requestId: String(message.requestId || ''),
+      progress: message.progress || null,
+    }, location.origin);
+    return false;
+  });
+
   window.addEventListener('message', async (event) => {
-    if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker || event.data?.type !== 'get-library') return;
+    if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     const requestId = String(event.data.requestId || '');
     if (!/^[a-z0-9-]{16,80}$/i.test(requestId)) return;
+
+    if (event.data.type === 'yandex-command') {
+      const action = String(event.data.action || '');
+      if (!['search-tracks', 'execute-transfer'].includes(action)) return;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'music-importer:yandex-command',
+          requestId,
+          action,
+          query: String(event.data.query || '').slice(0, 400),
+          plan: action === 'execute-transfer' ? event.data.plan : undefined,
+        });
+        window.postMessage({
+          source: marker,
+          type: 'yandex-command-response',
+          requestId,
+          ok: response?.ok === true,
+          error: response?.error || null,
+          results: response?.results || null,
+          report: response?.report || null,
+        }, location.origin);
+      } catch {
+        window.postMessage({ source: marker, type: 'yandex-command-response', requestId, ok: false, error: 'Не удалось связаться с расширением.' }, location.origin);
+      }
+      return;
+    }
+
+    if (event.data.type !== 'get-library') return;
 
     try {
       const response = await chrome.runtime.sendMessage({

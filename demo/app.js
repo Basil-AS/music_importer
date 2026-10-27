@@ -9,7 +9,7 @@
     { title: 'Blinding Lights', artist: 'The Weeknd', album: '' },
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
-  const state = { source: 'Звук', sourceProvider: 'zvuk', sourceSnapshot: null, collectionType: 'favorites', tracks: [], loaded: false, report: null, searching: false };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false };
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
@@ -58,8 +58,9 @@
       const artist = escapeHTML(track.artist);
       const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.searched && !track.matches.length ? 'Не найдено' : track.match ? (track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? 'Проверьте' : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : track.searched && track.matches.length ? 'review' : 'pending';
-      const options = track.matches.map((match) => `<option value="${match.trackId}" ${track.match?.trackId === match.trackId ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
-      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение Apple Music для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в Apple Music ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
+      const targetName = state.targetProvider === 'yandex-music' ? 'Яндекс Музыка' : 'Apple Music';
+      const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
+      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
       return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">♫</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${collection}${track.album ? `<div class="track-artist">${escapeHTML(track.album)}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
     }).join('');
@@ -117,7 +118,7 @@
     $('#report').classList.remove('show');
     const playlistCount = state.sourceSnapshot.collections.filter((collection) => collection.type === 'playlists').length;
     $('#reviewSub').textContent = `${label} · ${list.length} треков${playlistCount ? ` · ${playlistCount} плейлистов` : ''} готовы к поиску`;
-    $('#targetCollection').textContent = state.collectionType === 'library' ? 'Избранное и плейлисты' : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
+    updateTargetLabel();
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#searchStatus').classList.remove('search-error');
     renderTracks();
@@ -242,6 +243,68 @@
     },
   };
 
+  const yandexCatalogAdapter = {
+    id: 'yandex-music',
+    maxConcurrentSearches: 2,
+    async searchTracks(track) {
+      const response = await requestExtensionCommand('search-tracks', { query: (track.query || `${track.title} ${track.artist}`).trim() });
+      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Яндекс Музыки.');
+      return response.results;
+    },
+  };
+
+  function targetAdapter() {
+    if (state.targetProvider === 'apple-music') return appleCatalogAdapter;
+    if (state.targetProvider === 'yandex-music') return yandexCatalogAdapter;
+    throw new Error('Для выбранного сервиса назначения адаптер ещё не подключён.');
+  }
+
+  function requestExtensionCommand(action, details = {}) {
+    if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает защищённый запрос к расширению.'));
+    const requestId = window.crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        reject(new Error('Расширение не ответило. Перезагрузите вкладки и повторите.'));
+      }, action === 'execute-transfer' ? 30 * 60 * 1000 : 45000);
+      const onMessage = (messageEvent) => {
+        if (messageEvent.source !== window || messageEvent.origin !== location.origin
+          || messageEvent.data?.source !== 'music-importer-local-app'
+          || messageEvent.data?.requestId !== requestId) return;
+        if (messageEvent.data?.type === 'yandex-progress') {
+          const progress = messageEvent.data.progress;
+          if (progress?.message) {
+            $('#importBtn').textContent = progress.message;
+            $('#searchStatus').textContent = progress.message;
+          }
+          return;
+        }
+        if (messageEvent.data?.type !== 'yandex-command-response') return;
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        resolve(messageEvent.data);
+      };
+      window.addEventListener('message', onMessage);
+      window.postMessage({ source: 'music-importer-local-app', type: 'yandex-command', action, requestId, ...details }, location.origin);
+    });
+  }
+
+  function updateTargetLabel() {
+    const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' };
+    const label = labels[state.targetProvider] || state.targetProvider;
+    $('#targetProviderName').textContent = label;
+    $('#review-heading').textContent = `Сверка с каталогом ${label}`;
+    $('#searchBtn').textContent = `Найти в ${label}`;
+    $('#storefront').hidden = state.targetProvider !== 'apple-music';
+    $('#storefront').previousElementSibling.hidden = state.targetProvider !== 'apple-music';
+    $('#importBtn').innerHTML = state.targetProvider === 'yandex-music'
+      ? 'Перенести в Яндекс Музыку <span aria-hidden="true">→</span>'
+      : 'Сформировать план <span aria-hidden="true">→</span>';
+    $('#targetCollection').textContent = state.collectionType === 'library'
+      ? 'Лайки и плейлисты'
+      : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
+  }
+
   function applySuggestion(track) {
     const suggestion = window.MusicMatcher.suggestBestMatch(track, track.matches);
     track.match = suggestion.automatic ? suggestion.best : null;
@@ -276,7 +339,7 @@
     track.selected = false;
     renderTracks();
     try {
-      const [result] = await window.MusicTransferEngine.searchMany(appleCatalogAdapter, [track], {
+      const [result] = await window.MusicTransferEngine.searchMany(targetAdapter(), [track], {
         context: { storefront: $('#storefront').value },
       });
       if (result?.error) throw result.error;
@@ -318,9 +381,9 @@
         track.selected = false;
       });
       renderTracks();
-      await window.MusicTransferEngine.searchMany(appleCatalogAdapter, pending, {
+      await window.MusicTransferEngine.searchMany(targetAdapter(), pending, {
         context: { storefront: $('#storefront').value },
-        keyFor: (track) => `${$('#storefront').value}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${String(track.query || `${track.title} ${track.artist}`).toLowerCase().replace(/\s+/g, ' ').trim()}`,
         onProgress: async (group) => {
           for (const track of group.tracks) {
             track.searching = false;
@@ -344,7 +407,7 @@
       toast(failed ? 'Часть запросов не прошла — можно повторить' : `Совпадений в каталоге: ${withResults}`);
     } finally {
       state.searching = false;
-      $('#searchBtn').textContent = 'Найти совпадения';
+      $('#searchBtn').textContent = `Найти в ${state.targetProvider === 'yandex-music' ? 'Яндекс Музыке' : 'Apple Music'}`;
       renderTracks();
     }
   }
@@ -352,10 +415,10 @@
   function buildPlan() {
     return window.MusicTransferCore.createTransferPlan({
       sourceSnapshot: state.sourceSnapshot,
-      targetProvider: 'apple-music',
+      targetProvider: state.targetProvider,
       targetCollectionType: state.collectionType,
       targetCollectionName: state.collectionType === 'library' ? 'Любимое и плейлисты' : state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
-      storefront: $('#storefront').value,
+      storefront: state.targetProvider === 'apple-music' ? $('#storefront').value : null,
       tracks: state.tracks,
     });
   }
@@ -481,6 +544,15 @@
   });
 
   $('#searchBtn').addEventListener('click', searchCatalog);
+  $('#targetProvider').addEventListener('change', () => {
+    state.targetProvider = $('#targetProvider').value;
+    state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
+    state.report = null;
+    $('#report').classList.remove('show');
+    $('#searchStatus').textContent = 'Цель изменена; выполните новый поиск';
+    updateTargetLabel();
+    renderTracks();
+  });
   $('#storefront').addEventListener('change', () => {
     if (!state.loaded) return;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
@@ -511,13 +583,46 @@
     toast('Список сброшен');
   });
 
-  $('#importBtn').addEventListener('click', () => {
-    state.report = buildPlan();
-    $('#addedMetric').textContent = state.report.operations.length;
-    $('#skippedMetric').textContent = state.report.skipped.length;
-    $('#report').classList.add('show');
-    setStep(5);
-    toast('JSON-план сформирован; Apple Music не менялся');
+  $('#importBtn').addEventListener('click', async () => {
+    try {
+      const plan = buildPlan();
+      if (state.targetProvider === 'yandex-music') {
+        if (plan.completeness.source.some((status) => status?.confirmed !== true)) {
+          throw new Error('Для записи нужен полный snapshot. Пример и ручной CSV остаются в preview-only режиме.');
+        }
+        const playlistCount = plan.collectionMappings.length;
+        if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в Яндекс Музыке? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
+        $('#importBtn').disabled = true;
+        $('#importBtn').textContent = 'Записываем и сверяем…';
+        const response = await requestExtensionCommand('execute-transfer', { plan });
+        if (!response?.ok) throw new Error(response?.error || 'Перенос в Яндекс Музыку не выполнен.');
+        state.report = { ...plan, mode: 'account-write', execution: response.report || { status: 'complete' } };
+        const verifiedFavorites = Number(response.report?.favorites?.verified || 0);
+        const verifiedPlaylists = (response.report?.playlists || []).reduce((sum, playlist) => sum + Number(playlist.verified || 0), 0);
+        $('#addedMetric').textContent = verifiedFavorites + verifiedPlaylists;
+        $('#skippedMetric').textContent = plan.skipped.length;
+        $('#report').querySelector('h3').textContent = 'Перенос завершён и сверен';
+        $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(verifiedFavorites + verifiedPlaylists);
+        $('#report').querySelector('.report-grid .metric:last-child span').textContent = 'подтверждено в Яндексе';
+        $('#report').classList.add('show');
+        setStep(5);
+        toast('Яндекс Музыка подтвердила запись');
+      } else {
+        state.report = plan;
+        $('#addedMetric').textContent = state.report.operations.length;
+        $('#skippedMetric').textContent = state.report.skipped.length;
+        $('#report').querySelector('h3').textContent = 'План готов · без записи';
+        $('#report').classList.add('show');
+        setStep(5);
+        toast('План сформирован; Apple Music не менялся');
+      }
+    } catch (error) {
+      toast(error.message || 'Не удалось выполнить перенос.');
+    } finally {
+      $('#importBtn').disabled = false;
+      updateCounts();
+      updateTargetLabel();
+    }
   });
 
   $('#downloadReport').addEventListener('click', () => {
@@ -533,4 +638,5 @@
   });
 
   updateCounts();
+  updateTargetLabel();
 })();

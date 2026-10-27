@@ -27,7 +27,7 @@ Cookie значения и access tokens не читаются JavaScript-код
 
 - CORS и поведение запросов из `music.yandex.ru` в `api.music.yandex.ru` ещё не подтверждены на runtime; API может потребовать заголовки, которые устанавливает сам web player.
 - Likes endpoint не описывает pagination. Пока source service возвращает весь список одним response, код сверяет все уникальные refs с гидратированными карточками и сохраняет revision; этот контракт остаётся private.
-- Реальные браузерные аккаунты не меняются: reader только GET и metadata POST. Запись лайков/плейлистов в Яндекс или другие сервисы не реализована этим adapter.
+- Этот документ описывает только reader: он выполняет GET и metadata POST. Yandex target writer реализован отдельно; см. [`YANDEX_TRANSFER.md`](YANDEX_TRANSFER.md). Live mutation всё ещё не проверялась.
 - Для проверки откройте Яндекс Музыку в Chrome, выберите её как источник и нажмите «Подтянуть из расширения». Если API не допускает page-context fetch, ошибка будет показана, а snapshot не будет считаться полным.
 
 Исследовательские детали и ранее подтверждённые request shapes: [`providers/yandex-music.md` в API research](https://github.com/Basil-AS/music_importer/blob/feature/music-service-api-research/docs/providers/yandex-music.md).

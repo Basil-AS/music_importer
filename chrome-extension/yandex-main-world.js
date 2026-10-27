@@ -115,9 +115,180 @@
       id: `yandex:${ownerId}:${kind}`,
       title: String(playlist.title || playlist.name || detail.title || `Плейлист ${kind}`),
       trackCount: total,
+      revision: String(detail?.revision || ''),
       complete: true,
       tracks,
     };
+  }
+
+  function searchRows(result) {
+    const tracks = result?.tracks?.results ?? result?.tracks ?? result?.results;
+    return Array.isArray(tracks) ? tracks : null;
+  }
+
+  function normalizeCandidate(track) {
+    const normalized = normalizeTrack(track);
+    const album = Array.isArray(track?.albums) ? track.albums[0] : track?.album;
+    const trackIdValue = track?.id;
+    const albumId = album?.id ?? track?.albumId;
+    if (!normalized || !trackIdValue || !albumId) return null;
+    return {
+      trackId: String(trackIdValue),
+      providerId: String(trackIdValue),
+      albumId: String(albumId),
+      trackName: normalized.title,
+      artistName: normalized.artists.join(', '),
+      collectionName: String(album?.title || album?.name || ''),
+      trackTimeMillis: normalized.durationMs,
+      isrc: normalized.isrc,
+      trackViewUrl: `https://music.yandex.ru/album/${encodeURIComponent(String(albumId))}/track/${encodeURIComponent(String(trackIdValue))}`,
+    };
+  }
+
+  async function searchTracks(query) {
+    const params = new URLSearchParams({ text: String(query || '').trim(), page: '0', type: 'track' });
+    const result = await request(`/search?${params.toString()}`);
+    const rows = searchRows(result);
+    if (!rows) throw new Error('Яндекс Музыка вернула неизвестный формат поиска треков.');
+    return rows.map(normalizeCandidate).filter(Boolean).slice(0, 20);
+  }
+
+  async function readPlaylistDetail(uid, kind) {
+    const result = await request(`/users/${encodeURIComponent(uid)}/playlists/${encodeURIComponent(kind)}`);
+    const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
+    const refs = asArray(detail);
+    const total = Number(detail?.trackCount ?? detail?.track_count);
+    if (!detail || !refs || !Number.isInteger(total) || !detail.revision) throw new Error('Яндекс Музыка не вернула revision и полное состояние плейлиста.');
+    return { detail, refs, total, revision: String(detail.revision) };
+  }
+
+  async function postForm(path, fields) {
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(fields)) form.set(key, String(value));
+    return request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: form.toString(),
+    });
+  }
+
+  function sourcePlaylistKey(operation) {
+    return String(operation.source.collectionId || operation.source.collectionName || '');
+  }
+
+  async function addFavorites(uid, plan, progress, onWriteStarted) {
+    const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || plan.target.collectionType === 'favorites');
+    if (!favoriteOperations.length) return { added: 0, existing: 0, verified: 0 };
+    const existingResult = await request(`/users/${encodeURIComponent(uid)}/likes/tracks?if-modified-since-revision=0`);
+    const library = existingResult?.library || existingResult;
+    const refs = asArray(library);
+    if (!refs) throw new Error('Не удалось прочитать текущее избранное Яндекс Музыки перед записью.');
+    const existingIds = new Set(refs.map(trackId).filter(Boolean));
+    const wanted = [...new Set(favoriteOperations.map((operation) => String(operation.target.providerId || '')))].filter(Boolean);
+    const missing = wanted.filter((id) => !existingIds.has(id));
+    let added = 0;
+    for (let offset = 0; offset < missing.length; offset += 25) {
+      const batch = missing.slice(offset, offset + 25);
+      onWriteStarted?.();
+      await postForm(`/users/${encodeURIComponent(uid)}/likes/tracks/add-multiple`, { 'track-ids': batch.join(',') });
+      added += batch.length;
+      progress?.({ phase: 'favorites', completed: Math.min(offset + batch.length, missing.length), total: missing.length });
+    }
+    const afterResult = await request(`/users/${encodeURIComponent(uid)}/likes/tracks?if-modified-since-revision=0`);
+    const afterLibrary = afterResult?.library || afterResult;
+    const afterRefs = asArray(afterLibrary);
+    if (!afterRefs) throw new Error('Избранное записано, но Яндекс Музыка не вернула список для обратной сверки.');
+    const afterIds = new Set(afterRefs.map(trackId).filter(Boolean));
+    const verified = wanted.filter((id) => afterIds.has(id)).length;
+    if (verified !== wanted.length) throw new Error(`Обратная сверка лайков неполная: подтверждено ${verified} из ${wanted.length}.`);
+    return { added, existing: wanted.length - missing.length, verified };
+  }
+
+  async function createPlaylist(uid, title) {
+    const created = await postForm(`/users/${encodeURIComponent(uid)}/playlists/create`, { title, visibility: 'private' });
+    const playlist = created?.playlist || created;
+    const kind = playlist?.kind ?? playlist?.id;
+    if (!kind) throw new Error(`Яндекс Музыка не вернула ID созданного плейлиста «${title}».`);
+    return { kind: String(kind), title: String(playlist.title || title) };
+  }
+
+  async function appendPlaylistItems(uid, kind, items, progress) {
+    const initial = await readPlaylistDetail(uid, kind);
+    let expectedPosition = initial.total;
+    let written = 0;
+    for (let offset = 0; offset < items.length; offset += 50) {
+      const batch = items.slice(offset, offset + 50);
+      const current = await readPlaylistDetail(uid, kind);
+      if (current.total !== expectedPosition) throw new Error('Плейлист изменился во время записи; остановил импорт для защиты порядка.');
+      const tracks = batch.map((operation) => {
+        const id = String(operation.target.providerId || '');
+        const albumId = String(operation.target.albumId || '');
+        if (!id || !albumId) throw new Error('Для записи в плейлист Яндекса нужны track ID и album ID.');
+        return { id, albumId };
+      });
+      await postForm(`/users/${encodeURIComponent(uid)}/playlists/${encodeURIComponent(kind)}/change-relative`, {
+        revision: current.revision,
+        diff: JSON.stringify({ op: 'insert', at: expectedPosition, tracks }),
+      });
+      expectedPosition += batch.length;
+      written += batch.length;
+      progress?.({ phase: 'playlist-items', completed: written, total: items.length });
+    }
+    const after = await readPlaylistDetail(uid, kind);
+    if (after.total !== expectedPosition) throw new Error(`Обратная сверка плейлиста не сошлась: ожидалось ${expectedPosition}, получено ${after.total}.`);
+    const expectedIds = items.map((operation) => String(operation.target.providerId));
+    const actualRefs = after.refs.slice(initial.total, initial.total + expectedIds.length).map(trackId);
+    if (actualRefs.length !== expectedIds.length || actualRefs.some((id, index) => id !== expectedIds[index])) {
+      throw new Error('Обратная сверка плейлиста обнаружила несовпадение треков или порядка.');
+    }
+    return { written, verified: actualRefs.length };
+  }
+
+  async function executeTransfer(plan, requestId) {
+    if (!plan || plan.type !== 'music-transfer-plan' || plan.target?.provider !== 'yandex-music') throw new Error('Нужен план переноса с целью «Яндекс Музыка».');
+    if (!Array.isArray(plan.operations) || (!plan.operations.length && !plan.collectionMappings?.length)) throw new Error('В плане нет выбранных совпадений или плейлистов.');
+    if (!['favorites', 'playlists', 'library'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
+    if (!Array.isArray(plan.completeness?.source) || !plan.completeness.source.length || plan.completeness.source.some((status) => status?.confirmed !== true)) {
+      throw new Error('Запись остановлена: полнота исходной библиотеки не подтверждена.');
+    }
+    if (plan.operations.some((operation) => !operation?.target?.providerId)) throw new Error('В плане есть совпадение без ID трека назначения.');
+    const account = await request('/account/status');
+    const uidValue = account?.account?.uid ?? account?.uid;
+    if (uidValue === null || uidValue === undefined) throw new Error('Войдите в Яндекс Музыку в этой вкладке и повторите запись.');
+    const uid = String(uidValue);
+    const report = { status: 'writing', targetProvider: 'yandex-music', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
+    let writesStarted = false;
+    const update = (progress) => post('transfer-progress', {
+      requestId,
+      progress: {
+        ...progress,
+        message: progress.message || (progress.phase === 'favorites'
+          ? `Добавляем лайки: ${progress.completed} из ${progress.total}`
+          : `Добавляем треки в плейлист: ${progress.completed} из ${progress.total}`),
+      },
+    });
+    try {
+      report.favorites = await addFavorites(uid, plan, update, () => { writesStarted = true; });
+      const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
+      const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+      for (const [index, mapping] of mappings.entries()) {
+        const matching = playlistOperations.filter((operation) => sourcePlaylistKey(operation) === String(mapping.sourceId || mapping.sourceName || ''))
+          .sort((left, right) => Number(left.source.position || 0) - Number(right.source.position || 0));
+        writesStarted = true;
+        const created = await createPlaylist(uid, String(mapping.targetName || mapping.sourceName || 'Перенесённый плейлист').slice(0, 100));
+        const result = await appendPlaylistItems(uid, created.kind, matching, update);
+        report.playlists.push({ title: created.title, written: result.written, verified: result.verified });
+        update({ phase: 'playlists', completed: index + 1, total: mappings.length, message: `Плейлисты: ${index + 1} из ${mappings.length}` });
+      }
+      report.status = 'complete';
+      report.finishedAt = new Date().toISOString();
+      return report;
+    } catch (error) {
+      report.status = writesStarted || report.favorites?.verified || report.playlists.length ? 'partial_failure' : 'failed';
+      report.error = error instanceof Error ? error.message : 'Яндекс Музыка не завершила перенос.';
+      report.finishedAt = new Date().toISOString();
+      throw Object.assign(new Error(report.error), { transferReport: report });
+    }
   }
 
   async function scanLibrary() {
@@ -164,6 +335,26 @@
 
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
+    if (event.data.type === 'search-tracks') {
+      const requestId = String(event.data.requestId || '');
+      try {
+        const results = await searchTracks(event.data.query);
+        post('command-response', { requestId, ok: true, results });
+      } catch (error) {
+        post('command-response', { requestId, ok: false, error: error instanceof Error ? error.message : 'Поиск Яндекс Музыки не выполнен.' });
+      }
+      return;
+    }
+    if (event.data.type === 'execute-transfer') {
+      const requestId = String(event.data.requestId || '');
+      try {
+        const report = await executeTransfer(event.data.plan, requestId);
+        post('command-response', { requestId, ok: true, report });
+      } catch (error) {
+        post('command-response', { requestId, ok: false, error: error instanceof Error ? error.message : 'Перенос в Яндекс Музыку не выполнен.', report: error?.transferReport || null });
+      }
+      return;
+    }
     if (event.data.type !== 'start-library-scan') return;
     try {
       post('scan-progress', { phase: 'starting', message: 'Подключаем активную сессию Яндекс Музыки…' });
