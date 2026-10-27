@@ -9,7 +9,7 @@
     { title: 'Blinding Lights', artist: 'The Weeknd', album: '' },
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
-  const state = { source: 'Звук', collectionType: 'favorites', tracks: [], loaded: false, report: null, searching: false };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', sourceSnapshot: null, collectionType: 'favorites', tracks: [], loaded: false, report: null, searching: false };
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
@@ -87,7 +87,7 @@
     updateCounts();
   }
 
-  function loadTracks(list, label) {
+  function loadTracks(list, label, metadata = {}) {
     state.tracks = list.map((track) => ({
       ...track,
       query: `${track.title} ${track.artist}`.trim(),
@@ -99,7 +99,15 @@
       searchError: false,
     }));
     state.source = label;
+    state.sourceProvider = metadata.provider || state.sourceProvider || 'file';
     state.collectionType = list.some((track) => track.sourceCollectionId) ? 'playlists' : 'favorites';
+    state.sourceSnapshot = window.MusicTransferCore.createSnapshot({
+      provider: state.sourceProvider,
+      collectionType: state.collectionType,
+      collectionName: metadata.collectionName || (state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты'),
+      tracks: list,
+      completeness: metadata.completeness || { confirmed: false, reason: 'file_import' },
+    });
     state.loaded = true;
     state.report = null;
     $('#report').classList.remove('show');
@@ -315,48 +323,20 @@
   }
 
   function buildPlan() {
-    const selected = state.tracks.filter((track) => track.selected && track.match);
-    const skipped = state.tracks.filter((track) => !selected.includes(track));
-    const playlistGroups = new Map();
-    if (state.collectionType === 'playlists') {
-      for (const track of state.tracks) {
-        const key = track.sourceCollectionId || track.sourceCollectionName || 'playlist';
-        if (!playlistGroups.has(key)) playlistGroups.set(key, { sourceId: track.sourceCollectionId || null, sourceName: track.sourceCollectionName || 'Плейлист', targetName: track.sourceCollectionName || 'Плейлист', sourceTrackCount: 0, matchedCount: 0 });
-        const group = playlistGroups.get(key);
-        group.sourceTrackCount += 1;
-        if (track.selected && track.match) group.matchedCount += 1;
-      }
-    }
-    return {
-      schemaVersion: 1,
-      mode: 'preview-only',
-      createdAt: new Date().toISOString(),
-      source: state.source,
-      target: { service: 'Apple Music', collection: state.collectionType, storefront: $('#storefront').value },
-      search: { service: 'Apple iTunes Search API', writesPerformed: 0 },
-      playlists: [...playlistGroups.values()],
-      selected: selected.map((track) => ({
-        source: { id: track.sourceId || null, isrc: track.isrc || null, title: track.title, artist: track.artist, album: track.album || null, durationMs: track.durationMs || null, playlistId: track.sourceCollectionId || null, playlistName: track.sourceCollectionName || null, position: track.sourcePosition ?? null },
-        target: {
-          trackId: track.match.trackId,
-          title: track.match.trackName,
-          artist: track.match.artistName,
-          album: track.match.collectionName || null,
-          url: track.match.trackViewUrl,
-          artworkUrl: track.match.artworkUrl100 || null,
-          durationMs: track.match.trackTimeMillis || null,
-        },
-        action: state.collectionType === 'playlists' ? 'add_to_playlist' : 'favorite',
-        match: { method: track.matchReason || 'manual_review', confidence: track.matchConfidence || null, automatic: Boolean(track.autoMatched) },
-      })),
-      skipped: skipped.map((track) => ({ title: track.title, artist: track.artist, reason: track.searched && !track.matches.length ? 'no_catalog_match' : 'not_selected' })),
-      appleMusicWritesPerformed: 0,
-    };
+    return window.MusicTransferCore.createTransferPlan({
+      sourceSnapshot: state.sourceSnapshot,
+      targetProvider: 'apple-music',
+      targetCollectionType: state.collectionType,
+      targetCollectionName: state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
+      storefront: $('#storefront').value,
+      tracks: state.tracks,
+    });
   }
 
   $$('.source .connect').forEach((button) => button.addEventListener('click', () => {
     const card = button.closest('.source');
     state.source = card.dataset.source;
+    state.sourceProvider = card.dataset.provider || 'file';
     $$('.source').forEach((item) => {
       const active = item === card;
       item.classList.toggle('selected', active);
@@ -377,16 +357,18 @@
       const text = (await file.text()).replace(/^\uFEFF/, '');
       let label = file.name;
       let tracks;
+      let payload = null;
+      const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
       if (file.name.toLowerCase().endsWith('.json')) {
-        const payload = JSON.parse(text);
+        payload = JSON.parse(text);
         tracks = normalizeJSON(payload);
-        const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
         if (payload?.service && sourceLabels[payload.service]) label = `${sourceLabels[payload.service]} · ${payload.collection?.name || 'избранное'}`;
       } else {
         tracks = parseCSV(text);
       }
       if (!tracks.length) throw new Error('В файле не нашёл треков с названием и исполнителем');
-      loadTracks(tracks, label);
+      const sourceProvider = payload?.service && sourceLabels[payload.service] ? payload.service : state.sourceProvider;
+      loadTracks(tracks, label, { provider: sourceProvider, collectionName: payload?.collection?.name, completeness: payload?.completeness });
     } catch (error) {
       toast(error.message || 'Не удалось прочитать файл');
     } finally {
@@ -437,7 +419,7 @@
 
   $('#importBtn').addEventListener('click', () => {
     state.report = buildPlan();
-    $('#addedMetric').textContent = state.report.selected.length;
+    $('#addedMetric').textContent = state.report.operations.length;
     $('#skippedMetric').textContent = state.report.skipped.length;
     $('#report').classList.add('show');
     setStep(5);
@@ -450,7 +432,7 @@
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'apple-music-transfer-plan.json';
+    anchor.download = 'music-transfer-plan.json';
     anchor.click();
     URL.revokeObjectURL(url);
     toast('План скачан');
