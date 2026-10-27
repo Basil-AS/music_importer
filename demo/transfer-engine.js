@@ -247,6 +247,18 @@
       report.checkpoints.push(value);
       if (options.onCheckpoint) await options.onCheckpoint(structuredClone(report));
     };
+    const runStep = async (phase, action) => {
+      try {
+        return await action();
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        report.status = report.writesPerformed > 0 ? 'partial_failure' : 'failed';
+        report.failures.push({ phase, message: failure.message });
+        report.finishedAt = new Date().toISOString();
+        failure.transferReport = structuredClone(report);
+        throw failure;
+      }
+    };
     const existing = await adapter.readDestination({
       collectionType: plan.target.collectionType,
       collectionName: plan.target.collectionName,
@@ -263,13 +275,13 @@
         if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');
         const batch = pending.slice(offset, offset + batchSize);
         report.writesAttempted += batch.length;
-        const result = await adapter.writeFavorites(batch.map((operation) => operation.target), {
+        const result = await runStep(`write_favorites:${offset}`, () => adapter.writeFavorites(batch.map((operation) => operation.target), {
           signal: options.signal, idempotencyKey: `${plan.createdAt}:favorites:${offset}`,
-        });
+        }));
         report.writesPerformed += Number.isInteger(result?.writtenCount) ? result.writtenCount : batch.length;
-        await checkpoint({ phase: 'favorites', offset, count: batch.length });
+        await runStep(`checkpoint_favorites:${offset}`, () => checkpoint({ phase: 'favorites', offset, count: batch.length }));
       }
-      const back = await adapter.readBack({ type: 'favorites', operations: plan.operations }, { signal: options.signal });
+      const back = await runStep('read_back_favorites', () => adapter.readBack({ type: 'favorites', operations: plan.operations }, { signal: options.signal }));
       const readIds = destinationIds(back);
       report.verified = completeRead(back)
         ? plan.operations.filter((operation) => readIds.has(String(operation.target.providerId))).length
@@ -290,24 +302,24 @@
         operations.sort((left, right) => (left.source?.position ?? 0) - (right.source?.position ?? 0));
         const sourceMapping = (plan.collectionMappings || []).find((mapping) => String(mapping.sourceId || mapping.sourceName) === sourceKey);
         const name = sourceMapping?.targetName || sourceMapping?.sourceName || plan.target.collectionName || 'Перенесённая музыка';
-        const playlist = await adapter.createPlaylist({
+        const playlist = await runStep(`create_playlist:${sourceKey}`, () => adapter.createPlaylist({
           name, sourceId: sourceMapping?.sourceId || operations[0]?.source?.collectionId || null,
           idempotencyKey: `${plan.createdAt}:playlist:${sourceKey}`,
-        }, { signal: options.signal, existing });
+        }, { signal: options.signal, existing }));
         if (!playlist?.id) throw new Error(`Адаптер не вернул ID плейлиста «${name}»`);
         for (let offset = 0; offset < operations.length; offset += batchSize) {
           if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');
           const batch = operations.slice(offset, offset + batchSize);
           report.writesAttempted += batch.length;
-          const result = await adapter.writePlaylistItems(String(playlist.id), batch.map((operation, index) => ({
+          const result = await runStep(`write_playlist:${sourceKey}:${offset}`, () => adapter.writePlaylistItems(String(playlist.id), batch.map((operation, index) => ({
             ...operation.target, position: offset + index,
           })), {
             signal: options.signal, idempotencyKey: `${plan.createdAt}:playlist:${sourceKey}:${offset}`,
-          });
+          }));
           report.writesPerformed += Number.isInteger(result?.writtenCount) ? result.writtenCount : batch.length;
-          await checkpoint({ phase: 'playlist', playlistId: String(playlist.id), offset, count: batch.length });
+          await runStep(`checkpoint_playlist:${sourceKey}:${offset}`, () => checkpoint({ phase: 'playlist', playlistId: String(playlist.id), offset, count: batch.length }));
         }
-        const back = await adapter.readBack({ type: 'playlist', playlistId: String(playlist.id), operations }, { signal: options.signal });
+        const back = await runStep(`read_back_playlist:${sourceKey}`, () => adapter.readBack({ type: 'playlist', playlistId: String(playlist.id), operations }, { signal: options.signal }));
         if (completeRead(back) && back?.collectionPresent === true) report.collectionsVerified += 1;
         if (completeRead(back)) {
           report.verified += Number.isInteger(back?.verifiedCount)
