@@ -92,6 +92,10 @@ GitHub license metadata у репозитория отсутствует, в п�
 
 На текущем macOS `osacompile` успешно скомпилировал оба сторонних скрипта `read_loved.applescript` и `mark_loved.applescript` против установленного словаря Music.app; временные `.scpt` артефакты удалены после проверки. Скрипты не запускались. Это закрывает только синтаксис/терминологию текущего AppleScript environment, не Automation permission, поиск совпадений, setter runtime, Library import или iCloud/Apple Music sync.
 
+### Read-only readiness check в Music.app (2026-10-28)
+
+В текущей пользовательской macOS-сессии Terminal AppleScript прочитал версию Music.app и успешно получил агрегированный результат для `count of (every track whose favorited is true)` и `false`. Запросы ограничились числами; названия, ID и конкретные записи библиотеки не выводились и не сохранялись. Прямой SDEF установленного приложения находится по пути `/System/Applications/Music.app/Contents/Resources/com.apple.Music.sdef`; в нём `track.favorited` — boolean без read-only атрибута, а класс track входит в read/write Automation access group. Временный compile-only тест `set favorited of first track to true` прошёл через `osacompile`, но полученный скрипт не запускался и удалён. Это подтверждает, что на этой машине доступны локальное чтение Favorites и синтаксис setter; live write, добавление cloud-catalog track в Library и синхронизация результата между устройствами остаются непроверенными.
+
 ### Наблюдаемая авторизация Apple Music web player
 
 В текущей авторизованной вкладке `music.apple.com` сетевые запросы к `amp-api.music.apple.com` несут заголовки `Authorization: Bearer …` и `Media-User-Token: …`. Это web-player пара токенов, полученная штатным клиентом сайта; она технически отличается от созданного нами developer JWT, хотя API использует тот же HTTP Bearer заголовок. Не выдавать её за документированный сторонний OAuth flow.
