@@ -33,6 +33,8 @@
 - У Звука есть официальная миграция **в Звук** из Spotify, Яндекс Музыки, Apple Music, VK, Deezer и YouTube Music. Она создаёт отдельный плейлист, а не «Любимое», и переносит только треки из каталога Звука. Официальная справка прямо сообщает, что экспорт из Звука пока недоступен. Поэтому для направления Звук → Apple нужен отдельный read-only источник лайков (кандидат — `zvuk-music`) и собственная запись в Apple Favorites.
 - Нашли два точных open-source пути для лайков: `yarikmsu/yandex-music-transfer` реализует Яндекс → Apple Favorite Songs, а `ahnafnafee/songmirror` реализует Spotify → Apple Favorite Songs и несколько других сервисов. Оба технически попадают в нужную коллекцию, но используют web-session токены вместо только официальных OAuth интеграций; Apple library всё равно требует подходящую подписку. SongMirror не поддерживает Яндекс/Звук, а Yandex Music Transfer не является полноценным источником для Звука. Единого проверенного бесплатного переносчика всех трёх источников в Apple Favorites пока не найдено.
 
+- Spotify auth update, 27.10.2026: reviewed MIT helper `mirrorfm/spotify-webplayer-token` and independently reproduced its `sp_dc` + TOTP request using pinned public TOTP data. The live `/api/token` call returned `200` and `isAnonymous=false`; token value was never printed or retained. Follow-up `/v1/me/tracks?limit=1` returned 429, leaving Saved Tracks access with this bearer unresolved; no retry was made. Details and limitations are in [Spotify provider note](providers/spotify.md).
+
 ## Матрица источников и назначений
 
 | Сервис | Доступ к лайкам | Авторизация | Статус API | Что блокирует готовый бесплатный путь |
