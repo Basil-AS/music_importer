@@ -94,7 +94,40 @@ grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=<CLIENT_ID>
 
 Spotify позволяет запросить машиночитаемую копию личных данных из Account Privacy. В официальном описании `Your Library` включает сохранённые songs, episodes, shows, artists и albums; там же указано наличие имён сущностей, исполнителей/альбомов и Spotify URI. Это полезный offline backup и fallback, если Web API Development Mode не подходит, без регистрации Web API app и её Premium-ограничения. Архив не пишет ничего в Apple Music, может содержать другие чувствительные данные аккаунта и требует времени на подготовку; будущий parser должен локально читать только нужный JSON, не сохранять исходный ZIP в проекте и удалять его по завершении.
 
-По документации проверено только наличие `Your Library`; пользовательский ZIP не запрашивался. Точную JSON-схему, связь записей с конкретной коллекцией Liked Songs и полноту архива нужно проверить на отдельной копии/образце.
+### Выгрузка и типичная схема
+
+1. Пользователь сам запрашивает `Download your data` в Spotify Account Privacy и получает архив JSON. Spotify готовит экспорт асинхронно; использовать нужно именно Account data / `Your Library`, а не только файл с историей прослушиваний.
+2. В открытых парсерах Spotify `YourLibrary.json` содержит верхнеуровневый объект `tracks`, где запись обычно имеет поля `artist`, `album`, `track`, `uri`. Типичный пример, собранный из фикстур публичных репозиториев (не пользовательский экспорт):
+
+```json
+{
+  "tracks": [
+    {
+      "artist": "Artist Name",
+      "album": "Album Name",
+      "track": "Track Name",
+      "uri": "spotify:track:<id>"
+    }
+  ],
+  "albums": [],
+  "artists": [],
+  "shows": [],
+  "episodes": []
+}
+```
+
+3. Независимые парсеры `liMusic` и `Namida` читают `tracks[]` из `YourLibrary.json`; `MelodyBridge` также документирует его как источник Spotify liked songs. Это подтверждает практическую применимость файла как экспорта сохранённых треков, но официальная схема и обещание сохранить порядок/дату добавления в справке Spotify не опубликованы. Для переносимого источника опираться на `uri` (когда это `spotify:track:`), а имя/артиста/альбом использовать как fallback; `spotify:local:` не содержит каталожного track ID.
+4. `Playlist*.json` — отдельный формат пользовательских плейлистов (`playlists[] → items[] → track/episode/localTrack`). Не смешивать их с `YourLibrary.json`: для задачи переноса лайков основной источник — `tracks[]` библиотеки.
+
+Практическое состояние: схема и смысл сопоставлены по официальной справке Spotify и коду/докам публичных импортёров; пользовательский архив не запрашивался и не проверялся. Перед написанием production parser нужна отдельная обезличенная/синтетическая fixture и проверка реального экспорта, полученного самим пользователем. Импорт должен работать локально: выбирать из ZIP только `YourLibrary.json` и явно разрешённые `Playlist*.json`, не извлекать весь аккаунтный архив в рабочий каталог и не загружать его на сервер.
+
+### Проекты, проверенные на чтение архива
+
+- [`SimoHypers/liMusic`](https://github.com/SimoHypers/limusic/tree/d82372cdd3016e3c5e28ea8022596b7fefdf681a/src-tauri/src/spotify.rs) (GPL-3.0) находит `YourLibrary.json` и `Playlist*.json` внутри ZIP независимо от имени верхней папки, читает saved tracks и сохраняет Liked Songs как отдельный source list. Код имеет типы для `artist`/`album`/`track`/`uri` и ZIP fixture. Это полезный Rust parser reference; target проекта — YouTube Music, не Apple Music.
+- [`namidaco/namida`](https://github.com/namidaco/namida/blob/dc2c96c598d1e9cd6616cf228c17011e23555d9a/lib/controller/json_to_history_parser.dart) (лицензия GitHub не классифицирована; checked-in licence проверить отдельно) умеет читать Spotify Account Data для импорта истории прослушиваний и использует `YourLibrary.json` как коллекцию треков. Это подтверждение формата на независимой реализации, а не межсервисный Apple importer.
+- [`warreth/melodybridge`](https://github.com/warreth/melodybridge/blob/7595b7a81dcc154c4432755933a67a41051699df/docs/accounts.md) (AGPL-3.0) описывает ручной Spotify archive import как источник liked songs и плейлистов. У него также есть неофициальный `sp_dc` режим; README проекта предупреждает, что cookie хранится в базе открытым текстом. Для нашего подхода пригоден только file-import сценарий после проверки кода, не способ авторизации.
+
+Архивный parser устраняет Spotify Web API quota/app/Premium-зависимость чтения списка, но не решает поиск совпадений и запись в Apple Favorite Songs. Для этого всё ещё нужен отдельный matcher и локальный Apple Music путь или API.
 
 ## Источники
 
