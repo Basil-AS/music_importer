@@ -467,3 +467,10 @@ Spotify Developer Dashboard check (27.10.2026): Account Overview показыв�
 - Read-only Chrome navigation to Yandex API routes confirmed response shapes for account status, liked-track revision/refs, user playlist list and playlist detail. Account IDs, playlist names, track IDs and library sizes were not saved to the repository or PR. This confirms GET shapes only; the connector's cross-origin page fetch, `/tracks` POST hydration and full user-library import remain unverified live.
 - Spotify flow was checked with fixture responses for likes, playlist order/repeats, 429 handling and completeness; no live Spotify account requests were made. Both new connectors remain experimental source-only code.
 - The capability matrix distinguishes these readers from complete account adapters. Apple account source, destination writers, live read-back and all 12 directed end-to-end transfer paths remain incomplete.
+
+## First account-target writer: Yandex Music (2026-10-28)
+
+- PR #2 now includes a provider-neutral target selector and an experimental Yandex catalog-search/write path. The user reviews matches and explicitly confirms before the local extension sends any account mutation.
+- The writer adds missing favorites, creates private playlists (including empty ones), applies `change-relative` with a fresh playlist revision in bounded batches, and reads favorites/playlist contents back to verify IDs and order. API routes and payload forms were checked against community client source; isolated fixtures cover the full search → likes → playlist → read-back path.
+- No mutation was made to the user's account. The browser extension has not been reloaded with this change; live page-context CORS, search response shape, mutation semantics, revision conflicts, and account read-back are unverified. The writer is therefore experimental and no directed pair is marked complete.
+- The UI retains Apple as preview-only and labels Spotify/Zvuk target writers as not connected. User-library reads exist for Zvuk, Spotify and Yandex; Apple account source and all remaining target adapters are still required for the full 12-pair scope.
