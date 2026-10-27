@@ -409,6 +409,51 @@
     }
   });
 
+  $('#extensionImportBtn').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    if (!window.crypto?.randomUUID) {
+      toast('Этот браузер не поддерживает защищённый запрос к расширению.');
+      return;
+    }
+    const requestId = window.crypto.randomUUID();
+    button.disabled = true;
+    button.textContent = 'Запрашиваем локальную библиотеку…';
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          window.removeEventListener('message', onMessage);
+          reject(new Error('Ответа от расширения нет. Установите/перезагрузите его и повторите.'));
+        }, 8000);
+        const onMessage = (messageEvent) => {
+          if (messageEvent.source !== window || messageEvent.origin !== location.origin
+            || messageEvent.data?.source !== 'music-importer-local-app'
+            || messageEvent.data?.type !== 'library-response'
+            || messageEvent.data?.requestId !== requestId) return;
+          clearTimeout(timeout);
+          window.removeEventListener('message', onMessage);
+          resolve(messageEvent.data);
+        };
+        window.addEventListener('message', onMessage);
+        window.postMessage({ source: 'music-importer-local-app', type: 'get-library', requestId }, location.origin);
+      });
+      if (response.error) throw new Error(response.error);
+      if (!response.payload?.completeness?.confirmed) throw new Error('Расширение не подтвердило полноту собранной библиотеки.');
+      const tracks = normalizeJSON(response.payload);
+      loadTracks(tracks, 'Звук · библиотека из расширения', {
+        provider: response.payload.service,
+        collectionName: response.payload.collection?.name,
+        collectionType: response.payload.collection?.type,
+        completeness: response.payload.completeness,
+        playlists: response.payload.playlists,
+      });
+    } catch (error) {
+      toast(error.message || 'Не удалось получить данные из расширения.');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Подтянуть из расширения';
+    }
+  });
+
   $('#templateBtn').addEventListener('click', () => {
     const blob = new Blob(['title,artist,album,isrc,duration_ms,id\n"Снег","Моя Мишель","Кино",,,\n'], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);

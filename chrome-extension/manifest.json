@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Music Importer — Zvuk connector",
+  "name": "Music Importer — local account connector",
   "version": "0.1.0",
-  "description": "Read the signed-in Zvuk favorites and playlists locally for Music Importer.",
+  "description": "Read signed-in music libraries locally for Music Importer.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
-  "host_permissions": ["https://zvuk.com/*"],
+  "host_permissions": ["https://zvuk.com/*", "http://127.0.0.1/*", "http://localhost/*"],
   "action": {
     "default_title": "Music Importer",
     "default_popup": "popup.html"
@@ -24,6 +24,12 @@
     {
       "matches": ["https://zvuk.com/favorites*", "https://zvuk.com/collection*", "https://zvuk.com/playlist/*"],
       "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "js": ["local-app-bridge.js"],
       "run_at": "document_start",
       "world": "ISOLATED"
     }

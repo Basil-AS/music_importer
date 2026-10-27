@@ -29,6 +29,29 @@ async function readState() {
   };
 }
 
+function createLibraryPayload(state) {
+  const favoritesConfirmed = state.favoritesScanFinished && state.hasMore === false
+    && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+  const catalogConfirmed = state.playlistListHasMore === false
+    && Number.isInteger(state.expectedPlaylistCount) && state.expectedPlaylistCount === state.playlists.length;
+  const playlistItemsConfirmed = state.playlists.every((playlist) => playlist.complete === true);
+  return {
+    schemaVersion: 1,
+    service: 'zvuk',
+    collection: { type: 'library', name: 'Вся библиотека' },
+    completeness: {
+      confirmed: state.scan?.phase === 'complete' && favoritesConfirmed && catalogConfirmed && playlistItemsConfirmed,
+      favoritesConfirmed,
+      favoritesCount: state.tracks.length,
+      catalogConfirmed,
+      playlistItemsConfirmed,
+      playlistItemsTotal: state.playlists.length,
+    },
+    tracks: state.tracks,
+    playlists: state.playlists,
+  };
+}
+
 async function advancePlaylistAutomation(state) {
   const automation = state.automation;
   if (!automation?.active || !Number.isInteger(automation.tabId)) return;
@@ -177,6 +200,17 @@ function messageMatchesPage(type, kind) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === 'music-importer:get-library') {
+      const state = await readState();
+      const payload = createLibraryPayload(state);
+      if (!payload.completeness.confirmed) {
+        sendResponse({ error: 'Сначала завершите полный сбор Звука и дождитесь подтверждения лайков и всех плейлистов.' });
+        return;
+      }
+      sendResponse({ payload });
+      return;
+    }
+
     if (message?.type === 'zvuk:state') {
       sendResponse(await readState());
       return;
