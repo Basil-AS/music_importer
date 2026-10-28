@@ -7,7 +7,7 @@ The experimental local Chrome extension reader is implemented for liked songs an
 1. Open Apple Music in Chrome and sign in normally. You can keep Spotify, Yandex Music, and Zvuk tabs open too.
 2. Click the **Music Importer** extension button. Its extension-hosted app starts a scan of all supported music tabs; do not start a separate Apple-only scan.
 3. The reader follows `next` pages for `/v1/me/library/songs`, `/v1/me/library/playlists`, and each playlist's `/tracks` relationship.
-4. It classifies songs with the documented `inFavorites` library attribute into favorites, preserves playlist order and repeated items, and confirms each total before returning the snapshot.
+4. It classifies songs with the `inFavorites` library attribute into favorites, preserves playlist order and repeated items, and confirms each total before returning the snapshot. If Apple omits the membership attribute for any song, the reader rejects the scan instead of silently treating an unknown like as unliked.
 5. Wait for the Apple Music library status to report a complete snapshot, then choose Apple Music as the source and any of the other three services as the destination.
 
 The scan is read-only. If Apple Music has not yet made an authenticated API request in the open page, the reader asks the user to open the library and retry. A missing `meta.total`, repeated page, invalid pagination URL, or malformed track stops the scan rather than claiming a complete snapshot.

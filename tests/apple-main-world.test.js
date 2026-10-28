@@ -143,6 +143,20 @@ test('Apple source reader refuses an incomplete library page', async () => {
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
+test('Apple source reader refuses to confirm favorites when membership is missing on a library song', async () => {
+  const page = makePage({
+    '/v1/me/library/songs?limit=100': {
+      meta: { total: 1 }, next: null,
+      data: [{ id: 'song-without-membership', attributes: { name: 'Song', artistName: 'Artist' } }],
+    },
+    '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
+  });
+  await page.scan();
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.match(error?.error || '', /не сообщил статус избранного/);
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
 test('Apple source reader follows more than 10,000 pages without an artificial item cap', async () => {
   const total = 10001;
   const page = makePage({

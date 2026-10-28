@@ -225,6 +225,10 @@
         readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Песни Apple Music'),
         readPages(`/v1/me/library/playlists?limit=${pageSize}`, 'Каталог плейлистов Apple Music'),
       ]);
+      const unclassifiedFavorites = librarySongs.rows.filter((row) => typeof row?.attributes?.inFavorites !== 'boolean').length;
+      if (unclassifiedFavorites) {
+        throw new Error(`Apple Music не сообщил статус избранного для ${unclassifiedFavorites} песен; полный снимок не сохранён.`);
+      }
       const tracks = librarySongs.rows.map((row) => normalizeTrack(row)).filter((track) => track.inFavorites);
       const playlists = [];
       for (const [index, playlist] of playlistCatalog.rows.entries()) {
