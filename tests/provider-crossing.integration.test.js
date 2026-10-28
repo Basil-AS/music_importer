@@ -268,7 +268,10 @@ async function readProviderLibrary(provider, state) {
       href: 'https://zvuk.com/favorites?music_importer_capture=1',
       fetch: async (_url, init = {}) => {
         const payload = JSON.parse(init.body || '{}');
-        if (payload.operationName === 'getPaginatedCollection') return { status: 200, payload: { data: { paginatedCollection: { tracks: { items: [], page: { endCursor: null } } } } } };
+        if (payload.operationName === 'getPaginatedCollection') return { status: 200, payload: { data: { paginatedCollection: { tracks: {
+          items: state.ids.map((id) => ({ id, title: fixtureTrack.title, artists: [{ title: fixtureTrack.artists[0] }], release: { title: fixtureTrack.album }, isrc: fixtureTrack.isrc, duration: fixtureTrack.durationMs })),
+          page: { endCursor: null },
+        } } } } };
         if (payload.operationName === 'getPaginatedCollectionAll') return { status: 200, payload: { data: { paginatedCollectionAll: { playlists: {
           items: state.playlists.map((playlist) => ({ id: playlist.id, title: playlist.title, trackCount: playlist.trackIds.length })), page: { endCursor: null },
         } } } } };
@@ -281,7 +284,12 @@ async function readProviderLibrary(provider, state) {
         throw new Error(`Unexpected Zvuk reader query: ${payload.operationName}`);
       },
     });
-    // The connector self-enables from the capture URL and normalizes playlist catalog/items.
+    // The page connector captures the favorites response, then the real pagination and
+    // playlist normalization paths report both collection types to the harness.
+    await connector.window.fetch('/api/v1/graphql', { method: 'POST', body: JSON.stringify({
+      operationName: 'getPaginatedCollection', variables: { limit: 100, after: null },
+    }) });
+    await connector.waitForMessage('favorites-scroll-end');
     connector.window.location.pathname = '/collection';
     await connector.window.fetch('/api/v1/graphql', { method: 'POST', body: JSON.stringify({ operationName: 'getPaginatedCollectionAll', variables: { first: 100, after: null } }) });
     const listed = await connector.waitForMessage('playlist-list-page');
@@ -292,8 +300,13 @@ async function readProviderLibrary(provider, state) {
       const page = await connector.waitForMessage('playlist-track-page');
       playlists.push({ ...playlist, complete: true, tracks: page.tracks.map((track, position) => ({ ...track, position })) });
     }
-    // Favorites are not needed in these route cases; the connector still supplies playlist records.
-    return { service: provider, completeness: { confirmed: true, favoritesConfirmed: true }, tracks: [], playlists };
+    const favoritePage = connector.messages.filter((message) => message.type === 'favorite-page').flatMap((message) => message.tracks || []);
+    return {
+      service: provider,
+      completeness: { confirmed: true, favoritesConfirmed: true, favoritesCount: favoritePage.length },
+      tracks: favoritePage.map((track) => ({ ...track, collectionType: 'favorites' })),
+      playlists,
+    };
   }
 
   const page = await makeProviderPage(provider, state);
@@ -457,35 +470,50 @@ test('Apple Music source → shared transfer engine → Spotify writer verifies 
 for (const sourceProvider of providers) {
   for (const targetProvider of providers) {
     if (sourceProvider === targetProvider) continue;
-    test(`fixture route ${sourceProvider} → ${targetProvider} transfers an ordered repeated-track playlist`, async () => {
-      const sourceState = makeProviderState(sourceProvider, [], true);
+    test(`synthetic fixture ${sourceProvider} → ${targetProvider} transfers favorites and an ordered repeated-track playlist in one mixed plan`, async () => {
+      const sourceState = makeProviderState(sourceProvider, [fixtureIds[sourceProvider].source], true);
       const targetState = makeProviderState(targetProvider);
       const sourcePayload = await readProviderLibrary(sourceProvider, sourceState);
       assert.ok(Array.isArray(sourcePayload.playlists) && sourcePayload.playlists.length === 1, 'source reader returns one complete playlist');
+      assert.equal(sourcePayload.tracks.length, 1, 'source reader returns a favorite through its provider reader');
+      assert.equal(sourcePayload.completeness.favoritesConfirmed, true, 'source reader confirms favorite completeness');
       assert.deepEqual(Array.from(sourcePayload.playlists[0].tracks, (track) => track.position), [0, 1]);
       const { core, engine } = loadTransferModules();
       const sourcePlaylist = sourcePayload.playlists[0];
-      const sourceTracks = sourcePlaylist.tracks.map((track, position) => ({
+      const favoriteTracks = sourcePayload.tracks.map((track) => ({
+        ...track, sourceCollectionType: 'favorites',
+      }));
+      const playlistTracks = sourcePlaylist.tracks.map((track, position) => ({
         ...track,
         sourceCollectionType: 'playlists', sourceCollectionId: sourcePlaylist.id,
         sourceCollectionName: sourcePlaylist.title || sourcePlaylist.name, sourcePosition: position,
       }));
       const sourceSnapshot = core.createImportedSnapshot({
         provider: sourceProvider,
-        collectionType: 'playlists', playlists: sourcePayload.playlists, tracks: sourceTracks,
-        completeness: { confirmed: true, favoritesConfirmed: true, favoritesCount: 0 },
+        collectionType: 'library', playlists: sourcePayload.playlists, tracks: [...favoriteTracks, ...playlistTracks],
+        completeness: { confirmed: true, favoritesConfirmed: true, favoritesCount: favoriteTracks.length },
       });
-      const playlistCollection = sourceSnapshot.collections.find((collection) => collection.type === 'playlists');
+      assert.equal(sourceSnapshot.collections.find((collection) => collection.type === 'favorites')?.completeness.confirmed, true,
+        `${sourceProvider} reader must confirm the favorites collection`);
+      assert.equal(sourceSnapshot.collections.find((collection) => collection.type === 'playlists')?.completeness.confirmed, true,
+        `${sourceProvider} reader must confirm the playlist collection`);
       const targetId = fixtureIds[targetProvider].target;
       const plan = core.createTransferPlan({
-        sourceSnapshot, targetProvider, targetCollectionType: 'playlists',
-        tracks: playlistCollection.items.map(({ track, position }) => ({
-          ...track, selected: true, sourceCollectionType: 'playlists',
-          sourceCollectionId: playlistCollection.id, sourceCollectionName: playlistCollection.name, sourcePosition: position,
+        sourceSnapshot, targetProvider, targetCollectionType: 'library',
+        tracks: sourceSnapshot.collections.flatMap((collection) => collection.items.map(({ track, position }) => ({
+          ...track, selected: true,
+          sourceCollectionType: collection.type,
+          sourceCollectionId: collection.type === 'playlists' ? collection.id || undefined : undefined,
+          sourceCollectionName: collection.type === 'playlists' ? collection.name : undefined,
+          sourcePosition: position,
           match: { trackId: targetId, albumId: 'target-album', trackName: fixtureTrack.title, artistName: fixtureTrack.artists[0], collectionName: fixtureTrack.album, isrc: fixtureTrack.isrc, trackTimeMillis: fixtureTrack.durationMs },
           matchReason: 'isrc', matchConfidence: 1, autoMatched: true,
-        })),
+        }))),
       });
+      assert.equal(plan.target.collectionType, 'library', 'the single plan must include both collection types');
+      assert.equal(plan.operations.filter((operation) => operation.operation === 'add_to_favorites').length, 1);
+      assert.equal(plan.operations.filter((operation) => operation.operation === 'add_to_playlist').length, 2);
+      assert.equal(plan.collectionMappings.length, 1, 'favorites must not be treated as a playlist mapping');
       const targetWriter = await makeProviderPage(targetProvider, targetState);
 
       async function readTarget() {
@@ -494,10 +522,23 @@ for (const sourceProvider of providers) {
       let realWriterInvoked = false;
       const adapter = {
         id: targetProvider,
-        async readDestination() {
+        async readDestination({ collectionType }) {
           const snapshot = await readTarget();
           assert.equal(snapshot.completeness.confirmed, true, `${targetProvider} target reader confirms the initial destination`);
-          return { complete: true, items: (snapshot.playlists || []).map((playlist) => ({ providerId: playlist.id, name: playlist.title, trackCount: playlist.trackCount })) };
+          return { complete: true, items: collectionType === 'favorites'
+              ? targetTrackIds(targetProvider, snapshot).map((providerId) => ({ providerId }))
+              : (snapshot.playlists || []).map((playlist) => ({ providerId: playlist.id, name: playlist.title, trackCount: playlist.trackCount })) };
+        },
+        async writeFavorites(items) {
+          assert.equal(realWriterInvoked, false, 'the mixed fixture plan is sent once to the actual provider writer');
+          realWriterInvoked = true;
+          assert.equal(items.length, 1);
+          const response = await sendProviderTransfer(targetProvider, targetWriter, plan);
+          const writerReport = response.result || response.report;
+          assert.equal(writerReport.status, 'complete', `${targetProvider} writer completes favorites and playlist writes`);
+          assert.equal(writerReport.favorites.verified, 1, `${targetProvider} writer verifies the favorite`);
+          assert.equal(writerReport.playlists[0].verified, 2, `${targetProvider} writer verifies repeated playlist items`);
+          return { writtenCount: items.length };
         },
         async createPlaylist() {
           // The shared engine needs a destination handle; the provider MAIN-world writer
@@ -505,17 +546,15 @@ for (const sourceProvider of providers) {
           return { id: 'engine-writer-dispatch' };
         },
         async writePlaylistItems(_playlistId, items) {
-          assert.equal(realWriterInvoked, false, 'the fixture route dispatches one complete plan to the actual provider writer');
-          realWriterInvoked = true;
-          const response = await sendProviderTransfer(targetProvider, targetWriter, plan);
-          const writerReport = response.result || response.report;
-          const playlistReport = writerReport.playlists?.[0];
-          assert.ok(playlistReport, `${targetProvider} writer reports playlist completion`);
+          assert.equal(realWriterInvoked, true, 'actual target writer already received the complete mixed plan');
           return { writtenCount: items.length };
         },
         async readBack({ type, playlistId, operations }) {
-          assert.equal(type, 'playlist');
           const snapshot = await readTarget();
+          if (type === 'favorites') {
+            const ids = targetTrackIds(targetProvider, snapshot);
+            return { complete: snapshot.completeness.confirmed, items: ids.map((providerId) => ({ providerId })) };
+          }
           const playlist = (snapshot.playlists || []).find((item) => item.title === 'Ordered Fixture');
           const ids = playlist ? targetTrackIds(targetProvider, { tracks: playlist.tracks }) : [];
           return {
@@ -530,10 +569,11 @@ for (const sourceProvider of providers) {
       const finalTarget = await readTarget();
       const playlist = finalTarget.playlists.find((item) => item.title === 'Ordered Fixture');
       assert.equal(report.status, 'complete');
-      assert.equal(report.writesPerformed, 2);
-      assert.equal(report.verified, 2);
+      assert.equal(report.writesPerformed, 3);
+      assert.equal(report.verified, 3);
       assert.equal(report.collectionsVerified, 1);
       assert.equal(realWriterInvoked, true);
+      assert.deepEqual(targetTrackIds(targetProvider, finalTarget), [targetId], `${targetProvider} reader confirms the imported like`);
       assert.deepEqual(targetTrackIds(targetProvider, { tracks: playlist.tracks }), [targetId, targetId]);
       assert.equal(finalTarget.completeness.confirmed, true, 'final evidence comes from the target provider reader fixture');
     });

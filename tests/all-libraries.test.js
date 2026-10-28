@@ -396,6 +396,17 @@ test('a provider read error is reported as failed so its card can retry the scan
   assert.match(response.statuses.spotify.message, /Reader timeout/);
 });
 
+test('a Zvuk read error stays distinct from a missing signed-in tab', async () => {
+  const zvukState = { ...makeZvukState(), error: 'Favorites scan stopped before the last page.' };
+  const app = bootWorker({ [ZVUK_KEY]: zvukState });
+
+  const response = await app.call({ type: 'music-importer:get-all-libraries', refresh: false });
+
+  assert.equal(response.statuses.zvuk.status, 'failed');
+  assert.match(response.statuses.zvuk.message, /last page/);
+  assert.equal(response.statuses.spotify.status, 'unavailable');
+});
+
 test('one-click provider scan uses the most recently accessed matching service tab', async () => {
   const tabs = [
     { id: 1, url: 'https://music.apple.com/us/library', lastAccessed: 10 },
