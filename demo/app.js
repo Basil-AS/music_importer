@@ -216,7 +216,15 @@
       if (snapshot) {
         const playlistCount = snapshot.playlists.length;
         const count = `${snapshot.tracks.length} лайков · ${playlistCount} плейлистов`;
-        label.textContent = card.classList.contains('selected') ? `Выбран · ${count}` : `Подключено · ${count}`;
+        if (status?.status === 'scanning' && status.cached) {
+          label.textContent = `Обновляем · предыдущий снимок: ${count}`;
+        } else if (status?.status === 'stale' || status?.status === 'unavailable') {
+          label.textContent = `Последний полный снимок · ${count}`;
+          button.title = status.message || 'Аккаунт сейчас не обновлён.';
+        } else {
+          label.textContent = card.classList.contains('selected') ? `Выбран · ${count}` : `Подключено · ${count}`;
+          button.title = '';
+        }
         label.classList.add('connected');
         button.disabled = false;
         button.textContent = card.classList.contains('selected') ? '✓ Источник' : 'Выбрать источник';
@@ -900,7 +908,7 @@
       if (response.error) throw new Error(response.error);
       state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
       renderSourceAvailability(response.statuses || {});
-      const connected = Object.keys(state.librarySnapshots).filter((provider) => response.libraries?.[provider] || response.statuses?.[provider]?.status === 'ready');
+      const connected = Object.keys(state.librarySnapshots).filter((provider) => response.libraries?.[provider] || ['ready', 'stale'].includes(response.statuses?.[provider]?.status));
       if (!connected.length) {
         const details = Object.entries(response.statuses || {}).map(([provider, status]) => `${sourceLabels[provider]}: ${status.message || 'недоступен'}`).join(' · ');
         throw new Error(details || 'Не нашёл открытых библиотек. Войдите в музыкальные сервисы в Chrome и повторите.');
@@ -908,9 +916,11 @@
       const selectedProvider = connected.includes(state.sourceProvider) ? state.sourceProvider : connected[0];
       selectProviderSnapshot(selectedProvider);
       const unavailable = Object.values(response.statuses || {}).filter((status) => status.status === 'unavailable').length;
-      $('#extensionStatus').textContent = `Подключено аккаунтов: ${connected.length} из 4${unavailable ? ` · остальные недоступны: ${unavailable}` : ''}. Выберите любой источник выше.`;
+      const stale = Object.values(response.statuses || {}).filter((status) => status.status === 'stale').length;
+      $('#extensionStatus').textContent = `Библиотек доступно: ${connected.length} из 4${stale ? ` · не обновились: ${stale}` : ''}${unavailable ? ` · без снимка: ${unavailable}` : ''}. Выберите источник выше.`;
       if (!automatic || connected.length) {
-        if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не открыта`);
+        if (stale) toast(`Доступно библиотек: ${connected.length}; часть снимков не обновилась`);
+        else if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не открыта`);
         else toast(`Загружены библиотеки всех ${connected.length} аккаунтов`);
       }
     } catch (error) {

@@ -82,6 +82,7 @@ async function advancePlaylistAutomation(state) {
         phase: favoritesConfirmed && playlistCatalogConfirmed && playlistsConfirmed ? 'complete' : 'needs_review',
         finishedAt: new Date().toISOString(),
       };
+      if (state.scan.phase === 'complete') state.previousCompleteSnapshot = null;
     }
     state.updatedAt = new Date().toISOString();
     await writeState(state);
@@ -136,14 +137,19 @@ async function advanceAccountScan(state) {
   }
 }
 
-async function startAccountScan(tabId) {
+async function startAccountScan(tabId, { forceRefresh = false } = {}) {
   const numericTabId = Number(tabId);
   const tab = Number.isInteger(numericTabId) ? await chrome.tabs.get(numericTabId).catch(() => null) : null;
   let origin = '';
   try { origin = new URL(tab?.url || '').origin; } catch { /* Invalid or unavailable tab URL. */ }
   if (!tab || origin !== 'https://zvuk.com') return { ok: false, error: 'Войдите в Звук в этой вкладке и повторите запуск.' };
   const state = await readState();
-  if (state.tracks.length || state.playlists.length) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
+  if (state.scan?.active) return { ok: false, error: 'Сбор библиотеки Звука уже выполняется.' };
+  if ((state.tracks.length || state.playlists.length) && !forceRefresh) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
+  const currentSnapshot = createLibraryPayload(state);
+  if (currentSnapshot.completeness.confirmed) state.previousCompleteSnapshot = currentSnapshot;
+  state.tracks = [];
+  state.playlists = [];
   state.pagesSeen = 0;
   state.receivedCount = 0;
   state.expectedCount = null;
@@ -153,6 +159,7 @@ async function startAccountScan(tabId) {
   state.playlistListHasMore = null;
   state.favoritesScanFinished = false;
   state.collectionScrollFinished = false;
+  state.automation = { active: false, tabId: null, currentPlaylistId: null, startedAt: null };
   state.captureEnabled = true;
   state.scan = { active: true, phase: 'favorites', tabId: numericTabId, startedAt: new Date().toISOString() };
   state.updatedAt = new Date().toISOString();
@@ -189,6 +196,7 @@ async function readProviderState() {
   return {
     snapshots: stored[PROVIDER_STORAGE_KEY]?.snapshots || {},
     scans: stored[PROVIDER_STORAGE_KEY]?.scans || {},
+    previousSnapshots: stored[PROVIDER_STORAGE_KEY]?.previousSnapshots || {},
   };
 }
 
@@ -212,13 +220,16 @@ async function requestProviderLibrary(provider, refresh) {
     state.scans[provider] = scan;
     await writeProviderState(state);
   }
+  const lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+    .find((snapshot) => snapshot?.completeness?.confirmed === true);
   if (refresh && scan?.status !== 'reading') {
     const [tab] = await chrome.tabs.query({ url: providerConfig.tabPattern });
     const providerName = provider === 'spotify' ? 'Spotify Web Player' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыку';
     if (!tab?.id) {
-      if (state.snapshots[provider]?.completeness?.confirmed === true) return { payload: state.snapshots[provider], cached: true };
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Откройте ${providerName}, чтобы обновить сохранённый снимок.` };
       return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
     }
+    state.previousSnapshots[provider] = lastGoodSnapshot || null;
     state.snapshots[provider] = null;
     state.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
     await writeProviderState(state);
@@ -227,29 +238,56 @@ async function requestProviderLibrary(provider, refresh) {
     } catch {
       state.scans[provider] = { status: 'failed', message: `Расширение не подключено к ${providerName}. Перезагрузите вкладку сервиса и повторите.` };
       await writeProviderState(state);
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scans[provider].message };
       return { error: state.scans[provider].message };
     }
-    return { pending: true, progress: state.scans[provider].message };
+    return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   }
-  if (scan?.status === 'reading') return { pending: true, progress: scan.message || 'Читаем Spotify…' };
-  if (scan?.status === 'failed') return { error: scan.message || `Не удалось прочитать ${provider}.` };
+  if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+  if (scan?.status === 'failed') {
+    if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message || `Обновление ${provider} не завершилось.` };
+    return { error: scan.message || `Не удалось прочитать ${provider}.` };
+  }
   const payload = state.snapshots[provider];
-  if (payload?.completeness?.confirmed === true) return { payload };
+  if (payload?.completeness?.confirmed === true) return { payload, stale: false };
+  if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Сохранён последний полный снимок ${provider}.` };
   return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
 }
 
 async function requestZvukLibrary(refresh) {
   const state = await readState();
   const payload = createLibraryPayload(state);
-  if (payload.completeness.confirmed) return { payload };
-  if (state.scan?.active) return { pending: true, progress: `Звук: ${state.scan.phase || 'сбор библиотеки'}.` };
+  const lastGoodSnapshot = payload.completeness.confirmed ? payload : state.previousCompleteSnapshot;
+  if (payload.completeness.confirmed && !refresh) return { payload, stale: false };
+  if (state.scan?.active) return {
+    pending: true,
+    progress: `Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
+    payload: state.previousCompleteSnapshot || null,
+    cached: Boolean(state.previousCompleteSnapshot),
+    stale: Boolean(state.previousCompleteSnapshot),
+  };
+  if (!refresh && lastGoodSnapshot?.completeness?.confirmed === true) {
+    return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Звука.' };
+  }
   if (!refresh) return { error: state.error || 'Сбор библиотеки Звука не запускался.' };
   const tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
   const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
-  if (!tab?.id) return { error: 'Откройте Звук в Chrome и войдите в аккаунт.' };
-  const result = await startAccountScan(tab.id);
-  if (!result?.ok) return { error: result?.error || 'Не удалось запустить сбор библиотеки Звука.' };
-  return { pending: true, progress: 'Звук: собираем лайки, каталог и содержимое плейлистов.' };
+  if (!tab?.id) {
+    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: 'Откройте Звук, чтобы обновить сохранённый снимок.' };
+    return { error: 'Откройте Звук в Chrome и войдите в аккаунт.' };
+  }
+  const result = await startAccountScan(tab.id, { forceRefresh: true });
+  if (!result?.ok) {
+    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: result?.error || 'Не удалось обновить Звук; сохранён последний полный снимок.' };
+    return { error: result?.error || 'Не удалось запустить сбор библиотеки Звука.' };
+  }
+  return {
+    pending: true,
+    progress: 'Звук: собираем лайки, каталог и содержимое плейлистов.',
+    payload: lastGoodSnapshot?.completeness?.confirmed === true ? lastGoodSnapshot : null,
+    cached: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
+    stale: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
+  };
 }
 
 async function requestAllLibraries(refresh) {
@@ -266,14 +304,20 @@ async function requestAllLibraries(refresh) {
   for (const [provider, result] of outcomes) {
     if (result.pending) {
       pending = true;
-      statuses[provider] = { status: 'scanning', message: String(result.progress || `Сканируем ${provider}…`) };
+      if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) libraries[provider] = result.payload;
+      statuses[provider] = {
+        status: 'scanning',
+        message: String(result.progress || `Сканируем ${provider}…`),
+        cached: result.cached === true,
+      };
     } else if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) {
       libraries[provider] = result.payload;
       statuses[provider] = {
-        status: 'ready',
+        status: result.stale ? 'stale' : 'ready',
         trackCount: result.payload.tracks.length,
         playlistCount: result.payload.playlists.length,
         cached: result.cached === true,
+        message: result.message || '',
       };
     } else {
       statuses[provider] = { status: 'unavailable', message: String(result.error || 'Полная библиотека пока недоступна.') };
@@ -604,6 +648,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
         } else {
           state.snapshots[provider] = payload;
+          delete state.previousSnapshots[provider];
           state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
         }
       }
@@ -644,6 +689,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'zvuk:clear') {
       const state = await readState();
       state.tracks = [];
+      state.previousCompleteSnapshot = null;
       state.pagesSeen = 0;
       state.receivedCount = 0;
       state.expectedCount = null;
