@@ -380,9 +380,27 @@
 
   async function searchWithMetadataFallback(track, search) {
     const queries = window.MusicMatcher.buildSearchQueries(track);
-    const candidates = await search(queries.primary);
-    if (candidates.length || !queries.fallback) return candidates;
-    return search(queries.fallback);
+    const primaryCandidates = await search(queries.primary);
+    if (!queries.fallback || !Array.isArray(primaryCandidates) || !primaryCandidates.length) {
+      if (!primaryCandidates.length && queries.fallback) return search(queries.fallback);
+      return primaryCandidates;
+    }
+
+    // Catalogs often return something for a title+artist+album query even when
+    // the correct recording is absent from the first page. Expand only when
+    // the first page does not already contain a safe automatic match.
+    if (window.MusicMatcher.suggestBestMatch(track, primaryCandidates).automatic) return primaryCandidates;
+
+    let fallbackCandidates = [];
+    try { fallbackCandidates = await search(queries.fallback); }
+    catch { return primaryCandidates; }
+    const unique = new Map();
+    for (const candidate of [...primaryCandidates, ...(Array.isArray(fallbackCandidates) ? fallbackCandidates : [])]) {
+      const id = candidate?.trackId ?? candidate?.providerId ?? candidate?.id;
+      const key = id ? `id:${id}` : `metadata:${[candidate?.trackName || candidate?.title || candidate?.name, candidate?.artistName || candidate?.artist, candidate?.collectionName || candidate?.album].map((value) => String(value || '').toLocaleLowerCase().trim()).join('|')}`;
+      if (!unique.has(key)) unique.set(key, candidate);
+    }
+    return [...unique.values()];
   }
 
   async function searchWithExactIsrc(track, provider, search) {
