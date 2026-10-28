@@ -8,10 +8,20 @@ function makePage(respond) {
   const messages = [];
   const requests = [];
   const location = { origin: 'https://open.spotify.com', href: 'https://open.spotify.com/collection/tracks' };
+  async function dispatch(event) {
+    return Promise.all((listeners.get('message') || []).map((listener) => listener(event)));
+  }
   const window = {
     location,
-    addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(data) { messages.push(data); },
+    addEventListener(name, callback) { listeners.set(name, [...(listeners.get(name) || []), callback]); },
+    postMessage(data) {
+      messages.push(data);
+      if (data.type === 'transfer-progress' && data.progress?.checkpointId) queueMicrotask(() => {
+        void dispatch({ source: window, origin: location.origin, data: {
+          source: 'music-importer-spotify', type: 'transfer-progress-ack', checkpointId: data.progress.checkpointId, ok: true,
+        } });
+      });
+    },
     fetch: async (url, init = {}) => {
       const request = { url: String(url), init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null };
       requests.push(request);
@@ -41,8 +51,7 @@ function makePage(respond) {
       });
     },
     async command(action, detail = {}) {
-      const listener = listeners.get('message');
-      await listener({ source: window, origin: location.origin, data: { source: 'music-importer-spotify', type: 'command', requestId: 'fixture-command-0001', action, ...detail } });
+      await dispatch({ source: window, origin: location.origin, data: { source: 'music-importer-spotify', type: 'command', requestId: 'fixture-command-0001', action, ...detail } });
       while (!messages.some((message) => message.type === 'command-result' && message.requestId === 'fixture-command-0001')) {
         await new Promise((resolve) => setImmediate(resolve));
       }

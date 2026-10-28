@@ -6,7 +6,15 @@
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     const { type, ...detail } = event.data;
     if (!accepted.has(type)) return;
-    chrome.runtime.sendMessage({ type: `yandex:${type}`, ...detail });
+    chrome.runtime.sendMessage({ type: `yandex:${type}`, ...detail }).then((response) => {
+      if (type === 'transfer-progress' && detail.progress?.checkpointId) window.postMessage({
+        source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: response?.ok === true,
+      }, location.origin);
+    }).catch(() => {
+      if (type === 'transfer-progress' && detail.progress?.checkpointId) window.postMessage({
+        source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: false,
+      }, location.origin);
+    });
   });
 
   chrome.runtime.onMessage.addListener((message) => {

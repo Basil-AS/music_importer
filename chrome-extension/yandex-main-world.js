@@ -3,10 +3,34 @@
   const api = 'https://api.music.yandex.ru';
   const batchSize = 25;
   let scanPromise = null;
+  const checkpointWaiters = new Map();
+  let checkpointSequence = 0;
 
   function post(type, detail = {}) {
     window.postMessage({ source: marker, type, ...detail }, location.origin);
   }
+
+  function awaitCheckpoint(requestId, progress) {
+    const checkpointId = `${requestId}:${++checkpointSequence}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        checkpointWaiters.delete(checkpointId);
+        resolve(false);
+      }, 20000);
+      checkpointWaiters.set(checkpointId, (ok) => {
+        clearTimeout(timer);
+        checkpointWaiters.delete(checkpointId);
+        resolve(ok === true);
+      });
+      post('transfer-progress', { requestId, progress: { ...progress, checkpointId } });
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker
+      || event.data?.type !== 'transfer-progress-ack') return;
+    checkpointWaiters.get(String(event.data.checkpointId || ''))?.(event.data.ok === true);
+  });
 
   async function request(path, init = {}) {
     const response = await window.fetch(`${api}${path}`, {
@@ -308,10 +332,16 @@
           playlist = await readPlaylistDetail(uid, targetId);
         } else {
           if (index < completedPlaylistCount) throw new Error(`Не найден сохранённый ID завершённого плейлиста «${mapping.sourceName}».`);
-          update({ phase: 'playlist-creating', completed: index, total: mappings.length, sourceKey: key, playlistIndex: index });
+          const createCheckpointSaved = await awaitCheckpoint(requestId, {
+            phase: 'playlist-creating', completed: index, total: mappings.length, sourceKey: key, playlistIndex: index,
+          });
+          if (!createCheckpointSaved) throw new Error('Не удалось локально сохранить контрольную точку перед созданием плейлиста. Запись остановлена без изменения аккаунта.');
           playlist = await createPlaylist(uid, String(mapping.targetName || mapping.sourceName || 'Перенесённый плейлист').slice(0, 100));
           targetId = playlist.kind;
-          update({ phase: 'playlist-items', completed: 0, total: expectedIds.length, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index });
+          const targetCheckpointSaved = await awaitCheckpoint(requestId, {
+            phase: 'playlist-items', completed: 0, total: expectedIds.length, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index,
+          });
+          if (!targetCheckpointSaved) throw new Error(`Плейлист «${playlist.title}» создан, но его ID не сохранён. Сверьте целевой аккаунт вручную; добавление треков остановлено.`);
           const result = await appendPlaylistItems(uid, targetId, matching, (value) => update({
             ...value, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index,
           }));

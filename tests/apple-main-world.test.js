@@ -3,16 +3,27 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function makePage(fixtures, userTokenHeader = 'music-user-token') {
+function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck = true) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
   const token = 'fixture-only-credential';
   const location = { origin: 'https://music.apple.com', href: 'https://music.apple.com/library/songs' };
+  async function dispatch(event) {
+    return Promise.all((listeners.get('message') || []).map((listener) => listener(event)));
+  }
   const window = {
     location,
-    addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(data) { messages.push(data); },
+    addEventListener(name, callback) { listeners.set(name, [...(listeners.get(name) || []), callback]); },
+    postMessage(data) {
+      messages.push(data);
+      if (data.type === 'transfer-progress' && data.progress?.checkpointId) queueMicrotask(() => {
+        void dispatch({ source: window, origin: location.origin, data: {
+          source: 'music-importer-apple', type: 'transfer-progress-ack', checkpointId: data.progress.checkpointId,
+          ok: typeof checkpointAck === 'function' ? checkpointAck(data.progress) : checkpointAck,
+        } });
+      });
+    },
     fetch: async (url, init = {}) => {
       requests.push({ url: String(url), method: init.method || 'GET', body: init.body || null, headers: new Headers(init.headers || {}) });
       const key = new URL(String(url)).pathname + new URL(String(url)).search;
@@ -35,7 +46,7 @@ function makePage(fixtures, userTokenHeader = 'music-user-token') {
       await window.fetch('https://amp-api.music.apple.com/v1/me/storefront', {
         headers: { authorization: `Bearer ${token}`, [userTokenHeader]: token },
       });
-      await listeners.get('message')({
+      await dispatch({
         source: window,
         origin: location.origin,
         data: { source: 'music-importer-apple', type: 'start-library-scan' },
@@ -46,7 +57,7 @@ function makePage(fixtures, userTokenHeader = 'music-user-token') {
       await window.fetch('https://amp-api.music.apple.com/v1/me/storefront', {
         headers: { authorization: `Bearer ${token}`, [userTokenHeader]: token },
       });
-      await listeners.get('message')({
+      await dispatch({
         source: window, origin: location.origin,
         data: { source: 'music-importer-apple', type: 'command', requestId: 'fixture-command-0001', action, ...details },
       });
@@ -281,6 +292,23 @@ test('Apple resume stops without writing when the saved playlist does not match 
 
   assert.equal(result.ok, false);
   assert.match(result.error, /не является префиксом плана/i);
+  assert.equal(page.requests.filter((request) => request.method === 'POST').length, 0);
+});
+
+test('Apple creates no playlist when the pre-create checkpoint is not durable', async () => {
+  const page = makePage({
+    'POST /v1/me/library/playlists': { status: 201, payload: { data: [{ id: 'should-not-exist', type: 'library-playlists', attributes: { name: 'Road' } }] } },
+  }, 'music-user-token', false);
+  const result = await page.command('execute-transfer', { plan: {
+    type: 'music-transfer-plan',
+    target: { provider: 'apple-music', collectionType: 'playlists' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-playlist', sourceName: 'Road', targetName: 'Road' }],
+    operations: [{ operation: 'add_to_playlist', source: { collectionId: 'source-playlist', position: 0 }, target: { providerId: 'expected-track' } }],
+  } });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /контрольную точку перед созданием/i);
   assert.equal(page.requests.filter((request) => request.method === 'POST').length, 0);
 });
 

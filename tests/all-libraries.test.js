@@ -116,7 +116,16 @@ function bootWorker(storageState, tabs = [], options = {}) {
         name: 'music-importer-app',
         sender: { id: 'fixture-extension', url },
         onDisconnect: { addListener(listener) { port.onDisconnectListener = listener; } },
-        postMessage(message) { portMessages.push(message); },
+        onMessage: { addListener(listener) { port.onMessageListener = listener; } },
+        postMessage(message) {
+          portMessages.push(message);
+          if (message.checkpointAckId && options.autoAckCheckpoints !== false) {
+            queueMicrotask(() => port.onMessageListener?.({
+              type: 'transfer-progress-ack', checkpointAckId: message.checkpointAckId, ok: true,
+            }));
+          }
+        },
+        acknowledge(message) { port.onMessageListener?.(message); },
         disconnect() { port.disconnected = true; },
       };
       connectListener(port);
@@ -215,6 +224,25 @@ test('extension app receives transfer progress through its private runtime port'
     requestId: 'fixture-request-0001',
     progress: { message: 'Проверяем запись' },
   }]);
+});
+
+test('provider checkpoint is not acknowledged until the app confirms its local IndexedDB write', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs, { autoAckCheckpoints: false });
+  const port = app.connectApp();
+  let settled = false;
+  const responsePromise = app.pageMessage({
+    type: 'apple:transfer-progress', requestId: 'fixture-request-0001',
+    progress: { phase: 'playlist-creating', checkpointId: 'fixture-request-0001:1' },
+  }, 4).then((response) => { settled = true; return response; });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(settled, false);
+  assert.equal(app.portMessages[0].checkpointAckId, 'fixture-request-0001:1');
+  port.acknowledge({ type: 'transfer-progress-ack', checkpointAckId: 'fixture-request-0001:1', ok: true });
+  const response = await responsePromise;
+  assert.equal(response.ok, true);
+  assert.equal(response.error, null);
 });
 
 test('extension worker rejects app commands from unrelated extension pages', async () => {

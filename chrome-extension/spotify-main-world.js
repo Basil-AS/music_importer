@@ -13,10 +13,34 @@
   let scanPromise = null;
   let lastQueryAt = 0;
   let activeCommandId = '';
+  const checkpointWaiters = new Map();
+  let checkpointSequence = 0;
 
   function post(type, detail = {}) {
     window.postMessage({ source: marker, type, ...detail }, location.origin);
   }
+
+  function awaitCheckpoint(requestId, progress) {
+    const checkpointId = `${requestId}:${++checkpointSequence}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        checkpointWaiters.delete(checkpointId);
+        resolve(false);
+      }, 20000);
+      checkpointWaiters.set(checkpointId, (ok) => {
+        clearTimeout(timer);
+        checkpointWaiters.delete(checkpointId);
+        resolve(ok === true);
+      });
+      post('transfer-progress', { requestId, progress: { ...progress, checkpointId } });
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker
+      || event.data?.type !== 'transfer-progress-ack') return;
+    checkpointWaiters.get(String(event.data.checkpointId || ''))?.(event.data.ok === true);
+  });
 
   function retryAfterDelay(value) {
     const raw = String(value || '').trim();
@@ -425,9 +449,15 @@
           }));
         } else {
           if (playlistIndex < completedPlaylistCount) throw new Error(`Не найден сохранённый ID завершённого плейлиста «${name}».`);
-          reportProgress({ phase: 'playlist-creating', completed: playlistIndex, total: mappings.size, sourceKey, playlistIndex });
+          const createCheckpointSaved = await awaitCheckpoint(activeCommandId, {
+            phase: 'playlist-creating', completed: playlistIndex, total: mappings.size, sourceKey, playlistIndex,
+          });
+          if (!createCheckpointSaved) throw new Error('Не удалось локально сохранить контрольную точку перед созданием плейлиста. Запись остановлена без изменения аккаунта.');
           playlistUri = await createSpotifyPlaylist(name);
-          reportProgress({ phase: 'playlist-items', completed: 0, total: uris.length, sourceKey, targetPlaylistId: playlistUri, playlistIndex });
+          const targetCheckpointSaved = await awaitCheckpoint(activeCommandId, {
+            phase: 'playlist-items', completed: 0, total: uris.length, sourceKey, targetPlaylistId: playlistUri, playlistIndex,
+          });
+          if (!targetCheckpointSaved) throw new Error(`Плейлист «${name}» создан, но его ID не сохранён. Сверьте целевой аккаунт вручную; добавление треков остановлено.`);
           if (uris.length) await addSpotifyPlaylistItems(playlistUri, uris, (count) => { written = count; }, (completed, total) => reportProgress({
             phase: 'playlist-items', completed, total, sourceKey, targetPlaylistId: playlistUri, playlistIndex,
           }));

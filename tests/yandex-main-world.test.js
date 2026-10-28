@@ -10,10 +10,20 @@ function makePage(fetchHandler) {
   const messages = [];
   const requests = [];
   const location = { origin, href: `${origin}/home` };
+  async function dispatch(event) {
+    return Promise.all((listeners.get('message') || []).map((listener) => listener(event)));
+  }
   const window = {
     location,
-    addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(message) { messages.push(message); },
+    addEventListener(name, callback) { listeners.set(name, [...(listeners.get(name) || []), callback]); },
+    postMessage(message) {
+      messages.push(message);
+      if (message.type === 'transfer-progress' && message.progress?.checkpointId) queueMicrotask(() => {
+        void dispatch({ source: window, origin, data: {
+          source: 'music-importer-yandex', type: 'transfer-progress-ack', checkpointId: message.progress.checkpointId, ok: true,
+        } });
+      });
+    },
     async fetch(url, init = {}) {
       const request = { url: String(url), init };
       requests.push(request);
@@ -35,7 +45,7 @@ function makePage(fetchHandler) {
     messages,
     requests,
     async dispatch(type, detail = {}) {
-      await listeners.get('message')({
+      await dispatch({
         source: window, origin,
         data: { source: 'music-importer-yandex', type, requestId: 'fixture-request-0001', ...detail },
       });

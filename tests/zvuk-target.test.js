@@ -3,15 +3,26 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function makePage(respond) {
+function makePage(respond, checkpointAck = true) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
   const location = { origin: 'https://zvuk.com', href: 'https://zvuk.com/favorites' };
+  async function dispatch(event) {
+    return Promise.all((listeners.get('message') || []).map((listener) => listener(event)));
+  }
   const window = {
     location,
-    addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(data) { messages.push(data); },
+    addEventListener(name, callback) { listeners.set(name, [...(listeners.get(name) || []), callback]); },
+    postMessage(data) {
+      messages.push(data);
+      if (data.type === 'transfer-progress' && data.progress?.checkpointId) queueMicrotask(() => {
+        void dispatch({ source: window, origin: location.origin, data: {
+          source: 'music-importer-zvuk-target', type: 'transfer-progress-ack', checkpointId: data.progress.checkpointId,
+          ok: typeof checkpointAck === 'function' ? checkpointAck(data.progress) : checkpointAck,
+        } });
+      });
+    },
     fetch: async (url, init = {}) => {
       const request = { url: String(url), init, payload: JSON.parse(init.body || '{}') };
       requests.push(request);
@@ -32,7 +43,7 @@ function makePage(respond) {
   return {
     requests,
     async command(type, detail = {}) {
-      await listeners.get('message')({
+      await dispatch({
         source: window,
         origin: location.origin,
         data: { source: 'music-importer-zvuk-target', type, requestId: 'fixture-command-0001', ...detail },
@@ -110,6 +121,7 @@ test('Zvuk playlist write chunks items and verifies exact order, including repea
   const tracks = Array.from({ length: 102 }, (_, index) => `target-${index < 101 ? index : 0}`);
   let playlistTracks = [];
   let addBatches = 0;
+  const addBatchSizes = [];
   const page = makePage((request) => {
     const { operationName, variables } = graphRequest(request);
     if (operationName === 'createPlaylist') {
@@ -119,6 +131,7 @@ test('Zvuk playlist write chunks items and verifies exact order, including repea
     }
     if (operationName === 'addItems') {
       addBatches += 1;
+      addBatchSizes.push(variables.items.length);
       playlistTracks.push(...variables.items.map((item) => item.item_id));
       return { payload: { data: { playlist: { addItemsV1: { id: 'created-1' } } } } };
     }
@@ -139,7 +152,8 @@ test('Zvuk playlist write chunks items and verifies exact order, including repea
     operations,
   } });
   assert.equal(response.ok, true);
-  assert.equal(addBatches, 1);
+  assert.equal(addBatches, 2);
+  assert.deepEqual(addBatchSizes, [100, 2]);
   assert.equal(response.report.playlists[0].written, 102);
   assert.equal(response.report.playlists[0].verified, 102);
   assert.deepEqual(playlistTracks, tracks);
@@ -176,6 +190,36 @@ test('Zvuk resume verifies the stored playlist ID and writes only the missing su
   assert.equal(response.ok, true, response.error);
   assert.deepEqual(playlistTracks, ['track-first', 'track-second']);
   assert.equal(created, false);
+});
+
+test('Zvuk creates an empty playlist and does not add tracks if the target ID checkpoint is rejected', async () => {
+  const playlistTracks = [];
+  const page = makePage((request) => {
+    const { operationName, variables } = graphRequest(request);
+    if (operationName === 'createPlaylist') {
+      assert.deepEqual(variables.items, []);
+      return { payload: { data: { playlist: { createV1: { id: 'created-before-checkpoint' } } } } };
+    }
+    if (operationName === 'getPlaylistTracks') {
+      return { payload: { data: { playlistTracks: playlistTracks.slice(variables.offset, variables.offset + variables.limit).map((id) => ({ id })) } } };
+    }
+    if (operationName === 'addItems') {
+      playlistTracks.push(...variables.items.map((item) => item.item_id));
+      return { payload: { data: { playlist: { addItemsV1: { id: 'created-before-checkpoint' } } } } };
+    }
+    throw new Error(`Unexpected operation: ${operationName}`);
+  }, (progress) => progress.phase !== 'playlist-items');
+  const response = await page.command('execute-transfer', { plan: {
+    type: 'music-transfer-plan', target: { provider: 'zvuk', collectionType: 'playlists' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-list', sourceName: 'Road', targetName: 'Road' }],
+    operations: [{ operation: 'add_to_playlist', source: { collectionId: 'source-list', position: 0 }, target: { providerId: 'target-track' } }],
+  } });
+
+  assert.equal(response.ok, false);
+  assert.match(response.error, /ID не сохранён/i);
+  assert.deepEqual(playlistTracks, []);
+  assert.equal(page.requests.filter((request) => graphRequest(request).operationName === 'addItems').length, 0);
 });
 
 test('Zvuk writer rejects incomplete source snapshots before making a request', async () => {

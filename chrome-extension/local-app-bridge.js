@@ -21,6 +21,7 @@
       type: message.type === 'music-importer:apple-progress' ? 'apple-progress' : message.type === 'music-importer:zvuk-progress' ? 'zvuk-progress' : message.type === 'music-importer:spotify-progress' ? 'spotify-progress' : 'yandex-progress',
       requestId: String(message.requestId || ''),
       progress: message.progress || null,
+      checkpointAckId: String(message.checkpointAckId || ''),
     }, location.origin);
     return false;
   });
@@ -37,6 +38,15 @@
         requestId,
         version: chrome.runtime.getManifest().version,
       }, location.origin);
+      return;
+    }
+
+    if (event.data.type === 'transfer-progress-ack') {
+      const checkpointAckId = String(event.data.checkpointAckId || '');
+      if (!/^[a-z0-9:_-]{16,120}$/i.test(checkpointAckId)) return;
+      void chrome.runtime.sendMessage({
+        type: 'music-importer:progress-ack', checkpointAckId, ok: event.data.ok === true,
+      }).catch(() => {});
       return;
     }
 

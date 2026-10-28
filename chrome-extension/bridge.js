@@ -8,6 +8,16 @@
         type: 'zvuk:transfer-progress',
         requestId: String(event.data.requestId || ''),
         progress: event.data.progress || null,
+      }).then((response) => {
+        if (event.data.progress?.checkpointId) window.postMessage({
+          source: 'music-importer-zvuk-target', type: 'transfer-progress-ack',
+          checkpointId: event.data.progress.checkpointId, ok: response?.ok === true,
+        }, location.origin);
+      }).catch(() => {
+        if (event.data.progress?.checkpointId) window.postMessage({
+          source: 'music-importer-zvuk-target', type: 'transfer-progress-ack',
+          checkpointId: event.data.progress.checkpointId, ok: false,
+        }, location.origin);
       });
       return;
     }

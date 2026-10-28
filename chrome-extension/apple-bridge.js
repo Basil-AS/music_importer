@@ -21,7 +21,15 @@
       return;
     }
     if (type === 'transfer-progress') {
-      chrome.runtime.sendMessage({ type: 'apple:transfer-progress', ...detail });
+      chrome.runtime.sendMessage({ type: 'apple:transfer-progress', ...detail }).then((response) => {
+        if (detail.progress?.checkpointId) window.postMessage({
+          source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: response?.ok === true,
+        }, location.origin);
+      }).catch(() => {
+        if (detail.progress?.checkpointId) window.postMessage({
+          source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: false,
+        }, location.origin);
+      });
       return;
     }
     if (!accepted.has(type)) return;

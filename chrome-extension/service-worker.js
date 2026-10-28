@@ -12,6 +12,15 @@ const APP_ORIGINS = new Set([
 ]);
 const extensionAppUrl = chrome.runtime.getURL?.('app/index.html') || '';
 const extensionAppPorts = new Set();
+const pendingProgressAcks = new Map();
+
+function acknowledgeTransferCheckpoint(id, ok) {
+  const settle = pendingProgressAcks.get(String(id || ''));
+  if (!settle || ok !== true) return false;
+  pendingProgressAcks.delete(String(id));
+  settle(true);
+  return true;
+}
 
 function isAppSender(sender) {
   if (sender.id !== chrome.runtime.id) return false;
@@ -26,7 +35,17 @@ function isAppSender(sender) {
 }
 
 async function forwardTransferProgress(provider, requestId, progress) {
+  const checkpointAckId = String(progress?.checkpointId || '');
+  let ackTimer;
+  const ackPromise = checkpointAckId ? new Promise((resolve) => {
+    pendingProgressAcks.set(checkpointAckId, resolve);
+    ackTimer = setTimeout(() => {
+      pendingProgressAcks.delete(checkpointAckId);
+      resolve(false);
+    }, 15000);
+  }) : null;
   const extensionMessage = { type: 'transfer-progress', provider, requestId: String(requestId || ''), progress: progress || null };
+  if (checkpointAckId) extensionMessage.checkpointAckId = checkpointAckId;
   for (const port of extensionAppPorts) {
     try { port.postMessage(extensionMessage); } catch { extensionAppPorts.delete(port); }
   }
@@ -35,7 +54,12 @@ async function forwardTransferProgress(provider, requestId, progress) {
     type: `music-importer:${provider}-progress`,
     requestId: extensionMessage.requestId,
     progress: extensionMessage.progress,
+    ...(checkpointAckId ? { checkpointAckId } : {}),
   }).catch(() => null)));
+  if (!ackPromise) return true;
+  const acknowledged = await ackPromise;
+  clearTimeout(ackTimer);
+  return acknowledged;
 }
 
 chrome.runtime.onConnect?.addListener((port) => {
@@ -45,6 +69,9 @@ chrome.runtime.onConnect?.addListener((port) => {
     return;
   }
   extensionAppPorts.add(port);
+  port.onMessage.addListener((message) => {
+    if (message?.type === 'transfer-progress-ack') acknowledgeTransferCheckpoint(message.checkpointAckId, message.ok === true);
+  });
   port.onDisconnect.addListener(() => extensionAppPorts.delete(port));
 });
 
@@ -440,6 +467,16 @@ function messageMatchesPage(type, kind) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === 'music-importer:progress-ack') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false });
+        return;
+      }
+      const acknowledged = acknowledgeTransferCheckpoint(message.checkpointAckId, message.ok === true);
+      sendResponse({ ok: acknowledged });
+      return;
+    }
+
     if (message?.type === 'zvuk:transfer-progress') {
       let origin = '';
       try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
@@ -447,8 +484,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      await forwardTransferProgress('zvuk', message.requestId, message.progress);
-      sendResponse({ ok: true });
+      const acknowledged = await forwardTransferProgress('zvuk', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
       return;
     }
 
@@ -502,8 +539,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      await forwardTransferProgress('spotify', message.requestId, message.progress);
-      sendResponse({ ok: true });
+      const acknowledged = await forwardTransferProgress('spotify', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
       return;
     }
 
@@ -556,8 +593,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      await forwardTransferProgress('apple', message.requestId, message.progress);
-      sendResponse({ ok: true });
+      const acknowledged = await forwardTransferProgress('apple', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
       return;
     }
 
@@ -607,8 +644,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      await forwardTransferProgress('yandex', message.requestId, message.progress);
-      sendResponse({ ok: true });
+      const acknowledged = await forwardTransferProgress('yandex', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
       return;
     }
 

@@ -593,7 +593,18 @@
             $('#importBtn').textContent = message.progress.message;
             $('#searchStatus').textContent = message.progress.message;
           }
-          if (typeof onProgress === 'function') void onProgress(message.progress || {});
+          if (typeof onProgress === 'function') {
+            const acknowledge = (ok) => {
+              if (!message.checkpointAckId) return;
+              try { extensionAppPort.postMessage({ type: 'transfer-progress-ack', checkpointAckId: message.checkpointAckId, ok }); }
+              catch { /* The writer will time out and stop before its next write. */ }
+            };
+            void Promise.resolve(onProgress(message.progress || {})).then((saved) => {
+              acknowledge(saved === true);
+            }).catch(() => {
+              acknowledge(false);
+            });
+          }
         };
         extensionAppPort.onMessage.addListener(onProgressMessage);
         chrome.runtime.sendMessage({
@@ -628,7 +639,19 @@
             $('#importBtn').textContent = progress.message;
             $('#searchStatus').textContent = progress.message;
           }
-          if (typeof onProgress === 'function') void onProgress(progress || {});
+          if (typeof onProgress === 'function') {
+            void Promise.resolve(onProgress(progress || {})).then((saved) => {
+              if (messageEvent.data.checkpointAckId) window.postMessage({
+                source: 'music-importer-local-app', type: 'transfer-progress-ack', requestId,
+                checkpointAckId: messageEvent.data.checkpointAckId, ok: saved === true,
+              }, location.origin);
+            }).catch(() => {
+              if (messageEvent.data.checkpointAckId) window.postMessage({
+                source: 'music-importer-local-app', type: 'transfer-progress-ack', requestId,
+                checkpointAckId: messageEvent.data.checkpointAckId, ok: false,
+              }, location.origin);
+            });
+          }
           return;
         }
         if (messageEvent.data?.type !== `${provider}-command-response`) return;
@@ -1011,9 +1034,11 @@
     state.transferInProgress = true;
     updateCounts();
     renderUnresolvedTransferJob();
+    let jobClaimed = false;
     try {
       const resumed = await window.MusicTransferJobStore?.resume(job.id);
       if (!resumed) throw new Error('Не удалось безопасно открыть сохранённую операцию для продолжения.');
+      jobClaimed = true;
       const plan = {
         ...job.recoveryPlan,
         recovery: { playlistTargets: job.playlistTargets || {}, progress: job.progress || null },
@@ -1030,7 +1055,7 @@
         toast('Перенос продолжен и сверен с целевым аккаунтом.');
       }
     } catch (error) {
-      await window.MusicTransferJobStore?.finish(job.id, 'unknown', 'Связь прервалась во время продолжения; проверьте целевой аккаунт.');
+      if (jobClaimed) await window.MusicTransferJobStore?.finish(job.id, 'unknown', 'Связь прервалась во время продолжения; проверьте целевой аккаунт.');
       toast(error instanceof Error ? error.message : 'Не удалось продолжить перенос.');
     } finally {
       state.transferInProgress = false;
