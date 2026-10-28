@@ -194,6 +194,33 @@ test('onboarding opens only missing provider tabs from the extension app', async
   ]);
 });
 
+test('onboarding opens only the selected source and target service tabs', async () => {
+  const tabs = [{ id: 7, url: 'https://music.apple.com/library' }];
+  const app = bootWorker({}, tabs);
+  const response = await app.callFrom(
+    { type: 'music-importer:open-provider-tabs', providerIds: ['apple-music', 'spotify'] },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(response.opened)), ['spotify']);
+  assert.deepEqual(JSON.parse(JSON.stringify(response.alreadyOpen)), ['apple-music']);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), [
+    { url: 'https://open.spotify.com/collection/tracks', active: true },
+  ]);
+});
+
+test('onboarding rejects unknown provider IDs instead of opening every service', async () => {
+  const app = bootWorker({});
+  const response = await app.callFrom(
+    { type: 'music-importer:open-provider-tabs', providerIds: ['unknown'] },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+
+  assert.equal(response.ok, false);
+  assert.match(response.error, /поддерживаемых сервисов/i);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), []);
+});
+
 test('onboarding rejects provider-tab requests from unrelated extension pages', async () => {
   const app = bootWorker({});
   const response = await app.callFrom(

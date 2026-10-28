@@ -513,13 +513,21 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
   return { libraries, statuses, pending };
 }
 
-async function openMissingProviderTabs() {
-  const providers = [
+async function openMissingProviderTabs(providerIds = null) {
+  const allProviders = [
     { id: 'zvuk', pattern: 'https://zvuk.com/*', url: 'https://zvuk.com/favorites' },
     { id: 'spotify', pattern: 'https://open.spotify.com/*', url: 'https://open.spotify.com/collection/tracks' },
     { id: 'yandex-music', pattern: 'https://music.yandex.ru/*', url: 'https://music.yandex.ru/home' },
     { id: 'apple-music', pattern: 'https://music.apple.com/*', url: 'https://music.apple.com/library' },
   ];
+  if (providerIds !== null && (!Array.isArray(providerIds)
+    || providerIds.length === 0
+    || providerIds.some((id) => !allProviders.some((provider) => provider.id === id)))) {
+    return { ok: false, error: 'Выберите один или несколько поддерживаемых сервисов.' };
+  }
+  const providers = providerIds === null
+    ? allProviders
+    : allProviders.filter((provider) => providerIds.includes(provider.id));
   const opened = [];
   const alreadyOpen = [];
   for (const provider of providers) {
@@ -578,7 +586,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       try {
-        sendResponse(await openMissingProviderTabs());
+        sendResponse(await openMissingProviderTabs(message.providerIds ?? null));
       } catch {
         sendResponse({ ok: false, error: 'Не удалось открыть вкладки музыкальных сервисов.' });
       }

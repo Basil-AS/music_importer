@@ -195,7 +195,10 @@
 
     if (event.data.type === 'open-provider-tabs') {
       try {
-        const response = await chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs' });
+        const response = await chrome.runtime.sendMessage({
+          type: 'music-importer:open-provider-tabs',
+          providerIds: Array.isArray(event.data.providerIds) ? event.data.providerIds : null,
+        });
         window.postMessage({
           source: marker,
           type: 'provider-tabs-response',

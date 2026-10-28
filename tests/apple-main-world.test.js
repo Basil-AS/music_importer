@@ -422,3 +422,41 @@ test('local app bridge identifies the installed extension without requesting acc
     source: 'music-importer-local-app', type: 'extension-ready', requestId: 'fixture-request-0001', version: '0.10.0',
   }]);
 });
+
+test('local app bridge forwards only the selected providers for onboarding', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const posted = [];
+  const sent = [];
+  let listener;
+  const location = { origin: 'http://127.0.0.1:8001', pathname: '/' };
+  const window = {
+    addEventListener(name, callback) { if (name === 'message') listener = callback; },
+    postMessage(data) { posted.push(data); },
+  };
+  const context = {
+    window, location, URL, Set, String, chrome: { runtime: {
+      sendMessage: async (message) => { sent.push(message); return { ok: true, opened: ['spotify'], alreadyOpen: ['apple-music'] }; },
+      getManifest: () => ({ version: '0.13.19' }),
+      onMessage: { addListener() {} },
+    } },
+  };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/local-app-bridge.js'), 'utf8'), context);
+  listener({
+    source: window,
+    origin: location.origin,
+    data: {
+      source: 'music-importer-local-app', type: 'open-provider-tabs', requestId: 'fixture-request-0002',
+      providerIds: ['apple-music', 'spotify'],
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{
+    type: 'music-importer:open-provider-tabs', providerIds: ['apple-music', 'spotify'],
+  }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)), [{
+    source: 'music-importer-local-app', type: 'provider-tabs-response', requestId: 'fixture-request-0002',
+    ok: true, opened: ['spotify'], alreadyOpen: ['apple-music'], error: null,
+  }]);
+});

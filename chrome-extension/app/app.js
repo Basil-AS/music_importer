@@ -1316,11 +1316,11 @@
     });
   }
 
-  function requestOpenProviderTabs() {
+  function requestOpenProviderTabs(providerIds = null) {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает запуск вкладок сервисов.'));
     const requestId = window.crypto.randomUUID();
     if (extensionApp) {
-      return chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs' })
+      return chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs', providerIds })
         .catch(() => ({ ok: false, error: 'Не удалось связаться с расширением Chrome.' }));
     }
     return new Promise((resolve, reject) => {
@@ -1338,7 +1338,7 @@
         resolve(event.data);
       };
       window.addEventListener('message', onMessage);
-      window.postMessage({ source: 'music-importer-local-app', type: 'open-provider-tabs', requestId }, location.origin);
+      window.postMessage({ source: 'music-importer-local-app', type: 'open-provider-tabs', requestId, providerIds }, location.origin);
     });
   }
 
@@ -1347,14 +1347,17 @@
     if (!state.extensionAvailable) return;
     button.disabled = true;
     try {
-      const response = await requestOpenProviderTabs();
+      const sourceProvider = state.sourceSnapshot?.provider || (state.loaded ? state.sourceProvider : '');
+      const supportedProviders = new Set(['zvuk', 'spotify', 'yandex-music', 'apple-music']);
+      const selectedProviders = [...new Set([sourceProvider, state.targetProvider].filter((provider) => supportedProviders.has(provider)))];
+      const response = await requestOpenProviderTabs(selectedProviders.length ? selectedProviders : null);
       if (!response?.ok) throw new Error(response?.error || 'Не удалось открыть сервисы.');
       const names = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
       const opened = (response.opened || []).map((id) => names[id] || id);
       const alreadyOpen = (response.alreadyOpen || []).map((id) => names[id] || id);
       $('#extensionStatus').textContent = opened.length
-        ? `Открыты вкладки: ${opened.join(', ')}. Войдите в нужные аккаунты и вернитесь в Music Importer — он проверит их автоматически. Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
-        : `Все вкладки уже открыты: ${alreadyOpen.join(', ') || 'нет'}. Войдите в нужные аккаунты и вернитесь в Music Importer — он проверит их автоматически.`;
+        ? `Открыты вкладки нужных сервисов: ${opened.join(', ')}. Войдите в эти аккаунты и вернитесь в Music Importer — он проверит их автоматически. Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
+        : `Вкладки выбранных сервисов уже открыты: ${alreadyOpen.join(', ') || 'нет'}. Войдите в аккаунты и вернитесь в Music Importer — он проверит их автоматически.`;
       toast(opened.length ? `Открыто вкладок для входа: ${opened.length}` : 'Все вкладки сервисов уже открыты');
     } catch (error) {
       $('#extensionStatus').textContent = error.message || 'Не удалось открыть сервисы.';
