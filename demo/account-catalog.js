@@ -23,7 +23,7 @@
       : String(artistValue || '').trim();
     const isrc = normalizeISRC(track?.isrc || track?.ISRC || track?.externalIds?.isrc || track?.external_ids?.isrc);
     if (!trackId || !trackName || !artistName) return null;
-    const albumValue = track?.collectionName || track?.album || '';
+    const albumValue = track?.collectionName || track?.album || track?.release?.title || track?.release?.name || '';
     const collectionName = typeof albumValue === 'string' ? albumValue : albumValue?.name || albumValue?.title || '';
     const duration = Number(track?.trackTimeMillis || track?.durationMs || track?.duration || 0);
     return {
