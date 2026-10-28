@@ -100,6 +100,10 @@ test('bulk catalog search groups repeated source recordings and keeps edited que
   assert.equal(matcher.sourceSearchGroupKey(source, 'spotify'), 'spotify:id:track-1');
   assert.equal(matcher.sourceSearchGroupKey({ ...source, manualQuery: true, query: 'edited search' }, 'spotify'), '');
   assert.notEqual(matcher.sourceSearchGroupKey(source, 'spotify'), matcher.sourceSearchGroupKey(source, 'apple-music'));
+  assert.equal(matcher.catalogSearchGroupKey(source, 'spotify', 'zvuk', '', 'Song Artist Album'), 'zvuk:source:spotify:id:track-1');
+  assert.equal(matcher.catalogSearchGroupKey(duplicateWithDifferentMetadata, 'spotify', 'zvuk', '', 'other query'), 'zvuk:source:spotify:id:track-1');
+  assert.equal(matcher.catalogSearchGroupKey({ ...source, manualQuery: true }, 'spotify', 'apple-music', 'us', 'Edited query'), 'apple-music:US:query:edited query');
+  assert.notEqual(matcher.catalogSearchGroupKey(source, 'spotify', 'apple-music', 'us', 'Song'), matcher.catalogSearchGroupKey(source, 'spotify', 'apple-music', 'gb', 'Song'));
 });
 
 test('a resolved recording match propagates without replacing playlist occurrence metadata', () => {

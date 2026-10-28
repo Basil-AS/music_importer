@@ -851,10 +851,8 @@
           accountWrite: state.sourceSnapshot?.completeness?.confirmed === true,
         },
         keyFor: (track) => {
-          const sourceRecording = window.MusicMatcher.sourceSearchGroupKey(track, state.sourceProvider);
           const query = exactIsrcQuery(track, state.targetProvider) || window.MusicMatcher.buildSearchQueries(track).primary.toLowerCase().replace(/\s+/g, ' ').trim();
-          const searchIdentity = sourceRecording ? `source:${sourceRecording}` : `query:${query}`;
-          return `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${searchIdentity}`;
+          return window.MusicMatcher.catalogSearchGroupKey(track, state.sourceProvider, state.targetProvider, $('#storefront').value, query);
         },
         signal: controller.signal,
         onProgress: async (group) => {

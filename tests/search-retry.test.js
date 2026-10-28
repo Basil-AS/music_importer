@@ -31,6 +31,34 @@ function loadEngine() {
   return { engine: context.window.MusicTransferEngine, delays };
 }
 
+function loadMatcher() {
+  const context = { window: {}, String, Set, Map, Array, Number, Math };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../demo/matcher.js'), 'utf8'), context);
+  return context.window.MusicMatcher;
+}
+
+test('bulk catalog engine issues one request for repeated source recording occurrences', async () => {
+  const { engine } = loadEngine();
+  const matcher = loadMatcher();
+  const first = { sourceId: 'same-zvuk-track', title: 'Song', artist: 'Artist', sourceCollectionId: 'favorites', sourcePosition: 3 };
+  const repeated = { sourceId: 'same-zvuk-track', title: 'Song (Remastered)', artist: 'Artist', sourceCollectionId: 'playlist-7', sourcePosition: 12 };
+  let requests = 0;
+  let progressGroup;
+  const results = await engine.searchMany({
+    id: 'spotify',
+    async searchTracks() { requests += 1; return [{ trackId: 'spotify:target-track' }]; },
+  }, [first, repeated], {
+    keyFor: (track) => matcher.catalogSearchGroupKey(track, 'zvuk', 'spotify', '', `${track.title} ${track.artist}`),
+    onProgress: (group) => { progressGroup = group; },
+  });
+
+  assert.equal(requests, 1);
+  assert.equal(results.length, 1);
+  assert.equal(progressGroup.tracks.length, 2);
+  assert.equal(JSON.stringify(progressGroup.tracks.map((track) => [track.sourceCollectionId, track.sourcePosition])), JSON.stringify([['favorites', 3], ['playlist-7', 12]]));
+  assert.equal(progressGroup.candidates[0].trackId, 'spotify:target-track');
+});
+
 test('catalog search retries transient 5xx responses with exponential backoff', async () => {
   const { engine, delays } = loadEngine();
   let attempts = 0;

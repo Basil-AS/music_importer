@@ -57,6 +57,15 @@
     return sourceRecordingKey(track, provider);
   }
 
+  function catalogSearchGroupKey(track, sourceProvider, targetProvider, storefront, fallbackQuery) {
+    const sourceKey = sourceSearchGroupKey(track, sourceProvider);
+    const fallback = String(fallbackQuery || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+    const identity = sourceKey ? `source:${sourceKey}` : `query:${fallback}`;
+    const target = String(targetProvider || '');
+    const region = target === 'apple-music' ? `:${String(storefront || '').toUpperCase()}` : '';
+    return `${target}${region}:${identity}`;
+  }
+
   function propagateSourceMatch(tracks, track, provider) {
     const key = sourceRecordingKey(track, provider);
     if (!key) return [track];
@@ -235,5 +244,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, propagateSourceMatch, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, catalogSearchGroupKey, propagateSourceMatch, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();
