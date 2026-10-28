@@ -92,6 +92,16 @@ test('source recording identity groups repeated library items by ISRC or stable 
   assert.equal(matcher.sourceRecordingKey({ title: 'Song', artist: 'Artist' }, 'spotify'), '');
 });
 
+test('bulk catalog search groups repeated source recordings and keeps edited queries separate', () => {
+  const matcher = loadMatcher();
+  const source = { sourceId: 'track-1', title: 'Song', artist: 'Artist' };
+  const duplicateWithDifferentMetadata = { sourceId: 'track-1', title: 'Song (Remastered)', artist: 'Artist' };
+  assert.equal(matcher.sourceSearchGroupKey(source, 'spotify'), matcher.sourceSearchGroupKey(duplicateWithDifferentMetadata, 'spotify'));
+  assert.equal(matcher.sourceSearchGroupKey(source, 'spotify'), 'spotify:id:track-1');
+  assert.equal(matcher.sourceSearchGroupKey({ ...source, manualQuery: true, query: 'edited search' }, 'spotify'), '');
+  assert.notEqual(matcher.sourceSearchGroupKey(source, 'spotify'), matcher.sourceSearchGroupKey(source, 'apple-music'));
+});
+
 test('a resolved recording match propagates without replacing playlist occurrence metadata', () => {
   const matcher = loadMatcher();
   const chosen = { sourceId: 'same-track', sourceCollectionId: 'likes', sourcePosition: 2, matches: [{ trackId: 'target' }], match: { trackId: 'target' }, matchConfidence: 0.98, selected: true };

@@ -850,7 +850,12 @@
           storefront: $('#storefront').value,
           accountWrite: state.sourceSnapshot?.completeness?.confirmed === true,
         },
-        keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${exactIsrcQuery(track, state.targetProvider) || window.MusicMatcher.buildSearchQueries(track).primary.toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        keyFor: (track) => {
+          const sourceRecording = window.MusicMatcher.sourceSearchGroupKey(track, state.sourceProvider);
+          const query = exactIsrcQuery(track, state.targetProvider) || window.MusicMatcher.buildSearchQueries(track).primary.toLowerCase().replace(/\s+/g, ' ').trim();
+          const searchIdentity = sourceRecording ? `source:${sourceRecording}` : `query:${query}`;
+          return `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${searchIdentity}`;
+        },
         signal: controller.signal,
         onProgress: async (group) => {
           for (const track of group.tracks) {

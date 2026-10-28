@@ -52,6 +52,11 @@
     return providerId ? `${service}:id:${providerId}` : '';
   }
 
+  function sourceSearchGroupKey(track, provider) {
+    if (track?.manualQuery) return '';
+    return sourceRecordingKey(track, provider);
+  }
+
   function propagateSourceMatch(tracks, track, provider) {
     const key = sourceRecordingKey(track, provider);
     if (!key) return [track];
@@ -230,5 +235,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, propagateSourceMatch, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, propagateSourceMatch, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();
