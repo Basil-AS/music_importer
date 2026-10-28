@@ -13,6 +13,8 @@
   let lastCollectionPageAt = 0;
   let lastCollectionHasMore = true;
   const captureAckWaiters = new Map();
+  const xhrRequestHeaders = new WeakMap();
+  const xhrRequestMethods = new WeakMap();
   let captureAckSequence = 0;
 
   if (startAtLoad) {
@@ -107,8 +109,35 @@
   }
 
   function operationFor(url, body) {
-    if (!url.includes('/api/v1/graphql')) return '';
+    let requestUrl;
+    try { requestUrl = new URL(url, location.origin); } catch { return ''; }
+    if (requestUrl.origin !== location.origin || !requestUrl.pathname.endsWith('/api/v1/graphql')) return '';
     return parseOperation(body);
+  }
+
+  function copyHeaders(...sources) {
+    const output = Object.create(null);
+    for (const source of sources) {
+      if (!source) continue;
+      if (typeof source.forEach === 'function') {
+        source.forEach((value, name) => { output[String(name).toLowerCase()] = String(value); });
+      } else if (Array.isArray(source)) {
+        for (const [name, value] of source) output[String(name).toLowerCase()] = String(value);
+      } else if (typeof source === 'object') {
+        for (const [name, value] of Object.entries(source)) output[String(name).toLowerCase()] = String(value);
+      }
+    }
+    return output;
+  }
+
+  function replayRequestOptions(input, init) {
+    const request = input instanceof Request ? input : null;
+    return {
+      ...(init || {}),
+      method: init?.method || request?.method || 'POST',
+      credentials: init?.credentials || request?.credentials || 'include',
+      headers: copyHeaders(request?.headers, init?.headers),
+    };
   }
 
   function sanitizeTrack(track) {
@@ -318,7 +347,7 @@
         if (operation.name) response.clone().json().then((payload) => {
           const reported = reportOperation(operation, payload);
           if (operation.name === 'getPaginatedCollection') void continueFavoriteScan(
-            url, init || {}, text, payload?.data?.paginatedCollection?.tracks, reported,
+            url, replayRequestOptions(input, init), text, payload?.data?.paginatedCollection?.tracks, reported,
           );
         }).catch(() => {});
       });
@@ -335,7 +364,17 @@
   const xhrSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
     this.__musicImporterUrl = String(url);
+    xhrRequestMethods.set(this, String(method || 'POST'));
+    xhrRequestHeaders.set(this, Object.create(null));
     return xhrOpen.call(this, method, url, ...rest);
+  };
+  const xhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+  if (xhrSetRequestHeader) XMLHttpRequest.prototype.setRequestHeader = function patchedSetRequestHeader(name, value) {
+    const headers = xhrRequestHeaders.get(this) || Object.create(null);
+    const key = String(name).toLowerCase();
+    headers[key] = headers[key] ? `${headers[key]}, ${String(value)}` : String(value);
+    xhrRequestHeaders.set(this, headers);
+    return xhrSetRequestHeader.call(this, name, value);
   };
   XMLHttpRequest.prototype.send = function patchedSend(body) {
     const url = this.__musicImporterUrl || '';
@@ -348,7 +387,10 @@
             const reported = reportOperation(parsed, payload);
             if (parsed.name === 'getPaginatedCollection') void continueFavoriteScan(
               this.responseURL || url,
-              { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' } },
+              {
+                method: xhrRequestMethods.get(this) || 'POST', credentials: 'include',
+                headers: copyHeaders({ Accept: 'application/json', 'Content-Type': 'application/json' }, xhrRequestHeaders.get(this)),
+              },
               typeof body === 'string' ? body : '',
               payload?.data?.paginatedCollection?.tracks,
               reported,

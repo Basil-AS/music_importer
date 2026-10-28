@@ -12,10 +12,35 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
   class TestDate extends Date { static now() { return now; } }
   const location = { origin: 'https://zvuk.com', pathname: path, href: `https://zvuk.com${path}?music_importer_capture=1` };
   const history = { state: {}, replaceState(_state, _title, url) { location.href = String(url); } };
+  class Request {
+    constructor(url, init = {}) {
+      this.url = String(url);
+      this.method = init.method || 'GET';
+      this.credentials = init.credentials || 'same-origin';
+      this.headers = new Headers(init.headers || {});
+      this.body = init.body || '';
+    }
+    clone() { return { text: async () => this.body }; }
+  }
   class XMLHttpRequest {
-    open() {}
-    send() {}
-    addEventListener() {}
+    constructor() { this.headers = {}; this.listeners = {}; }
+    open(method, url) { this.method = method; this.url = String(url); }
+    setRequestHeader(name, value) { this.headers[name] = value; }
+    async send(body) {
+      const request = {
+        url: this.url,
+        init: { method: this.method, credentials: 'include', headers: this.headers, body },
+        payload: JSON.parse(body || '{}'),
+      };
+      requests.push(request);
+      const result = respond(request);
+      const payload = result?.payload || result;
+      this.responseURL = this.url;
+      this.status = Number(result?.statusCode || 200);
+      this.responseText = JSON.stringify(payload);
+      for (const callback of this.listeners.load || []) callback.call(this);
+    }
+    addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); }
   }
   const window = {
     location,
@@ -28,8 +53,13 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
       }));
     },
     scrollTo() {},
-    fetch: async (url, init = {}) => {
-      const request = { url: String(url), init, payload: JSON.parse(init.body || '{}') };
+    fetch: async (input, init = {}) => {
+      const fromRequest = input instanceof Request ? input : null;
+      const effectiveInit = { ...(fromRequest ? {
+        method: fromRequest.method, credentials: fromRequest.credentials, headers: fromRequest.headers, body: fromRequest.body,
+      } : {}), ...init };
+      const url = fromRequest ? fromRequest.url : String(input);
+      const request = { url, init: effectiveInit, payload: JSON.parse(effectiveInit.body || '{}') };
       requests.push(request);
       const operation = request.payload.operationName;
       const defaultPayload = operation === 'getPaginatedCollection'
@@ -54,8 +84,8 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
       const readPayload = async () => {
         if (!result?.pendingBody) return payload;
         await new Promise((resolve, reject) => {
-          if (init.signal.aborted) reject(new Error('aborted'));
-          else init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          if (effectiveInit.signal.aborted) reject(new Error('aborted'));
+          else effectiveInit.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
         });
         return payload;
       };
@@ -63,7 +93,7 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
     },
   };
   const context = {
-    window, location, history, document: { documentElement: { scrollHeight: 100, clientHeight: 100, scrollTop: 0 }, querySelectorAll: () => [] }, XMLHttpRequest, URL, Request: class Request {}, Promise,
+    window, location, history, document: { documentElement: { scrollHeight: 100, clientHeight: 100, scrollTop: 0 }, querySelectorAll: () => [] }, XMLHttpRequest, URL, Request, Headers, Promise,
     Map, Set, String, Number, Array, Object, Error, JSON, Date: TestDate, RegExp, Math, AbortController,
     setTimeout: (callback, delay, ...args) => setTimeout(callback, delay * timerScale, ...args),
     clearTimeout, setInterval: (callback) => { scrollCallback = callback; return 1; }, clearInterval() {},
@@ -78,6 +108,22 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
         method: 'POST', body: JSON.stringify({ operationName, variables }),
       });
       await response.clone().json();
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+    async requestAsRequest(operationName, variables = {}, headers = {}) {
+      const input = new Request('https://zvuk.com/api/v1/graphql', {
+        method: 'POST', credentials: 'include', headers,
+        body: JSON.stringify({ operationName, variables }),
+      });
+      const response = await window.fetch(input);
+      await response.clone().json();
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+    async requestAsXhr(operationName, variables = {}, headers = {}) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://zvuk.com/api/v1/graphql');
+      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+      await xhr.send(JSON.stringify({ operationName, variables }));
       await new Promise((resolve) => setImmediate(resolve));
     },
     setPath(pathname) { location.pathname = pathname; },
@@ -136,6 +182,33 @@ test('Zvuk source reader follows observed favorite cursors without relying on sc
   assert.deepEqual(page.messages.filter((message) => message.type === 'favorites-scroll-end').length, 1);
   assert.deepEqual(page.requests.filter((request) => request.payload.operationName === 'getPaginatedCollection')
     .map((request) => request.payload.variables.after), [null, 'cursor-b', 'cursor-c']);
+});
+
+test('Zvuk cursor replay preserves page-local headers from Request and XHR without forwarding them', async () => {
+  for (const transport of ['request', 'xhr']) {
+    const page = makePage('/favorites', ({ payload, init }) => {
+      const cursor = payload.variables?.after || null;
+      if (cursor) assert.equal(init.headers.get?.('x-fixture-client') || init.headers['x-fixture-client'], 'page-session-header');
+      return { data: { paginatedCollection: { tracks: cursor
+        ? { items: [{ id: 'favorite-next', title: 'Next', artists: [{ title: 'Artist' }] }], page: { endCursor: null } }
+        : { items: [{ id: 'favorite-first', title: 'First', artists: [{ title: 'Artist' }] }], page: { endCursor: 'next-page' } },
+      } } };
+    });
+
+    if (transport === 'request') {
+      await page.requestAsRequest('getPaginatedCollection', { first: 100, after: null }, { 'X-Fixture-Client': 'page-session-header' });
+    } else {
+      await page.requestAsXhr('getPaginatedCollection', { first: 100, after: null }, { 'X-Fixture-Client': 'page-session-header' });
+    }
+    for (let attempt = 0; attempt < 20 && !page.messages.some((message) => message.type === 'favorites-scroll-end'); attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.deepEqual(page.messages.filter((message) => message.type === 'favorite-page')
+      .flatMap((message) => message.tracks.map((track) => track.id)), ['favorite-first', 'favorite-next']);
+    assert.ok(page.messages.some((message) => message.type === 'favorites-scroll-end'));
+    assert.ok(!JSON.stringify(page.messages).includes('page-session-header'));
+  }
 });
 
 test('Zvuk source reader exposes a failed cursor request when scroll fallback stalls', async () => {

@@ -75,3 +75,9 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Code review confirmed a likely failure mode in the Spotify source reader: it requested 1,000 Liked Songs / playlist rows, then advanced offsets by the requested page size even when the response contained fewer rows. A capped response could skip rows and prevent a complete snapshot.
 - Version `0.13.27` now requests 50 rows, validates returned page offsets when present, and advances by the actual number of returned rows for Liked Songs, playlist catalog, and playlist contents. A synthetic provider fixture caps pages at two rows and confirms offsets `0, 2, 4` plus complete IDs and playlist ordering.
 - Full fixture suite passes 204/204; extension app bundle check and JavaScript syntax check pass. This is fixture evidence only: no fresh Spotify session scan was possible in this turn, so the live stall cause and fix remain unconfirmed. No account writes were run.
+
+## 2026-10-28 — Zvuk cursor replay headers
+
+- Code review found that cursor pagination could lose the page's original request headers when the site uses `fetch(Request)` or XHR instead of `fetch(url, init)`. This could make the first favorites page visible while the replayed next page is rejected.
+- Version `0.13.29` copies request headers only inside the page-script closure for same-origin GraphQL cursor replay. Fetch Request method/credentials and XHR method/custom headers are preserved. Header values are not posted to the extension, stored, or included in diagnostics.
+- Fixture tests exercise both Request and XHR replay with a required synthetic header, verify the next favorite page completes, and assert the header never appears in bridge messages. This is not live evidence; the Zvuk session still needs a read-only retest after extension reload.
