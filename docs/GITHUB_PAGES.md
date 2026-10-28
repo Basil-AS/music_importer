@@ -10,7 +10,7 @@ No public deployment has been triggered from this feature branch. GitHub Pages m
 
 ## Local alternative
 
-The app can still run locally with `python3 -m http.server 8001 --bind 127.0.0.1 --directory demo`. The same extension supports this local origin. The local path avoids relying on Pages availability but requires Python and a running server.
+The extension also contains its own app page, which opens from the toolbar icon and requires neither Pages nor the local Python server. For development, the web app can still run locally with `python3 -m http.server 8001 --bind 127.0.0.1 --directory demo`; the local page requires the optional localhost permission.
 
 ## Limits
 

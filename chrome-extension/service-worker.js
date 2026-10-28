@@ -10,6 +10,54 @@ const APP_ORIGINS = new Set([
   'http://localhost:8000', 'http://localhost:8001',
   'https://basil-as.github.io',
 ]);
+const extensionAppUrl = chrome.runtime.getURL?.('app/index.html') || '';
+const extensionAppPorts = new Set();
+
+function isAppSender(sender) {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (extensionAppUrl && sender.url === extensionAppUrl) return true;
+  try {
+    const url = new URL(sender.url || '');
+    if (!APP_ORIGINS.has(url.origin)) return false;
+    if (url.origin === 'https://basil-as.github.io') return ['/music_importer/', '/music_importer/index.html'].includes(url.pathname);
+    return url.pathname === '/';
+  }
+  catch { return false; }
+}
+
+async function forwardTransferProgress(provider, requestId, progress) {
+  const extensionMessage = { type: 'transfer-progress', provider, requestId: String(requestId || ''), progress: progress || null };
+  for (const port of extensionAppPorts) {
+    try { port.postMessage(extensionMessage); } catch { extensionAppPorts.delete(port); }
+  }
+  const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS }).catch(() => []);
+  await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
+    type: `music-importer:${provider}-progress`,
+    requestId: extensionMessage.requestId,
+    progress: extensionMessage.progress,
+  }).catch(() => null)));
+}
+
+chrome.runtime.onConnect?.addListener((port) => {
+  if (port.name !== 'music-importer-app') return;
+  if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== extensionAppUrl) {
+    port.disconnect();
+    return;
+  }
+  extensionAppPorts.add(port);
+  port.onDisconnect.addListener(() => extensionAppPorts.delete(port));
+});
+
+chrome.action?.onClicked?.addListener(async () => {
+  if (!extensionAppUrl) return;
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find((tab) => tab.url === extensionAppUrl);
+  if (existing?.id) {
+    await chrome.tabs.update(existing.id, { active: true });
+    return;
+  }
+  await chrome.tabs.create({ url: extensionAppUrl });
+});
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 
@@ -360,20 +408,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
-      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
-        type: 'music-importer:zvuk-progress',
-        requestId: String(message.requestId || ''),
-        progress: message.progress || null,
-      }).catch(() => null)));
+      await forwardTransferProgress('zvuk', message.requestId, message.progress);
       sendResponse({ ok: true });
       return;
     }
 
     if (message?.type === 'music-importer:zvuk-command') {
-      let origin = '';
-      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
+      if (!isAppSender(sender)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -422,20 +463,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
-      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
-        type: 'music-importer:spotify-progress',
-        requestId: String(message.requestId || ''),
-        progress: message.progress || null,
-      }).catch(() => null)));
+      await forwardTransferProgress('spotify', message.requestId, message.progress);
       sendResponse({ ok: true });
       return;
     }
 
     if (message?.type === 'music-importer:spotify-command') {
-      let origin = '';
-      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
+      if (!isAppSender(sender)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -483,20 +517,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
-      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
-        type: 'music-importer:apple-progress',
-        requestId: String(message.requestId || ''),
-        progress: message.progress,
-      }).catch(() => null)));
+      await forwardTransferProgress('apple', message.requestId, message.progress);
       sendResponse({ ok: true });
       return;
     }
 
     if (message?.type === 'music-importer:apple-command') {
-      let origin = '';
-      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
+      if (!isAppSender(sender)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -541,20 +568,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS });
-      await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
-        type: 'music-importer:yandex-progress',
-        requestId: String(message.requestId || ''),
-        progress: message.progress,
-      }).catch(() => null)));
+      await forwardTransferProgress('yandex', message.requestId, message.progress);
       sendResponse({ ok: true });
       return;
     }
 
     if (message?.type === 'music-importer:yandex-command') {
-      let origin = '';
-      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
+      if (!isAppSender(sender)) {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
@@ -601,9 +621,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === 'music-importer:get-all-libraries') {
-      let origin = '';
-      try { origin = new URL(sender.url || '').origin; } catch { /* Invalid sender URL. */ }
-      if (sender.id !== chrome.runtime.id || !APP_ORIGINS.has(origin)) {
+      if (!isAppSender(sender)) {
         sendResponse({ error: 'Команда доступна только локальному приложению.' });
         return;
       }

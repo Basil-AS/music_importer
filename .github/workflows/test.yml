@@ -25,5 +25,7 @@ jobs:
           done
       - name: Validate extension manifest
         run: node -e "JSON.parse(require('node:fs').readFileSync('chrome-extension/manifest.json', 'utf8'))"
+      - name: Check extension app bundle
+        run: node scripts/build-extension-app.mjs --check
       - name: Run fixtures
         run: node --test tests/*.test.js

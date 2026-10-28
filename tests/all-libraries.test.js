@@ -25,9 +25,19 @@ function makeProviderPayload(service, count = 1) {
 function bootWorker(storageState, tabs = []) {
   const messages = [];
   const updates = [];
+  const portMessages = [];
+  const createdTabs = [];
   let runtimeListener;
+  let connectListener;
+  let actionListener;
   const chrome = {
-    runtime: { id: 'fixture-extension', onMessage: { addListener(listener) { runtimeListener = listener; } } },
+    runtime: {
+      id: 'fixture-extension',
+      getURL(path) { return `chrome-extension://fixture-extension/${path}`; },
+      onMessage: { addListener(listener) { runtimeListener = listener; } },
+      onConnect: { addListener(listener) { connectListener = listener; } },
+    },
+    action: { onClicked: { addListener(listener) { actionListener = listener; } } },
     storage: { local: {
       setAccessLevel: async () => {},
       async get(key) { return { [key]: storageState[key] }; },
@@ -48,6 +58,7 @@ function bootWorker(storageState, tabs = []) {
         const tab = tabs.find((candidate) => candidate.id === tabId);
         if (tab && update.url) tab.url = update.url;
       },
+      async create(createProperties) { createdTabs.push(createProperties); return { id: 99, ...createProperties }; },
       async sendMessage(tabId, message) { messages.push({ tabId, message }); return { ok: true }; },
     },
   };
@@ -57,9 +68,14 @@ function bootWorker(storageState, tabs = []) {
   return {
     messages,
     updates,
+    createdTabs,
+    clickAction() { return actionListener(); },
     call(message) {
+      return this.callFrom(message, 'http://127.0.0.1:8001/');
+    },
+    callFrom(message, url) {
       return new Promise((resolve) => {
-        const keptOpen = runtimeListener(message, { id: 'fixture-extension', url: 'http://127.0.0.1:8001/' }, resolve);
+        const keptOpen = runtimeListener(message, { id: 'fixture-extension', url }, resolve);
         assert.equal(keptOpen, true);
       });
     },
@@ -70,6 +86,18 @@ function bootWorker(storageState, tabs = []) {
         runtimeListener(message, { id: 'fixture-extension', tab, url: tab.url }, resolve);
       });
     },
+    connectApp(url = 'chrome-extension://fixture-extension/app/index.html') {
+      const port = {
+        name: 'music-importer-app',
+        sender: { id: 'fixture-extension', url },
+        onDisconnect: { addListener(listener) { port.onDisconnectListener = listener; } },
+        postMessage(message) { portMessages.push(message); },
+        disconnect() { port.disconnected = true; },
+      };
+      connectListener(port);
+      return port;
+    },
+    portMessages,
   };
 }
 
@@ -103,6 +131,60 @@ test('one-click library scan starts readers in every open provider tab', async (
     'apple:start-library-scan', 'spotify:start-library-scan', 'yandex:start-library-scan',
   ]);
   assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url.includes('/favorites?music_importer_capture=1')));
+});
+
+test('extension-hosted app can start a library scan without localhost origin permission', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);
+  const response = await app.callFrom({ type: 'music-importer:get-all-libraries', refresh: true }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.pending, true);
+  assert.equal(response.statuses['apple-music'].status, 'scanning');
+  assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'apple:start-library-scan'));
+});
+
+test('extension-hosted app can send a catalog command to a signed-in service tab', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);
+  const response = await app.callFrom({
+    type: 'music-importer:apple-command',
+    requestId: 'fixture-request-0001',
+    action: 'search-tracks',
+    query: 'isrc:USABC1234567',
+    storefront: 'AE',
+  }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.ok, true);
+  assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'apple:command'));
+});
+
+test('extension app receives transfer progress through its private runtime port', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);
+  app.connectApp();
+  await app.pageMessage({ type: 'apple:transfer-progress', requestId: 'fixture-request-0001', progress: { message: 'Проверяем запись' } }, 4);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.portMessages)), [{
+    type: 'transfer-progress',
+    provider: 'apple',
+    requestId: 'fixture-request-0001',
+    progress: { message: 'Проверяем запись' },
+  }]);
+});
+
+test('extension worker rejects app commands from unrelated extension pages', async () => {
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() });
+  const response = await app.callFrom({ type: 'music-importer:get-all-libraries', refresh: true }, 'chrome-extension://fixture-extension/popup.html');
+  assert.match(response.error, /только локальному приложению/i);
+});
+
+test('extension worker only accepts the project GitHub Pages app paths', async () => {
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() });
+  const response = await app.callFrom({ type: 'music-importer:get-all-libraries', refresh: true }, 'https://basil-as.github.io/another-project/');
+  assert.match(response.error, /только локальному приложению/i);
+});
+
+test('clicking the extension icon opens its full app page', async () => {
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() });
+  await app.clickAction();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), [{ url: 'chrome-extension://fixture-extension/app/index.html' }]);
 });
 
 test('one-click library scan returns all complete snapshots and marks missing sessions', async () => {

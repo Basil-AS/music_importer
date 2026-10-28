@@ -52,7 +52,7 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   const appBridge = manifest.content_scripts.find((script) => script.js.includes('local-app-bridge.js'));
   assert.ok(appBridge.matches.includes('https://basil-as.github.io/music_importer/*'));
   assert.ok(manifest.host_permissions.includes('https://basil-as.github.io/*'));
-  assert.equal(manifest.version, '0.12.0');
+  assert.equal(manifest.version, '0.13.0');
 
   const workflow = fs.readFileSync(require.resolve('../.github/workflows/deploy-pages.yml'), 'utf8');
   assert.match(workflow, /branches:\s*\[master\]/);

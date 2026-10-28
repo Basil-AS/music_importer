@@ -6,6 +6,7 @@ const providers = [
   { id: 'yandex-music', statusId: '#yandexStatus', origin: 'https://music.yandex.ru' },
   { id: 'zvuk', statusId: '#zvukStatus', origin: 'https://zvuk.com' },
 ];
+const extensionAppUrl = chrome.runtime.getURL('app/index.html');
 let appTargetTabId = null;
 let appPermissionOrigin = null;
 
@@ -30,11 +31,13 @@ async function renderConnections() {
   const appTabs = tabs.filter((candidate) => {
     try {
       const url = new URL(candidate.url || '');
-      return ['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001', 'https://basil-as.github.io'].includes(url.origin)
-        && (url.pathname === '/' || url.pathname === '/music_importer/' || url.pathname === '/music_importer/index.html');
+      return candidate.url === extensionAppUrl
+        || (['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001', 'https://basil-as.github.io'].includes(url.origin)
+          && (url.pathname === '/' || url.pathname === '/music_importer/' || url.pathname === '/music_importer/index.html'));
     } catch { return false; }
   });
   const appPriority = (candidate) => {
+    if (candidate.url === extensionAppUrl) return 5;
     const url = new URL(candidate.url);
     if (url.origin === 'http://127.0.0.1:8001' || url.origin === 'http://localhost:8001') return 4;
     if (url.origin === 'https://basil-as.github.io') return 3;
@@ -52,6 +55,12 @@ async function renderConnections() {
   }
   const appUrl = new URL(appTab.url);
   appPermissionOrigin = localPermissionOrigin(appUrl);
+  if (appTab.url === extensionAppUrl) {
+    $('#appConnectionStatus').textContent = 'Music Importer запущен из расширения';
+    $('#appConnectionHelp').textContent = 'Открытые авторизованные вкладки будут проверены автоматически.';
+    $('#connectAppBtn').hidden = true;
+    return;
+  }
   try {
     const health = await chrome.tabs.sendMessage(appTab.id, { type: 'music-importer:bridge-health' });
     $('#appConnectionStatus').textContent = health?.ok ? `Приложение подключено · расширение ${health.version}` : 'Страница найдена, расширение не ответило';
@@ -145,14 +154,9 @@ async function render() {
 
 $('#openAppBtn').addEventListener('click', async () => {
   const tabs = await chrome.tabs.query({});
-  const appTab = tabs.find((candidate) => {
-    try {
-      const url = new URL(candidate.url || '');
-      return ['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(url.origin) && url.pathname === '/';
-    } catch { return false; }
-  });
+  const appTab = tabs.find((candidate) => candidate.url === extensionAppUrl);
   if (appTab?.id) await chrome.tabs.update(appTab.id, { active: true });
-  else await chrome.tabs.create({ url: 'http://127.0.0.1:8001/' });
+  else await chrome.tabs.create({ url: extensionAppUrl });
 });
 
 $('#startBtn').addEventListener('click', async () => {

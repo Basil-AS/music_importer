@@ -10,7 +10,9 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
+  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
+  const extensionApp = location.protocol === 'chrome-extension:' && typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
+  const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
   let extensionCheckInProgress = false;
   let activeSearchController = null;
@@ -30,6 +32,14 @@
   function checkLocalExtension() {
     const button = $('#extensionImportBtn');
     const status = $('#extensionStatus');
+    if (extensionApp) {
+      state.extensionAvailable = true;
+      status.textContent = 'Music Importer запущен в Chrome. Проверяю открытые аккаунты…';
+      button.textContent = 'Подключаем аккаунты…';
+      button.disabled = false;
+      void scanOpenAccounts(true);
+      return;
+    }
     if (extensionCheckInProgress || state.extensionAvailable) return;
     if (!window.crypto?.randomUUID) {
       status.textContent = 'Этот браузер не поддерживает проверку локального расширения. Используйте Chrome.';
@@ -249,6 +259,16 @@
         button.disabled = true;
         button.textContent = 'Нет подключения';
         button.title = status.message || '';
+      } else if (status?.status === 'failed') {
+        label.textContent = status.message || 'Не удалось прочитать библиотеку';
+        label.classList.remove('connected');
+        button.disabled = true;
+        button.textContent = 'Ошибка чтения';
+      } else {
+        label.textContent = 'Откройте сервис и войдите в аккаунт';
+        label.classList.remove('connected');
+        button.disabled = true;
+        button.textContent = 'Нет библиотеки';
       }
     });
   }
@@ -256,7 +276,7 @@
   function selectProviderSnapshot(provider) {
     const payload = state.librarySnapshots[provider];
     if (!payload) {
-      toast(`Сначала откройте ${sourceLabels[provider] || provider} в Chrome и нажмите «Сканировать открытые аккаунты»`);
+      toast(`Сначала откройте ${sourceLabels[provider] || provider} в Chrome и обновите список аккаунтов`);
       return;
     }
     state.sourceProvider = provider;
@@ -268,6 +288,7 @@
       button.disabled = false;
       button.textContent = active ? '✓ Источник' : 'Выбрать источник';
     });
+    $('[aria-labelledby="source-heading"] .count').textContent = `1 из ${$$('.source').length}`;
     const tracks = normalizeJSON(payload);
     loadTracks(tracks, `${state.source} · библиотека из расширения`, {
       provider,
@@ -543,6 +564,38 @@
   function requestExtensionCommand(action, details = {}, provider = 'yandex', onProgress = null) {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает защищённый запрос к расширению.'));
     const requestId = window.crypto.randomUUID();
+    if (extensionApp) {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          extensionAppPort.onMessage.removeListener(onProgressMessage);
+          reject(new Error('Сервис не ответил вовремя. Перезагрузите его вкладку и повторите.'));
+        }, action === 'execute-transfer' ? 30 * 60 * 1000 : 45000);
+        const onProgressMessage = (message) => {
+          if (message?.type !== 'transfer-progress' || message.provider !== provider || message.requestId !== requestId) return;
+          if (message.progress?.message) {
+            $('#importBtn').textContent = message.progress.message;
+            $('#searchStatus').textContent = message.progress.message;
+          }
+          if (typeof onProgress === 'function') void onProgress(message.progress || {});
+        };
+        extensionAppPort.onMessage.addListener(onProgressMessage);
+        chrome.runtime.sendMessage({
+          type: `music-importer:${provider}-command`,
+          requestId,
+          action,
+          ...details,
+        }).then((response) => {
+          clearTimeout(timeout);
+          extensionAppPort.onMessage.removeListener(onProgressMessage);
+          if (response?.ok === false && response?.error) reject(new Error(response.error));
+          else resolve(response || { ok: false, error: 'Сервис не вернул результат.' });
+        }, (error) => {
+          clearTimeout(timeout);
+          extensionAppPort.onMessage.removeListener(onProgressMessage);
+          reject(error);
+        });
+      });
+    }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         window.removeEventListener('message', onMessage);
@@ -906,24 +959,10 @@
       selectProviderSnapshot(provider);
       return;
     }
-    state.source = card.dataset.source;
-    state.sourceProvider = provider || 'file';
-    $$('.source').forEach((item) => {
-      const active = item === card;
-      item.classList.toggle('selected', active);
-      const provider = item.dataset.provider;
-      item.querySelector('.source-status').textContent = active
-        ? 'Источник выбран · снимка библиотеки пока нет'
-        : (state.librarySnapshots[provider] ? 'Библиотека подключена' : 'Нет снимка библиотеки');
-      item.querySelector('.source-status').classList.toggle('connected', Boolean(state.librarySnapshots[provider]));
-      item.querySelector('.connect').disabled = active;
-      item.querySelector('.connect').textContent = active ? '✓ Выбрано' : 'Выбрать';
-    });
-    $('.count').textContent = `1 из ${$$('.source').length}`;
-    toast(`${state.source}: выбран как источник`);
+    toast(`Сначала откройте ${sourceLabels[provider] || provider} в Chrome и подключите его библиотеку`);
   }));
 
-  $('#loadBtn').addEventListener('click', () => loadTracks(demoTracks, `${state.source} · пример`));
+  $('#loadBtn').addEventListener('click', () => loadTracks(demoTracks, 'Демо-данные', { provider: 'file' }));
   $('#fileInput').addEventListener('change', async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -959,6 +998,10 @@
   function requestAllLibraries(refresh = false) {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает запрос к локальному расширению.'));
     const requestId = window.crypto.randomUUID();
+    if (extensionApp) {
+      return chrome.runtime.sendMessage({ type: 'music-importer:get-all-libraries', requestId, refresh })
+        .catch(() => ({ error: 'Не удалось связаться с расширением. Перезапустите Music Importer из панели Chrome.' }));
+    }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         window.removeEventListener('message', onMessage);
