@@ -353,7 +353,7 @@ async function repairStaleProviderTabs() {
   await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
     try {
       const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
-      if (health?.ok === true && health.bridgeProtocol === 2) return;
+      if (health?.ok === true && health.bridgeProtocol === 3) return;
     } catch {
       // A stale content script loses its extension context after the worker update.
     }
@@ -366,10 +366,10 @@ async function ensureCurrentProviderBridge(tabId) {
   try {
     health = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
   } catch { /* The tab may still host scripts from an earlier extension version. */ }
-  if (health?.ok === true && health.bridgeProtocol === 2) return;
+  if (health?.ok === true && health.bridgeProtocol === 3) return;
   await reloadTabForReader(tabId);
   const reloadedHealth = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
-  if (reloadedHealth?.ok !== true || reloadedHealth.bridgeProtocol !== 2) {
+  if (reloadedHealth?.ok !== true || reloadedHealth.bridgeProtocol !== 3) {
     throw new Error('Вкладка музыкального сервиса не подключилась после обновления.');
   }
 }

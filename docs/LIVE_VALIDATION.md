@@ -1,5 +1,12 @@
 # Live validation log
 
+## 2026-10-28 — stale Apple bridge recovery
+
+- Version `0.13.43` upgrades all provider bridge health replies to protocol 3. Tabs still running a protocol 2 content script now fail the health check and are reloaded automatically on extension install/update or before the next read/write command.
+- The supplied Apple stack contains a direct `chrome.runtime.sendMessage(...).then(...)` call, while the current bridge wraps runtime access in `try/catch` and absorbs invalid-context rejections. That stack therefore belongs to a stale injected script or an older retained Chrome error entry; an already-injected invalid script cannot repair itself because its extension runtime is gone.
+- `http://127.0.0.1:8001/` is a Python static server serving `music_importer-mvp/demo/`, not the extension app or a backend. The in-app browser does not share the separately installed Chrome extension. Open the extension UI from Chrome's Music Importer button for a connected session.
+- Each provider needs a page tab for its existing signed-in session while reading/searching/writing; the extension opens missing tabs in the background. Zvuk reads favorites, then playlist catalog and each playlist's paginated tracks, preserving order and verifying counts. No cookies or tokens are exported to the app.
+
 ## 2026-10-28 — mobile layout verification
 
 - Version `0.13.42` changes the service-card grid to two columns on mobile and stacks the hero artwork below copy at widths up to 360 px. Long source-card status labels no longer widen the grid.
