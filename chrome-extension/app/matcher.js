@@ -170,7 +170,8 @@
     const sourceCredits = names(sourceTitle);
     const targetCredits = names(targetTitle);
     if (!sourceCredits.length || !targetCredits.length) return false;
-    return !sourceCredits.some((sourceName) => targetCredits.some((targetName) => similarity(sourceName, targetName) >= 0.82));
+    const contains = (namesToFind, credits) => namesToFind.every((name) => credits.some((credit) => similarity(name, credit) >= 0.82));
+    return !contains(sourceCredits, targetCredits) || !contains(targetCredits, sourceCredits);
   }
 
   function titleSearchKeys(value) {
