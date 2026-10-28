@@ -25,3 +25,9 @@ This log records connector behavior observed with an unpacked extension and the 
 - No target search, account write, or read-back was run. Counts, track names, IDs, cookies, and session headers are intentionally not recorded.
 
 Fixture coverage remains separate from this live observation. None of the 12 source-to-target routes has yet completed a live write and read-back.
+
+## 2026-10-28 — parallel scan state audit
+
+- Code review found that simultaneous Spotify, Apple Music, and Yandex progress/snapshot messages each performed an independent read-modify-write of the same Chrome storage record. A later write could therefore erase another provider's just-written progress or completed snapshot.
+- Provider-state mutations are now serialized, including scan start, stale-scan failure, scan errors, progress, and completed snapshots. A concurrent three-provider snapshot fixture confirms that all three results survive.
+- This is a confirmed storage race in the implementation, but it is not yet proven to be the cause of the observed Spotify stall. The changed extension still needs a live reload and another read-only multi-service scan; no account writes were made.

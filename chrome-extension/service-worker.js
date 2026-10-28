@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
 const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
+let providerStateMutationQueue = Promise.resolve();
 const APP_TAB_URLS = [
   'http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*',
   'http://localhost:8000/*', 'http://localhost:8001/*',
@@ -306,6 +307,17 @@ async function writeProviderState(state) {
   await chrome.storage.local.set({ [PROVIDER_STORAGE_KEY]: state });
 }
 
+function mutateProviderState(mutate) {
+  const update = providerStateMutationQueue.then(async () => {
+    const state = await readProviderState();
+    const result = await mutate(state);
+    await writeProviderState(state);
+    return { state, result };
+  });
+  providerStateMutationQueue = update.then(() => undefined, () => undefined);
+  return update;
+}
+
 async function reloadTabForReader(tabId, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     let sawLoading = false;
@@ -348,17 +360,28 @@ async function requestProviderLibrary(provider, refresh) {
   };
   const providerConfig = providers[provider];
   if (!providerConfig) return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
-  const state = await readProviderState();
+  let state = await readProviderState();
   let scan = state.scans[provider];
   const lastUpdate = Date.parse(scan?.updatedAt || scan?.startedAt || '');
-  const lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+  let lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
   if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > PROVIDER_SCAN_STALE_AFTER_MS) {
-    scan = { status: 'failed', message: 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.' };
-    state.scans[provider] = scan;
-    await writeProviderState(state);
-    if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message };
-    return { error: scan.message };
+    const staleMessage = 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.';
+    const update = await mutateProviderState((current) => {
+      const latest = current.scans[provider];
+      const latestAt = Date.parse(latest?.updatedAt || latest?.startedAt || '');
+      if (latest?.status !== 'reading' || !Number.isFinite(latestAt) || Date.now() - latestAt <= PROVIDER_SCAN_STALE_AFTER_MS) return false;
+      current.scans[provider] = { status: 'failed', message: staleMessage, updatedAt: new Date().toISOString() };
+      return true;
+    });
+    state = update.state;
+    scan = state.scans[provider];
+    lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+      .find((snapshot) => snapshot?.completeness?.confirmed === true);
+    if (update.result) {
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: staleMessage };
+      return { error: staleMessage };
+    }
   }
   if (refresh && scan?.status !== 'reading') {
     const tabs = await chrome.tabs.query({ url: providerConfig.tabPattern });
@@ -368,17 +391,36 @@ async function requestProviderLibrary(provider, refresh) {
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Откройте ${providerName}, чтобы обновить сохранённый снимок.` };
       return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
     }
-    state.previousSnapshots[provider] = lastGoodSnapshot || null;
-    state.snapshots[provider] = null;
-    state.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
-    await writeProviderState(state);
+    const start = await mutateProviderState((current) => {
+      if (current.scans[provider]?.status === 'reading') return false;
+      const currentLastGood = [current.snapshots[provider], current.previousSnapshots[provider]]
+        .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      current.previousSnapshots[provider] = currentLastGood || null;
+      current.snapshots[provider] = null;
+      current.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
+      return true;
+    });
+    state = start.state;
+    if (!start.result) {
+      const currentSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+        .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      return { pending: true, progress: state.scans[provider]?.message || `Читаем ${providerName}…`, payload: currentSnapshot, cached: Boolean(currentSnapshot), stale: Boolean(currentSnapshot) };
+    }
     try {
       await startProviderLibraryScan(tab.id, providerConfig.startMessage);
     } catch {
-      state.scans[provider] = { status: 'failed', message: `Не удалось подключить сборщик к ${providerName}. Проверьте вход и повторите сбор.` };
-      await writeProviderState(state);
-      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scans[provider].message };
-      return { error: state.scans[provider].message };
+      const failureMessage = `Не удалось подключить сборщик к ${providerName}. Проверьте вход и повторите сбор.`;
+      const failed = await mutateProviderState((current) => {
+        if (current.scans[provider]?.status === 'reading') {
+          current.scans[provider] = { status: 'failed', message: failureMessage, updatedAt: new Date().toISOString() };
+        }
+        return current.scans[provider];
+      });
+      state = failed.state;
+      lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+        .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: failed.result.message };
+      return { error: failed.result.message };
     }
     return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   }
@@ -824,38 +866,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false });
         return;
       }
-      const state = await readProviderState();
-      if (message.type.endsWith(':scan-progress')) {
-        state.scans[provider] = { status: 'reading', message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
-      } else if (message.type.endsWith(':scan-error')) {
-        state.scans[provider] = { status: 'failed', message: String(message.error || `Не удалось прочитать ${provider}.`).slice(0, 500), updatedAt: new Date().toISOString() };
-      } else {
-        const payload = message.payload;
-        const valid = payload?.service === provider
-          && payload?.collection?.type === 'library'
-          && payload?.completeness?.confirmed === true
-          && payload?.completeness?.favoritesConfirmed === true
-          && payload?.completeness?.catalogConfirmed === true
-          && (provider !== 'apple-music' || payload?.completeness?.librarySongsConfirmed === true)
-          && (provider !== 'yandex-music' || payload?.completeness?.playlistCatalogKindsConfirmed === true)
-          && payload?.completeness?.playlistItemsConfirmed === true
-          && Array.isArray(payload?.tracks)
-          && payload?.completeness?.favoritesCount === payload.tracks.length
-          && Array.isArray(payload?.playlists)
-          && payload?.completeness?.playlistItemsTotal === payload.playlists.length
-          && payload.playlists.every((playlist) => playlist.complete === true && Array.isArray(playlist.tracks)
-            && playlist.trackCount === playlist.tracks.length
-            && playlist.tracks.every((track, position) => String(track.id || track.providerId || '') !== ''
-              && (track.position === undefined || track.position === position)));
-        if (!valid) {
-          state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
+      await mutateProviderState((state) => {
+        if (message.type.endsWith(':scan-progress')) {
+          state.scans[provider] = { status: 'reading', message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
+        } else if (message.type.endsWith(':scan-error')) {
+          state.scans[provider] = { status: 'failed', message: String(message.error || `Не удалось прочитать ${provider}.`).slice(0, 500), updatedAt: new Date().toISOString() };
         } else {
-          state.snapshots[provider] = payload;
-          delete state.previousSnapshots[provider];
-          state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
+          const payload = message.payload;
+          const valid = payload?.service === provider
+            && payload?.collection?.type === 'library'
+            && payload?.completeness?.confirmed === true
+            && payload?.completeness?.favoritesConfirmed === true
+            && payload?.completeness?.catalogConfirmed === true
+            && (provider !== 'apple-music' || payload?.completeness?.librarySongsConfirmed === true)
+            && (provider !== 'yandex-music' || payload?.completeness?.playlistCatalogKindsConfirmed === true)
+            && payload?.completeness?.playlistItemsConfirmed === true
+            && Array.isArray(payload?.tracks)
+            && payload?.completeness?.favoritesCount === payload.tracks.length
+            && Array.isArray(payload?.playlists)
+            && payload?.completeness?.playlistItemsTotal === payload.playlists.length
+            && payload.playlists.every((playlist) => playlist.complete === true && Array.isArray(playlist.tracks)
+              && playlist.trackCount === playlist.tracks.length
+              && playlist.tracks.every((track, position) => String(track.id || track.providerId || '') !== ''
+                && (track.position === undefined || track.position === position)));
+          if (!valid) {
+            state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
+          } else {
+            state.snapshots[provider] = payload;
+            delete state.previousSnapshots[provider];
+            state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
+          }
         }
-      }
-      await writeProviderState(state);
+      });
       sendResponse({ ok: true });
       return;
     }

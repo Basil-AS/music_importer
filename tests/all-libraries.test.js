@@ -45,7 +45,10 @@ function bootWorker(storageState, tabs = [], options = {}) {
     action: { onClicked: { addListener(listener) { actionListener = listener; } } },
     storage: { local: {
       setAccessLevel: async () => {},
-      async get(key) { return { [key]: storageState[key] }; },
+      async get(key) {
+        const value = storageState[key];
+        return { [key]: options.cloneStorageReads ? structuredClone(value) : value };
+      },
       async set(value) { Object.assign(storageState, value); },
       async remove(keys) { for (const key of keys) delete storageState[key]; },
     } },
@@ -268,6 +271,25 @@ test('selective library refresh rescans only the requested provider', async () =
   assert.equal(response.statuses['apple-music'].status, 'scanning');
   assert.deepEqual(app.messages.map((entry) => entry.message.type), ['apple:start-library-scan']);
   assert.ok(!app.updates.some((entry) => entry.update.url?.includes('/favorites?music_importer_capture=1')));
+});
+
+test('concurrent provider snapshots merge instead of overwriting each other', async () => {
+  const tabs = [
+    { id: 1, url: 'https://open.spotify.com/collection/tracks' },
+    { id: 2, url: 'https://music.yandex.ru/users/me/playlists' },
+    { id: 3, url: 'https://music.apple.com/us/library' },
+  ];
+  const app = bootWorker({}, tabs, { cloneStorageReads: true });
+
+  await Promise.all([
+    app.pageMessage({ type: 'spotify:library-snapshot', payload: makeProviderPayload('spotify') }, 1),
+    app.pageMessage({ type: 'yandex:library-snapshot', payload: makeProviderPayload('yandex-music') }, 2),
+    app.pageMessage({ type: 'apple:library-snapshot', payload: makeProviderPayload('apple-music') }, 3),
+  ]);
+
+  assert.deepEqual(Object.keys(app.storageState[PROVIDER_KEY].snapshots).sort(), ['apple-music', 'spotify', 'yandex-music']);
+  assert.deepEqual(Object.keys(app.storageState[PROVIDER_KEY].scans).sort(), ['apple-music', 'spotify', 'yandex-music']);
+  assert.ok(Object.values(app.storageState[PROVIDER_KEY].scans).every((scan) => scan.status === 'complete'));
 });
 
 test('selective library refresh rejects unknown provider IDs', async () => {
