@@ -146,6 +146,16 @@ test('matching keeps no-ISRC duplicates for review when duration or ISRCs confli
 test('source recording identity groups repeated library items by ISRC or stable provider ID', () => {
   const matcher = loadMatcher();
   assert.equal(matcher.sourceRecordingKey({ isrc: 'US-ABC-12-34567', sourceId: 'one' }, 'spotify'), 'spotify:isrc:USABC1234567');
+  assert.notEqual(
+    matcher.sourceRecordingKey({ isrc: 'USABC1234567', title: 'Song (Live)' }, 'spotify'),
+    matcher.sourceRecordingKey({ isrc: 'USABC1234567', title: 'Song' }, 'spotify'),
+    'same ISRC must not merge library entries with conflicting recording versions',
+  );
+  assert.equal(
+    matcher.sourceRecordingKey({ isrc: 'USABC1234567', title: 'Song (Live)' }, 'spotify'),
+    matcher.sourceRecordingKey({ isrc: 'USABC1234567', title: 'Song (Live)', album: 'Deluxe' }, 'spotify'),
+    'edition labels without a recording-version marker should still share an ISRC group',
+  );
   assert.equal(matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'spotify'), 'spotify:id:same-track');
   assert.notEqual(matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'spotify'), matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'apple-music'));
   assert.equal(matcher.sourceRecordingKey({ title: 'Song', artist: 'Artist' }, 'spotify'), '');
@@ -178,4 +188,14 @@ test('a resolved recording match propagates without replacing playlist occurrenc
   assert.equal(duplicate.sourcePosition, 4);
   assert.equal(unrelated.match, undefined);
   assert.equal(unrelated.selected, false);
+});
+
+test('a match does not propagate between same-ISRC source tracks with conflicting versions', () => {
+  const matcher = loadMatcher();
+  const live = { sourceId: 'source-live', isrc: 'USABC1234567', title: 'Song (Live)', match: { trackId: 'target-live' }, selected: true };
+  const studio = { sourceId: 'source-studio', isrc: 'USABC1234567', title: 'Song', match: null, selected: false };
+  const affected = matcher.propagateSourceMatch([live, studio], live, 'spotify');
+  assert.deepEqual(affected, [live]);
+  assert.equal(studio.match, null);
+  assert.equal(studio.selected, false);
 });

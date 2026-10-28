@@ -47,7 +47,10 @@
     const service = String(provider || track?.provider || '');
     if (!service || !track) return '';
     const isrc = normalizeISRC(track.isrc || track.ISRC || track.externalIds?.isrc);
-    if (/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) return `${service}:isrc:${isrc}`;
+    if (/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) {
+      const versionKey = [...versions(`${track.title || track.name || ''} ${track.album || track.collectionName || ''}`)].sort().join(',');
+      return `${service}:isrc:${isrc}${versionKey ? `:version:${versionKey}` : ''}`;
+    }
     const providerId = String(track.sourceId || track.providerId || track.id || '').trim();
     return providerId ? `${service}:id:${providerId}` : '';
   }
