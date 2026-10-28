@@ -292,6 +292,25 @@ test('concurrent provider snapshots merge instead of overwriting each other', as
   assert.ok(Object.values(app.storageState[PROVIDER_KEY].scans).every((scan) => scan.status === 'complete'));
 });
 
+test('concurrent Zvuk favorite page and independent count preserve both updates', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/favorites?music_importer_capture=1' }];
+  const app = bootWorker({
+    [ZVUK_KEY]: {
+      ...makeZvukState(),
+      scan: { active: true, phase: 'favorites', tabId: 1 },
+      captureEnabled: true,
+    },
+  }, tabs, { cloneStorageReads: true });
+
+  await Promise.all([
+    app.pageMessage({ type: 'zvuk:favorite-page', tracks: [{ id: 'zvuk-live-1', title: 'Track', artist: 'Artist' }], hasMore: false }, 1),
+    app.pageMessage({ type: 'zvuk:collection-count', uniqueTrackCount: 1, uniquePlaylistCount: 0 }, 1),
+  ]);
+
+  assert.deepEqual(app.storageState[ZVUK_KEY].tracks.map((track) => track.id), ['zvuk-live-1']);
+  assert.equal(app.storageState[ZVUK_KEY].expectedCount, 1);
+});
+
 test('selective library refresh rejects unknown provider IDs', async () => {
   const app = bootWorker({});
   const response = await app.callFrom({

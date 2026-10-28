@@ -2,6 +2,14 @@ const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
 const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
 let providerStateMutationQueue = Promise.resolve();
+let zvukStateMutationQueue = Promise.resolve();
+const SERIALIZED_STATE_MESSAGE_TYPES = new Set([
+  'music-importer:get-all-libraries', 'music-importer:get-library', 'music-importer:clear-library-snapshots',
+  'zvuk:state', 'zvuk:start-library', 'zvuk:start', 'zvuk:stop', 'zvuk:clear', 'zvuk:run-playlists',
+  'zvuk:favorite-page', 'zvuk:favorites-scroll-end', 'zvuk:favorites-scroll-stall', 'zvuk:collection-count',
+  'zvuk:scan-progress', 'zvuk:playlist-list-page', 'zvuk:playlist-metadata', 'zvuk:playlist-track-page',
+  'zvuk:playlist-scroll-end', 'zvuk:collection-scroll-end', 'zvuk:collection-scroll-stall', 'zvuk:read-error',
+]);
 const APP_TAB_URLS = [
   'http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*',
   'http://localhost:8000/*', 'http://localhost:8001/*',
@@ -569,7 +577,7 @@ function messageMatchesPage(type, kind) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  (async () => {
+  const handleMessage = () => (async () => {
     if (message?.type === 'music-importer:progress-ack') {
       if (!isAppSender(sender)) {
         sendResponse({ ok: false });
@@ -1153,5 +1161,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ ok: false });
   })().catch(() => sendResponse({ ok: false, error: 'Не удалось обновить локальное состояние.' }));
+  if (SERIALIZED_STATE_MESSAGE_TYPES.has(message?.type)) {
+    const update = zvukStateMutationQueue.then(handleMessage, handleMessage);
+    zvukStateMutationQueue = update.then(() => undefined, () => undefined);
+  } else {
+    void handleMessage();
+  }
   return true;
 });
