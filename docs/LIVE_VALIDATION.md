@@ -69,3 +69,9 @@ Code review of the live `HTTP 429` observed in the importer showed that the `0.1
 ### Spotify reader preflight/hash follow-up — 2026-10-28
 
 Static review found that source scanning fetched and buffered a Spotify CDN bundle even when all required persisted-query hashes were already available in the reader. It also found that a `PersistedQueryNotFound` response could rediscover the cached old hash instead of refreshing it. Version `0.13.20` skips the unnecessary preflight fetch and removes the stale hash before discovery. Fixtures prove the no-download path and successful retry with a refreshed query hash. The prior live Liked Songs stall remains unexplained and this fix has not been retested in the user's account.
+
+## 2026-10-28 — Spotify short-page pagination correction
+
+- Code review confirmed a likely failure mode in the Spotify source reader: it requested 1,000 Liked Songs / playlist rows, then advanced offsets by the requested page size even when the response contained fewer rows. A capped response could skip rows and prevent a complete snapshot.
+- Version `0.13.27` now requests 50 rows, validates returned page offsets when present, and advances by the actual number of returned rows for Liked Songs, playlist catalog, and playlist contents. A synthetic provider fixture caps pages at two rows and confirms offsets `0, 2, 4` plus complete IDs and playlist ordering.
+- Full fixture suite passes 204/204; extension app bundle check and JavaScript syntax check pass. This is fixture evidence only: no fresh Spotify session scan was possible in this turn, so the live stall cause and fix remain unconfirmed. No account writes were run.

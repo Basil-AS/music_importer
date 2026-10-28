@@ -1,7 +1,7 @@
 (() => {
   const marker = 'music-importer-spotify';
   const endpoint = 'https://api-partner.spotify.com/pathfinder/v2/query';
-  const pageSize = 1000;
+  const pageSize = 50;
   const apiTimeoutMs = 45000;
   const scriptTimeoutMs = 15000;
   const queryHashes = new Map([
@@ -315,22 +315,27 @@
     const tracksData = [];
     let total = null;
     let lastPageData = null;
-    for (let offset = 0; total === null || offset < total; offset += pageSize) {
+    let lastOffset = 0;
+    for (let offset = 0; total === null || offset < total;) {
       post('scan-progress', { phase: 'favorites', message: `Читаем Spotify Liked Songs: страница с ${offset + 1}…` });
       const data = await query('fetchLibraryTracks', { offset, limit: pageSize });
       lastPageData = data;
+      lastOffset = offset;
       const library = data?.me?.library?.tracks;
       if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'invalid_page_shape', 'Неожиданный ответ Spotify с любимыми треками.', data);
       if (total !== null && total !== library.totalCount) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'total_changed', 'Spotify изменил число любимых треков во время чтения.', data);
+      const pageOffset = Number(library?.pagingInfo?.offset ?? offset);
+      if (!Number.isInteger(pageOffset) || pageOffset !== offset) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'unexpected_offset', 'Spotify вернул неверное смещение страницы любимых треков.', data);
       total = library.totalCount;
       tracksData.push(...library.items);
       post('scan-progress', { phase: 'favorites', message: `Собираем Spotify Liked Songs: ${Math.min(tracksData.length, total)} из ${total}.` });
       if (library.items.length === 0 && offset < total) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'empty_page', 'Spotify вернул пустую страницу до конца библиотеки.', data);
+      offset = pageOffset + library.items.length;
     }
     const tracks = tracksData.map((row) => trackFrom(row?.track?.data, row?.track?._uri)).filter(Boolean);
     const unique = new Set(tracks.map((track) => track.id));
     if (tracks.length !== total || unique.size !== tracks.length) {
-      failScanShape('fetchLibraryTracks', { offset: Math.max(0, tracksData.length - pageSize), limit: pageSize }, 'track_count_mismatch', 'Число любимых треков Spotify не сошлось с totalCount.', lastPageData);
+      failScanShape('fetchLibraryTracks', { offset: lastOffset, limit: pageSize }, 'track_count_mismatch', 'Число любимых треков Spotify не сошлось с totalCount.', lastPageData);
     }
     return { tracks, total };
   }
@@ -339,7 +344,8 @@
     const playlists = [];
     let total = null;
     let lastPageData = null;
-    for (let offset = 0; total === null || offset < total; offset += 50) {
+    let lastOffset = 0;
+    for (let offset = 0; total === null || offset < total;) {
       post('scan-progress', { phase: 'playlists', message: `Читаем каталог плейлистов Spotify: страница с ${offset + 1}…` });
       const data = await query('libraryV3', {
         filters: ['Playlists'], order: null, textFilter: '',
@@ -348,6 +354,7 @@
         includeFoldersWhenFlattening: false,
       });
       lastPageData = data;
+      lastOffset = offset;
       const library = data?.me?.libraryV3;
       if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) failScanShape('libraryV3', { offset, limit: 50 }, 'invalid_page_shape', 'Неожиданный ответ Spotify с каталогом плейлистов.', data);
       if (total !== null && total !== library.totalCount) failScanShape('libraryV3', { offset, limit: 50 }, 'total_changed', 'Spotify изменил число плейлистов во время чтения.', data);
@@ -361,9 +368,10 @@
       }
       post('scan-progress', { phase: 'playlists', message: `Найдено плейлистов Spotify: ${playlists.length} из ${total}.` });
       if (library.items.length === 0 && offset < total) failScanShape('libraryV3', { offset, limit: 50 }, 'empty_page', 'Spotify вернул пустую страницу каталога до конца.', data);
+      offset += library.items.length;
     }
     if (playlists.length !== total || new Set(playlists.map((playlist) => playlist.id)).size !== playlists.length) {
-      failScanShape('libraryV3', { offset: Math.max(0, playlists.length - 50), limit: 50 }, 'catalog_count_mismatch', 'Число или уникальность плейлистов Spotify не сошлись с totalCount.', lastPageData);
+      failScanShape('libraryV3', { offset: lastOffset, limit: 50 }, 'catalog_count_mismatch', 'Число или уникальность плейлистов Spotify не сошлись с totalCount.', lastPageData);
     }
     return playlists;
   }
@@ -372,10 +380,12 @@
     const rows = [];
     let total = null;
     let lastPageData = null;
-    for (let offset = 0; total === null || offset < total; offset += pageSize) {
+    let lastOffset = 0;
+    for (let offset = 0; total === null || offset < total;) {
       post('scan-progress', { phase: 'playlist-items', message: `Запрашиваем треки плейлиста «${playlist.title}» с позиции ${offset + 1}…` });
       const data = await query('fetchPlaylistContents', { uri: playlist.id, offset, limit: pageSize, includeEpisodeContentRatingsV2: true });
       lastPageData = data;
+      lastOffset = offset;
       const page = data?.playlistV2?.content;
       if (!Array.isArray(page?.items) || !Number.isInteger(page.totalCount)) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'invalid_page_shape', 'Неожиданный ответ плейлиста Spotify.', data);
       if (total !== null && total !== page.totalCount) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'total_changed', 'Spotify изменил число элементов плейлиста во время чтения.', data);
@@ -383,12 +393,13 @@
       const pageOffset = Number(page?.pagingInfo?.offset ?? offset);
       if (pageOffset !== offset) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'unexpected_offset', 'Spotify вернул неверное смещение страницы плейлиста.', data);
       rows.push(...page.items);
+      offset = pageOffset + page.items.length;
       post('scan-progress', { phase: 'playlist-items', message: `Читаем «${playlist.title}»: ${Math.min(rows.length, total)} из ${total}.` });
       if (page.items.length === 0 && offset < total) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'empty_page', 'Spotify вернул пустую страницу плейлиста.', data);
     }
     const tracks = rows.map((row) => trackFrom(row?.itemV2?.data)).filter(Boolean).map((track, position) => ({ ...track, position }));
     const playlistTotal = total ?? 0;
-    if (rows.length !== playlistTotal || tracks.length !== rows.length) failScanShape('fetchPlaylistContents', { offset: Math.max(0, rows.length - pageSize), limit: pageSize }, 'item_count_mismatch', 'Не все элементы плейлиста удалось прочитать.', lastPageData);
+    if (rows.length !== playlistTotal || tracks.length !== rows.length) failScanShape('fetchPlaylistContents', { offset: lastOffset, limit: pageSize }, 'item_count_mismatch', 'Не все элементы плейлиста удалось прочитать.', lastPageData);
     return { ...playlist, trackCount: playlistTotal, complete: true, tracks };
   }
 

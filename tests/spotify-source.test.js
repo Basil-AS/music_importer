@@ -107,7 +107,7 @@ test('Spotify source reader imports liked tracks and every playlist with item or
   assert.ok(page.requests.filter((request) => request.url === endpoint).every((request) => request.init.headers.authorization === 'Bearer fixture-secret'));
   const diagnostics = page.messages.filter((message) => message.diagnostic).map((message) => message.diagnostic);
   assert.ok(diagnostics.some((diagnostic) => diagnostic.operation === 'fetchLibraryTracks'
-    && diagnostic.offset === 0 && diagnostic.limit === 1000
+    && diagnostic.offset === 0 && diagnostic.limit === 50
     && Number.isInteger(diagnostic.elapsedMs) && diagnostic.elapsedMs >= 0
     && diagnostic.result.status === 200));
   assert.ok(diagnostics.some((diagnostic) => diagnostic.operation === 'libraryV3'
@@ -116,6 +116,47 @@ test('Spotify source reader imports liked tracks and every playlist with item or
   for (const privateValue of ['fixture-secret', 'fixture-client-secret', 'spotify:track:like1', 'spotify:playlist:road', 'Liked', 'Road']) {
     assert.ok(!diagnosticText.includes(privateValue), `diagnostics must not include ${privateValue}`);
   }
+});
+
+test('Spotify source reader advances by the returned page length when likes and playlists are capped', async () => {
+  const trackUris = Array.from({ length: 5 }, (_, index) => `spotify:track:page-${index + 1}`);
+  const page = makePage(({ payload }) => {
+    const { operationName, variables = {} } = payload || {};
+    if (operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (operationName === 'fetchLibraryTracks') {
+      return { payload: { data: { me: { library: { tracks: {
+        totalCount: trackUris.length,
+        pagingInfo: { offset: variables.offset },
+        items: trackUris.slice(variables.offset, variables.offset + 2).map((uri) => ({ track: { _uri: uri, data: trackData(uri, uri) } })),
+      } } } } } };
+    }
+    if (operationName === 'libraryV3') {
+      const rows = variables.offset === 0 ? [{ item: { _uri: 'spotify:playlist:capped', data: { name: 'Capped', totalLength: trackUris.length } } }] : [];
+      return { payload: { data: { me: { libraryV3: { totalCount: 1, items: rows } } } } };
+    }
+    if (operationName === 'fetchPlaylistContents') {
+      return { payload: { data: { playlistV2: { content: {
+        totalCount: trackUris.length,
+        pagingInfo: { offset: variables.offset },
+        items: trackUris.slice(variables.offset, variables.offset + 2).map((uri) => ({ itemV2: { data: trackData(uri, uri) } })),
+      } } } } };
+    }
+    throw new Error(`Unexpected Spotify operation: ${operationName}`);
+  });
+
+  await page.startScan();
+
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.equal(snapshot.completeness.confirmed, true);
+  assert.deepEqual(Array.from(snapshot.tracks, (track) => track.id), trackUris);
+  assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => track.id), trackUris);
+  const likesOffsets = page.requests.filter((request) => request.payload?.operationName === 'fetchLibraryTracks').map((request) => request.payload.variables.offset);
+  const playlistOffsets = page.requests.filter((request) => request.payload?.operationName === 'fetchPlaylistContents').map((request) => request.payload.variables.offset);
+  assert.deepEqual(likesOffsets, [0, 2, 4]);
+  assert.deepEqual(playlistOffsets, [0, 2, 4]);
+  assert.ok(page.requests.filter((request) => ['fetchLibraryTracks', 'fetchPlaylistContents'].includes(request.payload?.operationName))
+    .every((request) => request.payload.variables.limit === 50));
 });
 
 test('Spotify scan diagnostics sanitize provider errors and include page coordinates and elapsed time', async () => {
@@ -132,10 +173,10 @@ test('Spotify scan diagnostics sanitize provider errors and include page coordin
   assert.ok(error);
   assert.equal(error.diagnostic.operation, 'fetchLibraryTracks');
   assert.equal(error.diagnostic.offset, 0);
-  assert.equal(error.diagnostic.limit, 1000);
+  assert.equal(error.diagnostic.limit, 50);
   assert.ok(Number.isInteger(error.diagnostic.elapsedMs) && error.diagnostic.elapsedMs >= 0);
   assert.deepEqual({ ...error.diagnostic.result }, { code: 'provider_error' });
-  assert.match(error.error, /Диагностика: fetchLibraryTracks 0\/1000 · \d+ мс · provider_error\./);
+  assert.match(error.error, /Диагностика: fetchLibraryTracks 0\/50 · \d+ мс · provider_error\./);
   const diagnosticText = JSON.stringify(page.messages.filter((message) => message.diagnostic));
   assert.ok(!diagnosticText.includes(privateProviderMessage));
   assert.ok(!diagnosticText.includes('spotify:track:private-id'));
@@ -219,7 +260,7 @@ test('Spotify source reader refuses a truncated liked-track page', async () => {
   const error = page.messages.find((message) => message.type === 'scan-error');
   assert.equal(error.diagnostic.operation, 'fetchLibraryTracks');
   assert.equal(error.diagnostic.offset, 0);
-  assert.equal(error.diagnostic.limit, 1000);
+  assert.equal(error.diagnostic.limit, 50);
   assert.equal(error.diagnostic.result.code, 'empty_page');
   assert.match(error.error, /empty_page/);
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
