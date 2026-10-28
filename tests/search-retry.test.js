@@ -231,6 +231,38 @@ test('album batch search groups matching source albums and falls back for tracks
   assert.deepEqual(results.map((result) => result.candidates[0].trackId), ['target:a', 'individual:Song B', 'individual:Song C']);
 });
 
+test('10,000 tracks with complete album batches avoid per-track fallback searches', async () => {
+  const { engine } = loadEngine();
+  const tracks = Array.from({ length: 10_000 }, (_, index) => ({
+    title: `Track ${index}`,
+    artist: 'Artist',
+    album: `Album ${Math.floor(index / 10)}`,
+  }));
+  let albumBatches = 0;
+  let perTrackSearches = 0;
+  const results = await engine.searchMany({
+    id: 'spotify',
+    maxConcurrentSearches: 4,
+    batchSearchRequiresGroup: true,
+    canBatchSearch(track) { return Boolean(track.album); },
+    batchSearchKey(track) { return `${track.album}|${track.artist}`; },
+    async searchTracksBatch(batchTracks) {
+      albumBatches += 1;
+      return batchTracks.map((track) => [{ trackId: `catalog:${track.title}` }]);
+    },
+    async searchTracks() {
+      perTrackSearches += 1;
+      throw new Error('complete album batches should not fall back');
+    },
+  }, tracks);
+
+  assert.equal(results.length, 10_000);
+  assert.equal(albumBatches, 1_000);
+  assert.equal(perTrackSearches, 0);
+  assert.equal(results[0].candidates[0].trackId, 'catalog:Track 0');
+  assert.equal(results.at(-1).candidates[0].trackId, 'catalog:Track 9999');
+});
+
 test('batch catalog search uses bounded parallelism for large ISRC queues', async () => {
   const { engine } = loadEngine();
   const tracks = Array.from({ length: 9 }, (_, index) => ({
