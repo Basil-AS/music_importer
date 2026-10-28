@@ -147,10 +147,18 @@ test('first install opens the extension-hosted importer automatically', async ()
   assert.equal(worker.createdTabs[0].url, 'chrome-extension://fixture-extension/app/index.html');
 });
 
-test('extension updates do not open an extra importer tab', async () => {
+test('extension update opens the importer app when it is not already open', async () => {
   const worker = bootWorker({});
   await worker.install('update');
+  assert.deepEqual(JSON.parse(JSON.stringify(worker.createdTabs)), [{ url: 'chrome-extension://fixture-extension/app/index.html' }]);
+});
+
+test('extension update focuses the existing importer app without creating another tab', async () => {
+  const existingApp = { id: 18, url: 'chrome-extension://fixture-extension/app/index.html' };
+  const worker = bootWorker({}, [existingApp]);
+  await worker.install('update');
   assert.deepEqual(worker.createdTabs, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(worker.updates)), [{ tabId: 18, update: { active: true } }]);
 });
 
 test('extension icon opens the importer app when the localhost app is active', async () => {

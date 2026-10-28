@@ -85,12 +85,7 @@ chrome.runtime.onConnect?.addListener((port) => {
   port.onDisconnect.addListener(() => extensionAppPorts.delete(port));
 });
 
-chrome.runtime.onInstalled?.addListener((details) => {
-  if (details?.reason !== 'install' || !extensionAppUrl) return;
-  void chrome.tabs.create({ url: extensionAppUrl }).catch(() => {});
-});
-
-chrome.action?.onClicked?.addListener(async (activeTab) => {
+async function openImporterApp() {
   if (!extensionAppUrl) return;
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find((tab) => tab.url === extensionAppUrl);
@@ -99,6 +94,15 @@ chrome.action?.onClicked?.addListener(async (activeTab) => {
     return;
   }
   await chrome.tabs.create({ url: extensionAppUrl });
+}
+
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (!['install', 'update'].includes(details?.reason) || !extensionAppUrl) return;
+  return openImporterApp().catch(() => {});
+});
+
+chrome.action?.onClicked?.addListener(() => {
+  return openImporterApp().catch(() => {});
 });
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
