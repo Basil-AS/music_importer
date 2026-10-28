@@ -252,6 +252,40 @@ async function writeProviderState(state) {
   await chrome.storage.local.set({ [PROVIDER_STORAGE_KEY]: state });
 }
 
+async function reloadTabForReader(tabId, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    let sawLoading = false;
+    let settled = false;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId) return;
+      if (changeInfo.status === 'loading') sawLoading = true;
+      if (sawLoading && changeInfo.status === 'complete') finish();
+    };
+    const timeout = setTimeout(() => finish(new Error('Вкладка музыкального сервиса не перезагрузилась вовремя.')), timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.reload(tabId).catch(finish);
+  });
+}
+
+async function startProviderLibraryScan(tabId, startMessage) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: startMessage });
+    return;
+  } catch {
+    // Existing tabs do not receive newly installed/updated content scripts until navigation.
+    await reloadTabForReader(tabId);
+    await chrome.tabs.sendMessage(tabId, { type: startMessage });
+  }
+}
+
 async function requestProviderLibrary(provider, refresh) {
   const providers = {
     spotify: { tabPattern: 'https://open.spotify.com/*', origin: 'https://open.spotify.com', startMessage: 'spotify:start-library-scan' },
@@ -282,9 +316,9 @@ async function requestProviderLibrary(provider, refresh) {
     state.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
     await writeProviderState(state);
     try {
-      await chrome.tabs.sendMessage(tab.id, { type: providerConfig.startMessage });
+      await startProviderLibraryScan(tab.id, providerConfig.startMessage);
     } catch {
-      state.scans[provider] = { status: 'failed', message: `Расширение не подключено к ${providerName}. Перезагрузите вкладку сервиса и повторите.` };
+      state.scans[provider] = { status: 'failed', message: `Не удалось подключить сборщик к ${providerName}. Проверьте вход и повторите сбор.` };
       await writeProviderState(state);
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scans[provider].message };
       return { error: state.scans[provider].message };

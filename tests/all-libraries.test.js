@@ -22,9 +22,12 @@ function makeProviderPayload(service, count = 1) {
   };
 }
 
-function bootWorker(storageState, tabs = []) {
+function bootWorker(storageState, tabs = [], options = {}) {
   const messages = [];
   const updates = [];
+  const reloads = [];
+  const reloadedTabs = new Set();
+  const tabUpdatedListeners = new Set();
   const portMessages = [];
   const createdTabs = [];
   let runtimeListener;
@@ -58,16 +61,35 @@ function bootWorker(storageState, tabs = []) {
         const tab = tabs.find((candidate) => candidate.id === tabId);
         if (tab && update.url) tab.url = update.url;
       },
+      onUpdated: {
+        addListener(listener) { tabUpdatedListeners.add(listener); },
+        removeListener(listener) { tabUpdatedListeners.delete(listener); },
+      },
+      async reload(tabId) {
+        reloads.push(tabId);
+        const tab = tabs.find((candidate) => candidate.id === tabId);
+        if (!tab) throw new Error('No such tab');
+        tab.status = 'loading';
+        for (const listener of tabUpdatedListeners) listener(tabId, { status: 'loading' }, tab);
+        tab.status = 'complete';
+        for (const listener of tabUpdatedListeners) listener(tabId, { status: 'complete' }, tab);
+        reloadedTabs.add(tabId);
+      },
       async create(createProperties) { createdTabs.push(createProperties); return { id: 99, ...createProperties }; },
-      async sendMessage(tabId, message) { messages.push({ tabId, message }); return { ok: true }; },
+      async sendMessage(tabId, message) {
+        messages.push({ tabId, message });
+        if (options.missingReceiverOnce?.includes(tabId) && !reloadedTabs.has(tabId)) throw new Error('Receiving end does not exist');
+        return { ok: true };
+      },
     },
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/service-worker.js'), 'utf8'), {
-    chrome, URL, Date, Number, String, Array, Promise, Set, Map, Object, Error, JSON, RegExp, Math,
+    chrome, URL, Date, Number, String, Array, Promise, Set, Map, Object, Error, JSON, RegExp, Math, setTimeout, clearTimeout,
   });
   return {
     messages,
     updates,
+    reloads,
     createdTabs,
     clickAction() { return actionListener(); },
     call(message) {
@@ -140,6 +162,16 @@ test('extension-hosted app can start a library scan without localhost origin per
   assert.equal(response.pending, true);
   assert.equal(response.statuses['apple-music'].status, 'scanning');
   assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'apple:start-library-scan'));
+});
+
+test('library scan reloads an old provider tab once when its extension content script is missing', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library', status: 'complete' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs, { missingReceiverOnce: [4] });
+  const response = await app.callFrom({ type: 'music-importer:get-all-libraries', refresh: true }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.pending, true);
+  assert.deepEqual(app.reloads, [4]);
+  assert.equal(app.messages.filter(({ tabId, message }) => tabId === 4 && message.type === 'apple:start-library-scan').length, 2);
+  assert.equal(response.statuses['apple-music'].status, 'scanning');
 });
 
 test('extension-hosted app can send a catalog command to a signed-in service tab', async () => {
