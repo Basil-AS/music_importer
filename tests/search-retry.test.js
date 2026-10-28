@@ -173,6 +173,36 @@ test('batch catalog search preserves order and individually retries missing ISRC
   assert.deepEqual(progress, [1, 2]);
 });
 
+test('batch catalog search uses bounded parallelism for large ISRC queues', async () => {
+  const { engine } = loadEngine();
+  const tracks = Array.from({ length: 9 }, (_, index) => ({
+    title: `Song ${index}`,
+    artist: 'Artist',
+    isrc: `USABC${String(index).padStart(7, '0')}`,
+  }));
+  let active = 0;
+  let peakActive = 0;
+  const results = await engine.searchMany({
+    id: 'apple-music',
+    maxConcurrentSearches: 2,
+    batchSearchSize: 1,
+    canBatchSearch() { return true; },
+    async searchTracksBatch(batchTracks) {
+      active += 1;
+      peakActive = Math.max(peakActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return [[{ trackId: `apple:${batchTracks[0].title}`, isrc: batchTracks[0].isrc }]];
+    },
+    async searchTracks() {
+      throw new Error('successful batches should not fall back to per-track search');
+    },
+  }, tracks);
+
+  assert.equal(peakActive, 2);
+  assert.deepEqual(results.map((result) => result.candidates[0].trackId), tracks.map((track) => `apple:${track.title}`));
+});
+
 test('bulk catalog search aborts queued requests without reporting cancelled tracks as complete', async () => {
   const { engine } = loadEngine();
   const controller = new AbortController();

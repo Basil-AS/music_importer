@@ -106,28 +106,36 @@
       const batchIndexes = queue.map((group, index) => index)
         .filter((index) => adapter.canBatchSearch(queue[index].tracks[0], options.context || {}));
       const batchSize = Math.max(1, Math.min(25, Math.floor(adapter.batchSearchSize || 25)));
-      for (let offset = 0; offset < batchIndexes.length; offset += batchSize) {
-        const indexes = batchIndexes.slice(offset, offset + batchSize);
-        const batchTracks = indexes.map((index) => queue[index].tracks[0]);
-        let batchResults;
-        try {
-          batchResults = await searchWithRetry(
-            () => adapter.searchTracksBatch(batchTracks, options.context || {}),
-            options,
-          );
-        } catch (error) {
-          if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
-          // If the batch request fails, the ordinary per-track adapter path remains available.
-          continue;
+      const batchQueue = Array.from({ length: Math.ceil(batchIndexes.length / batchSize) }, (_, index) => index);
+      let nextBatch = 0;
+      const batchWorkerCount = Math.min(concurrency, batchQueue.length);
+      await Promise.all(Array.from({ length: batchWorkerCount }, async () => {
+        while (true) {
+          const batchIndex = nextBatch++;
+          if (batchIndex >= batchQueue.length) return;
+          const offset = batchIndex * batchSize;
+          const indexes = batchIndexes.slice(offset, offset + batchSize);
+          const batchTracks = indexes.map((index) => queue[index].tracks[0]);
+          let batchResults;
+          try {
+            batchResults = await searchWithRetry(
+              () => adapter.searchTracksBatch(batchTracks, options.context || {}),
+              options,
+            );
+          } catch (error) {
+            if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
+            // If the batch request fails, the ordinary per-track adapter path remains available.
+            continue;
+          }
+          if (!Array.isArray(batchResults) || batchResults.length !== indexes.length) continue;
+          for (let index = 0; index < indexes.length; index += 1) {
+            const candidates = Array.isArray(batchResults[index]) ? batchResults[index] : [];
+            if (!candidates.length) continue;
+            pendingIndexes.delete(indexes[index]);
+            await finishGroup(indexes[index], candidates);
+          }
         }
-        if (!Array.isArray(batchResults) || batchResults.length !== indexes.length) continue;
-        for (let index = 0; index < indexes.length; index += 1) {
-          const candidates = Array.isArray(batchResults[index]) ? batchResults[index] : [];
-          if (!candidates.length) continue;
-          pendingIndexes.delete(indexes[index]);
-          await finishGroup(indexes[index], candidates);
-        }
-      }
+      }));
     }
 
     const workerQueue = [...pendingIndexes];
