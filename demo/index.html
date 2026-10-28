@@ -82,6 +82,7 @@
           <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title" id="targetProviderName">Apple Music</div><div class="dest-sub" id="targetCollection">Избранные песни</div></div></div>
           <div class="check-row"><span>Совпадения найдены</span><span id="readyStat">—</span></div><div class="check-row"><span>Нужно проверить</span><span id="reviewStat" style="color:var(--amber)">—</span></div><div class="check-row"><span>Без совпадения</span><span id="missingStat" style="color:var(--red)">—</span></div>
           <button class="primary side-primary" id="importBtn" type="button" disabled>Сформировать план <span aria-hidden="true">→</span></button>
+          <p class="quiet" style="margin:8px 0 0">Во время записи оставьте эту вкладку и целевой сервис открытыми. При попытке закрыть страницу браузер предупредит, что перенос ещё идёт.</p>
           <div class="report" id="report" aria-live="polite"><h3>План готов</h3><div class="report-grid"><div class="metric"><b id="addedMetric">0</b><span>выбрано</span></div><div class="metric"><b id="skippedMetric">0</b><span>пропущено</span></div><div class="metric"><b>0</b><span>записано</span></div></div><div class="quiet" style="margin-top:10px">JSON-план содержит выбранные ID совпадений и исходные коллекции. До явного запуска библиотека не меняется.</div><button class="linkbtn" id="downloadReport" type="button" style="margin-top:12px">Скачать JSON-план</button></div>
         </section>
         <section class="card side-card privacy"><div class="privacy-icon" aria-hidden="true">◈</div><h2>Вы управляете переносом</h2><p><strong>Сбор и передача выполняются локально.</strong> Токены и cookie не сохраняются расширением. Поиск отправляет запрос выбранному музыкальному сервису. Чтение и запись выполняются через открытые авторизованные вкладки сервисов. Любая запись в аккаунт требует отдельного подтверждения.</p><p id="matchCacheStatus" class="quiet" role="status" aria-live="polite">Результаты поиска и решения сохраняются только на этом устройстве.</p><button id="clearMatchCache" class="linkbtn" type="button">Очистить локальные результаты и решения</button></section>
@@ -95,6 +96,7 @@
   <script src="match-cache.js" defer></script>
   <script src="transfer-core.js" defer></script>
   <script src="transfer-engine.js" defer></script>
+  <script src="transfer-safety.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

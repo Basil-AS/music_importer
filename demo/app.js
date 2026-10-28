@@ -10,9 +10,10 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, extensionAvailable: false };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false };
   let trackPage = 0;
   let extensionCheckInProgress = false;
+  window.MusicTransferSafety.installBeforeUnloadGuard(() => state.transferInProgress);
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
@@ -972,6 +973,7 @@
         const playlistCount = plan.collectionMappings.length;
         const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', zvuk: 'Звук', spotify: 'Spotify' })[state.targetProvider] || state.targetProvider;
         if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
+        state.transferInProgress = true;
         $('#importBtn').disabled = true;
         $('#importBtn').textContent = 'Записываем и сверяем…';
         const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk', spotify: 'spotify' })[state.targetProvider];
@@ -1016,6 +1018,7 @@
     } catch (error) {
       toast(error.message || 'Не удалось выполнить перенос.');
     } finally {
+      state.transferInProgress = false;
       $('#importBtn').disabled = false;
       updateCounts();
       updateTargetLabel();
