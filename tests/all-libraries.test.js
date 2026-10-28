@@ -31,6 +31,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
   const portMessages = [];
   const createdTabs = [];
   let runtimeListener;
+  let installedListener;
   let connectListener;
   let actionListener;
   const chrome = {
@@ -38,6 +39,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
       id: 'fixture-extension',
       getURL(path) { return `chrome-extension://fixture-extension/${path}`; },
       onMessage: { addListener(listener) { runtimeListener = listener; } },
+      onInstalled: { addListener(listener) { installedListener = listener; } },
       onConnect: { addListener(listener) { connectListener = listener; } },
     },
     action: { onClicked: { addListener(listener) { actionListener = listener; } } },
@@ -92,6 +94,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
     reloads,
     createdTabs,
     clickAction() { return actionListener(); },
+    install(reason = 'install') { return installedListener({ reason }); },
     call(message) {
       return this.callFrom(message, 'http://127.0.0.1:8001/');
     },
@@ -122,6 +125,19 @@ function bootWorker(storageState, tabs = [], options = {}) {
     portMessages,
   };
 }
+
+test('first install opens the extension-hosted importer automatically', async () => {
+  const worker = bootWorker({});
+  await worker.install('install');
+  assert.equal(worker.createdTabs.length, 1);
+  assert.equal(worker.createdTabs[0].url, 'chrome-extension://fixture-extension/app/index.html');
+});
+
+test('extension updates do not open an extra importer tab', async () => {
+  const worker = bootWorker({});
+  await worker.install('update');
+  assert.deepEqual(worker.createdTabs, []);
+});
 
 function makeZvukState(complete = false) {
   return {

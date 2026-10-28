@@ -48,6 +48,11 @@ chrome.runtime.onConnect?.addListener((port) => {
   port.onDisconnect.addListener(() => extensionAppPorts.delete(port));
 });
 
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (details?.reason !== 'install' || !extensionAppUrl) return;
+  void chrome.tabs.create({ url: extensionAppUrl }).catch(() => {});
+});
+
 chrome.action?.onClicked?.addListener(async () => {
   if (!extensionAppUrl) return;
   const tabs = await chrome.tabs.query({});

@@ -269,10 +269,12 @@
         button.disabled = true;
         button.textContent = 'Ошибка чтения';
       } else {
-        label.textContent = 'Откройте сервис и войдите в аккаунт';
+        label.textContent = state.extensionAvailable
+          ? 'Откройте сервис и войдите в аккаунт'
+          : 'Подключите расширение для проверки открытой вкладки';
         label.classList.remove('connected');
         button.disabled = true;
-        button.textContent = 'Нет библиотеки';
+        button.textContent = state.extensionAvailable ? 'Нет библиотеки' : 'Нет соединения';
       }
     });
     updateTargetLabel();
