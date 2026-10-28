@@ -1,17 +1,22 @@
 /* Local, credential-free cache for bounded catalog search results. */
 (() => {
   const databaseName = 'music-importer-local';
-  const databaseVersion = 3;
+  const databaseVersion = 4;
   const cacheFormatVersion = 3;
+  const decisionFormatVersion = 1;
   const previousStoreName = 'automatic-matches';
   const storeName = 'catalog-search-results';
+  const decisionStoreName = 'match-decisions';
   const expiresAfterMs = 30 * 24 * 60 * 60 * 1000;
   const noResultExpiresAfterMs = 7 * 24 * 60 * 60 * 1000;
+  const decisionExpiresAfterMs = 180 * 24 * 60 * 60 * 1000;
   const maxEntries = 25000;
   const maxCandidatesPerEntry = 12;
   const memory = new Map();
+  const memoryDecisions = new Map();
   let databasePromise;
   let lastPrunedAt = 0;
+  let lastDecisionsPrunedAt = 0;
 
   function normalized(value) {
     return String(value || '').normalize('NFKC').toLocaleLowerCase()
@@ -33,6 +38,12 @@
     return JSON.stringify([cacheFormatVersion, String(targetProvider), region, catalogMode, ...identity]);
   }
 
+  function decisionKeyFor(track, targetProvider, storefront = '', accountCatalog = false, sourceProvider = '') {
+    if (!track || !targetProvider) return '';
+    const catalogKey = keyFor({ ...track, manualQuery: false }, targetProvider, storefront, accountCatalog);
+    return catalogKey ? JSON.stringify([decisionFormatVersion, String(sourceProvider || track.provider || 'file'), catalogKey]) : '';
+  }
+
   function openDatabase() {
     if (databasePromise) return databasePromise;
     databasePromise = new Promise((resolve) => {
@@ -47,6 +58,11 @@
           const store = db.createObjectStore(storeName, { keyPath: 'key' });
           store.createIndex('expiresAt', 'expiresAt');
           store.createIndex('updatedAt', 'updatedAt');
+        }
+        if (!db.objectStoreNames.contains(decisionStoreName)) {
+          const decisions = db.createObjectStore(decisionStoreName, { keyPath: 'key' });
+          decisions.createIndex('expiresAt', 'expiresAt');
+          decisions.createIndex('updatedAt', 'updatedAt');
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -152,6 +168,36 @@
     } catch { /* Cache pruning must never interrupt matching. */ }
   }
 
+  async function pruneDecisions(db) {
+    const now = Date.now();
+    if (now - lastDecisionsPrunedAt < 60 * 60 * 1000) return;
+    lastDecisionsPrunedAt = now;
+    let records = [];
+    try {
+      records = await new Promise((resolve, reject) => {
+        const transaction = db.transaction(decisionStoreName, 'readonly');
+        const request = transaction.objectStore(decisionStoreName).getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    } catch { return; }
+    const expired = records.filter((record) => record.decisionVersion !== decisionFormatVersion || Number(record.expiresAt) <= now);
+    const live = records.filter((record) => record.decisionVersion === decisionFormatVersion && Number(record.expiresAt) > now)
+      .sort((left, right) => Number(left.updatedAt) - Number(right.updatedAt));
+    const remove = [...expired, ...live.slice(0, Math.max(0, live.length - maxEntries))];
+    if (!remove.length) return;
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(decisionStoreName, 'readwrite');
+        const store = transaction.objectStore(decisionStoreName);
+        remove.forEach((record) => store.delete(record.key));
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } catch { /* Pruning must not interrupt a user decision. */ }
+  }
+
   async function putSearchResults(tracks, targetProvider, storefront = '', accountCatalog = false) {
     const records = tracks.map((track) => recordFor(track, targetProvider, storefront, accountCatalog)).filter(Boolean);
     if (!records.length) return 0;
@@ -177,15 +223,99 @@
     }
   }
 
+  async function getDecisions(tracks, targetProvider, storefront = '', accountCatalog = false, sourceProvider = '') {
+    const keys = [...new Set(tracks.map((track) => decisionKeyFor(track, targetProvider, storefront, accountCatalog, sourceProvider)).filter(Boolean))];
+    const result = new Map();
+    if (!keys.length) return result;
+    const db = await openDatabase();
+    if (!db) {
+      for (const key of keys) {
+        const record = memoryDecisions.get(key);
+        if (record?.expiresAt > Date.now()) result.set(key, record);
+        else if (record) memoryDecisions.delete(key);
+      }
+      return result;
+    }
+    return new Promise((resolve) => {
+      let transaction;
+      try { transaction = db.transaction(decisionStoreName, 'readonly'); }
+      catch { return resolve(result); }
+      const store = transaction.objectStore(decisionStoreName);
+      for (const key of keys) {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const record = request.result;
+          if (record?.decisionVersion === decisionFormatVersion && record.expiresAt > Date.now()) result.set(key, record);
+        };
+      }
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = () => resolve(result);
+      transaction.onabort = () => resolve(result);
+    });
+  }
+
+  function decisionRecord(track, targetProvider, decision, storefront, accountCatalog, sourceProvider) {
+    if (!decision || typeof decision.selected !== 'boolean') return false;
+    const targetTrackId = String(decision.trackId || '');
+    if (decision.selected && !targetTrackId) return false;
+    const key = decisionKeyFor(track, targetProvider, storefront, accountCatalog, sourceProvider);
+    if (!key) return false;
+    const now = Date.now();
+    const record = {
+      key,
+      decisionVersion: decisionFormatVersion,
+      sourceProvider: String(sourceProvider || track.provider || 'file'),
+      targetProvider: String(targetProvider),
+      storefront: targetProvider === 'apple-music' ? String(storefront || '').toUpperCase() : '',
+      catalogMode: targetProvider === 'apple-music' ? (accountCatalog ? 'account' : 'preview') : '',
+      selected: decision.selected,
+      targetTrackId: targetTrackId || null,
+      updatedAt: now,
+      expiresAt: now + decisionExpiresAfterMs,
+    };
+    return record;
+  }
+
+  async function putDecisions(tracks, targetProvider, decide, storefront = '', accountCatalog = false, sourceProvider = '') {
+    if (!Array.isArray(tracks) || typeof decide !== 'function') return 0;
+    const records = tracks.map((track) => decisionRecord(track, targetProvider, decide(track), storefront, accountCatalog, sourceProvider)).filter(Boolean);
+    if (!records.length) return 0;
+    const db = await openDatabase();
+    if (!db) {
+      records.forEach((record) => memoryDecisions.set(record.key, record));
+      while (memoryDecisions.size > maxEntries) memoryDecisions.delete(memoryDecisions.keys().next().value);
+      return records.length;
+    }
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(decisionStoreName, 'readwrite');
+        const store = transaction.objectStore(decisionStoreName);
+        records.forEach((record) => store.put(record));
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      void pruneDecisions(db);
+      return records.length;
+    } catch { return 0; }
+  }
+
+  async function putDecision(track, targetProvider, decision, storefront = '', accountCatalog = false, sourceProvider = '') {
+    const written = await putDecisions([track], targetProvider, () => decision, storefront, accountCatalog, sourceProvider);
+    return written === 1;
+  }
+
   async function clear() {
     memory.clear();
+    memoryDecisions.clear();
     const db = await openDatabase();
     if (!db) return;
     await new Promise((resolve) => {
       let transaction;
-      try { transaction = db.transaction(storeName, 'readwrite'); }
+      try { transaction = db.transaction([storeName, decisionStoreName], 'readwrite'); }
       catch { return resolve(); }
       transaction.objectStore(storeName).clear();
+      transaction.objectStore(decisionStoreName).clear();
       transaction.oncomplete = resolve;
       transaction.onerror = resolve;
       transaction.onabort = resolve;
@@ -194,16 +324,22 @@
 
   async function count() {
     const db = await openDatabase();
-    if (!db) return memory.size;
+    if (!db) return memory.size + memoryDecisions.size;
     return new Promise((resolve) => {
       try {
-        const transaction = db.transaction(storeName, 'readonly');
-        const request = transaction.objectStore(storeName).count();
-        request.onsuccess = () => resolve(request.result || 0);
-        request.onerror = () => resolve(0);
+        const transaction = db.transaction([storeName, decisionStoreName], 'readonly');
+        const resultCache = transaction.objectStore(storeName).count();
+        const resultDecisions = transaction.objectStore(decisionStoreName).count();
+        let resultCount = 0;
+        let decisionCount = 0;
+        resultCache.onsuccess = () => { resultCount = resultCache.result || 0; };
+        resultDecisions.onsuccess = () => { decisionCount = resultDecisions.result || 0; };
+        transaction.oncomplete = () => resolve(resultCount + decisionCount);
+        transaction.onerror = () => resolve(0);
+        transaction.onabort = () => resolve(0);
       } catch { resolve(0); }
     });
   }
 
-  window.MusicMatchCache = { keyFor, getMany, putSearchResults, clear, count };
+  window.MusicMatchCache = { keyFor, decisionKeyFor, getMany, putSearchResults, getDecisions, putDecision, putDecisions, clear, count };
 })();

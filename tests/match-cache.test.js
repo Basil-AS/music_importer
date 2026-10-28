@@ -90,3 +90,28 @@ test('manual search text is excluded from automatic cache identity', () => {
   const cache = loadCache();
   assert.equal(cache.keyFor({ title: 'Track', artist: 'Artist', manualQuery: true }, 'zvuk'), '');
 });
+
+test('manual match and exclusion decisions persist locally with source and target scope', async () => {
+  const cache = loadCache();
+  const track = { title: 'Track', artist: 'Artist', album: 'Album', durationMs: 180000, manualQuery: true };
+  const sourceProvider = 'apple-music';
+  const decisionKey = cache.decisionKeyFor(track, 'yandex-music', '', false, sourceProvider);
+  assert.ok(decisionKey);
+  assert.equal(await cache.putDecision(track, 'yandex-music', { selected: true, trackId: 'ym-42' }, '', false, sourceProvider), true);
+  let decisions = await cache.getDecisions([track], 'yandex-music', '', false, sourceProvider);
+  assert.equal(decisions.get(decisionKey).targetTrackId, 'ym-42');
+  assert.equal(decisions.get(decisionKey).selected, true);
+  assert.equal((await cache.getDecisions([track], 'spotify', '', false, sourceProvider)).size, 0);
+  assert.equal((await cache.getDecisions([track], 'yandex-music', '', false, 'spotify')).size, 0);
+  assert.equal(await cache.putDecision(track, 'yandex-music', { selected: false, trackId: 'ym-42' }, '', false, sourceProvider), true);
+  decisions = await cache.getDecisions([track], 'yandex-music', '', false, sourceProvider);
+  assert.equal(decisions.get(decisionKey).selected, false);
+  assert.equal(decisions.get(decisionKey).targetTrackId, 'ym-42');
+  assert.equal(await cache.putDecision(track, 'yandex-music', { selected: false }, '', false, sourceProvider), true);
+  decisions = await cache.getDecisions([track], 'yandex-music', '', false, sourceProvider);
+  assert.equal(decisions.get(decisionKey).targetTrackId, null);
+  assert.equal(await cache.putDecision(track, 'yandex-music', { selected: true }, '', false, sourceProvider), false);
+  assert.equal(await cache.count(), 1);
+  await cache.clear();
+  assert.equal((await cache.getDecisions([track], 'yandex-music', '', false, sourceProvider)).size, 0);
+});
