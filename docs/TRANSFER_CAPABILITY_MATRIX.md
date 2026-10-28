@@ -22,6 +22,17 @@
 | Яндекс Музыка | Extension автоматически открывает фоновую `music.yandex.ru` страницу, если её нет | likes и playlists | Search из страницы сервиса | likes, приватные playlists, read-back | CORS, mutation limits и текущие формы ответов требуют live-проверки. См. [Яндекс](YANDEX_TRANSFER.md). |
 | Звук | Extension автоматически открывает фоновую `zvuk.com` страницу, если её нет | favorites и playlists; crawler страниц | GraphQL search из страницы сервиса | favorites и playlists, read-back | Интеграция использует внутренние API; crawler меняет URL вкладки, write contract ещё не live-проверен. См. [Звук](ZVUK_TRANSFER.md). |
 
+## Сохранённые альбомы (fixture-only)
+
+| Сервис | Чтение альбомов | Поиск | Запись и сверка | Подключение в приложении |
+| --- | --- | --- | --- | --- |
+| Apple Music | library albums с каталожным ID и UPC | `search-albums`: UPC, затем название + исполнитель | `add_album` в `execute-transfer`, read-back по `read-library-albums` | `albumsCollection` в снимке; UPC передаётся |
+| Spotify | `GET /me/albums`, число = `total` | `search-albums`: `upc:`, затем `album:` + `artist:` | отдельная `write-albums` с проверкой `contains` | `collections[albums]`; чекпойнт этапа `albums` подтверждается приложением |
+| Яндекс Музыка | likes/albums + `/albums` hydrate, отдельный `albumsConfirmed` | `search-albums` по названию и исполнителю | `add_album` в `execute-transfer`, read-back | `collections[albums]`; неудачное чтение = неподтверждённая пустая коллекция |
+| Звук | `releases` из `getPaginatedCollectionAll`, сверка с `uniqueReleaseCount` | `search-albums` по тексту | `add_album` в `execute-transfer`, чекпойнт `albums-writing` | коллекция создаётся только при равенстве уникальных ID и счётчика |
+
+Альбом остаётся одной записью в плане (`add_album`) и не превращается в треки. Живая проверка на аккаунтах не выполнялась; в Spotify и Звуке неподтверждённые детали перечислены в соответствующих `*_TRANSFER.md` и `*_CONNECTOR.md`.
+
 ## Автоматический подбор для больших библиотек
 
 - Сопоставитель использует ISRC, название, исполнителя, альбом, длительность и признаки версии записи. Поисковый запрос включает доступный альбом и автоматически расширяется, только если точный запрос ничего не нашёл. ISRC совпадение выбирается автоматически, если title/album не указывают на конфликт версии; metadata-only выбор требует высокого score и отрыва от второго кандидата. Повторные вхождения одной записи с устойчивым ID источника получают общий результат поиска для любого маршрута; ручной запрос не объединяется с автоматическим.
