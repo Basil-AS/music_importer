@@ -42,4 +42,6 @@ node scripts/build-extension-app.mjs
 
 Изученные готовые проекты, их auth-модели, ограничения и идеи для повторного использования: [`docs/PROJECTS.md`](docs/PROJECTS.md).
 
+Подробное исследование API и входа по каждому сервису, включая инвентаризацию endpoint-ов и проверенные open-source проекты, ведётся отдельно в [PR #1 — исследование API и авторизации](https://github.com/Basil-AS/music_importer/pull/1). Там же фиксируются наблюдения и источники; это исследовательская ветка, а не подтверждение live-переносов.
+
 Локальное расширение находится в [`chrome-extension/`](chrome-extension/). Коннекторы и ограничения: [Zvuk source](docs/ZVUK_CONNECTOR.md), [Zvuk target](docs/ZVUK_TRANSFER.md), [Spotify](docs/SPOTIFY_CONNECTOR.md), [Apple Music source](docs/APPLE_CONNECTOR.md), [Apple Music target](docs/APPLE_TRANSFER.md), [Яндекс source](docs/YANDEX_CONNECTOR.md), [Яндекс target](docs/YANDEX_TRANSFER.md). Ни один из 12 маршрутов ещё не прошёл end-to-end live transfer.
