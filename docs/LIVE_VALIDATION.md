@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-28 — mobile layout verification
+
+- Version `0.13.42` changes the service-card grid to two columns on mobile and stacks the hero artwork below copy at widths up to 360 px. Long source-card status labels no longer widen the grid.
+- The ordinary local page was visually checked at 320 px and 390 px. DOM measurements reported document widths of exactly 320 px and 390 px respectively, with no element extending beyond the viewport. The temporary viewport override was reset after the check.
+- This is a visual/layout check only. The in-app browser does not host the user's Chrome extension, so account connection remained unavailable there; no provider library was read or written in this check.
+
 ## 2026-10-28 — batch catalog cache writes
 
 - Version `0.13.40` batches completed catalog-search results into local cache writes of up to 100 tracks, reducing serialized IndexedDB transaction count for large libraries. Any partial batch is flushed after normal completion, cancellation, or search failure; a cache-write error does not interrupt catalog matching.
