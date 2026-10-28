@@ -2,7 +2,7 @@
 (() => {
   const databaseName = 'music-importer-local';
   const databaseVersion = 4;
-  const cacheFormatVersion = 4;
+  const cacheFormatVersion = 5;
   const decisionFormatVersion = 2;
   const previousStoreName = 'automatic-matches';
   const storeName = 'catalog-search-results';
@@ -102,7 +102,15 @@
   function recordFor(track, targetProvider, storefront, accountCatalog) {
     if (!track || track.manualQuery || track.searchError || track.searched !== true || !Array.isArray(track.matches)) return null;
     const key = keyFor(track, targetProvider, storefront, accountCatalog);
-    const candidates = track.matches.slice(0, maxCandidatesPerEntry).map(candidateFor).filter(Boolean);
+    const ranked = window.MusicMatcher?.suggestBestMatch?.(track, track.matches)?.ranked?.map((entry) => entry.candidate)
+      || track.matches;
+    const ordered = track.match ? [track.match, ...ranked] : ranked;
+    const seen = new Set();
+    const candidates = ordered.map(candidateFor).filter((candidate) => {
+      if (!candidate || seen.has(candidate.trackId)) return false;
+      seen.add(candidate.trackId);
+      return true;
+    }).slice(0, maxCandidatesPerEntry);
     if (!key || (track.matches.length > 0 && !candidates.length)) return null;
     const now = Date.now();
     return {

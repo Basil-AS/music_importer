@@ -4,7 +4,8 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 function loadCache() {
-  const context = { window: {}, Map, Date, String, Array, Number, JSON, Promise };
+  const context = { window: {}, Map, Date, String, Array, Number, JSON, Promise, Set };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../demo/matcher.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(require.resolve('../demo/match-cache.js'), 'utf8'), context);
   return context.window.MusicMatchCache;
 }
@@ -73,6 +74,42 @@ test('cached result rows keep their original target-scoped identity', async () =
   assert.equal(found.get(cache.keyFor(track, 'spotify')).candidates[0].trackViewUrl, 'https://example.test/track/1');
   await cache.clear();
   assert.equal((await cache.getMany([track], 'spotify')).size, 0);
+});
+
+test('catalog cache keeps the best-ranked candidate when the result list exceeds its cap', async () => {
+  const cache = loadCache();
+  const track = {
+    title: 'Время', artist: 'Моя Мишель', album: 'Кино', durationMs: 210000,
+    isrc: 'USABC1234567', searched: true,
+    matches: Array.from({ length: 15 }, (_, index) => ({
+      trackId: `target-${index + 1}`,
+      trackName: `Unrelated ${index + 1}`,
+      artistName: 'Other Artist',
+    })),
+  };
+  track.matches[14] = {
+    trackId: 'best-target', trackName: 'Время', artistName: 'Моя Мишель',
+    collectionName: 'Кино', isrc: track.isrc, trackTimeMillis: track.durationMs,
+  };
+  assert.equal(await cache.putSearchResults([track], 'spotify'), 1);
+  const candidates = (await cache.getMany([track], 'spotify')).get(cache.keyFor(track, 'spotify')).candidates;
+  assert.equal(candidates.length, 12);
+  assert.equal(candidates[0].trackId, 'best-target');
+});
+
+test('catalog cache retains a user-selected candidate beyond its candidate cap', async () => {
+  const cache = loadCache();
+  const track = {
+    title: 'Source', artist: 'Source Artist', searched: true,
+    matches: Array.from({ length: 15 }, (_, index) => ({
+      trackId: `target-${index + 1}`, trackName: `Candidate ${index + 1}`, artistName: 'Other Artist',
+    })),
+  };
+  track.match = track.matches[14];
+  assert.equal(await cache.putSearchResults([track], 'spotify'), 1);
+  const candidates = (await cache.getMany([track], 'spotify')).get(cache.keyFor(track, 'spotify')).candidates;
+  assert.equal(candidates.length, 12);
+  assert.equal(candidates[0].trackId, 'target-15');
 });
 
 test('Apple preview cache entries are never reused for account catalog IDs', async () => {

@@ -923,6 +923,9 @@
     const cache = window.MusicMatchCache;
     if (!cache || !track) return;
     const context = matchCacheContext();
+    if (track.searched && !track.searchError) {
+      void cache.putSearchResults([track], context.targetProvider, context.storefront, context.accountCatalog);
+    }
     void cache.putDecision(track, context.targetProvider, {
       selected: Boolean(track.selected && track.match),
       trackId: track.match?.trackId || null,
