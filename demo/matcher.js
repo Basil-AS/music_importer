@@ -90,7 +90,7 @@
   function artistScore(sourceArtist, candidateArtist) {
     const splitCredits = (value) => {
       const names = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '') : [String(value || '')];
-      return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with)\s+|,|;|\s*&\s*/i))
+      return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with|and)\s+|,|;|\s*&\s*/i))
         .map(normalizeText).filter(Boolean);
     };
     const source = splitCredits(sourceArtist);
