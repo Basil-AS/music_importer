@@ -170,6 +170,41 @@
     };
   }
 
+  function sanitizeRelease(release) {
+    const artwork = release?.artwork?.url || release?.image?.src || release?.image?.url || release?.coverUrl || release?.imageUrl || '';
+    const trackCount = Number.isInteger(release?.trackCount) ? release.trackCount
+      : Array.isArray(release?.tracks) ? release.tracks.length : null;
+    return {
+      id: String(release?.id || ''),
+      title: String(release?.title || ''),
+      artists: Array.isArray(release?.artists) ? release.artists.map((artist) => ({
+        id: String(artist?.id || ''),
+        title: String(artist?.title || ''),
+      })).filter((artist) => artist.title) : [],
+      trackCount,
+      releaseDate: String(release?.releaseDate || release?.date || release?.year || ''),
+      artworkUrl: String(typeof artwork === 'object' ? '' : artwork),
+    };
+  }
+
+  function releaseItems(section) {
+    const items = Array.isArray(section) ? section : section?.items;
+    return Array.isArray(items) ? items : null;
+  }
+
+  // Saved albums ("releases") ride on the same sectioned collection cursor as playlists. They are
+  // reported as their own page type so completeness can be checked against getCollectionIds separately.
+  function reportReleasePage(section, fallbackPageInfo) {
+    const items = releaseItems(section);
+    if (!items) return null;
+    const pageInfo = section?.page || fallbackPageInfo || {};
+    const hasMore = typeof pageInfo.hasNextPage === 'boolean' ? pageInfo.hasNextPage : Boolean(pageInfo.endCursor);
+    if (hasMore && !pageInfo.endCursor) return false;
+    const releases = items.map(sanitizeRelease).filter((release) => release.id && release.title);
+    post('release-list-page', { releases, hasMore });
+    return true;
+  }
+
   function reportOperation(operation, payload, httpStatus = 200) {
     const operationName = operation.name;
     const diagnostic = {
@@ -199,6 +234,15 @@
       const collection = payload.data?.paginatedCollectionAll || payload.data?.paginatedCollectionAllSections;
       const page = collection?.playlists;
       const items = Array.isArray(page) ? page : page?.items;
+      if (!Array.isArray(items) && releaseItems(collection?.releases)) {
+        // Release-only section page (for example withPlaylists:false).
+        const releasesOk = reportReleasePage(collection.releases, collection?.page);
+        if (releasesOk === false) {
+          lastCollectionDiagnostic = { ...diagnostic, invalidPagination: true };
+          if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
+        }
+        return;
+      }
       if (!Array.isArray(items)) {
         lastCollectionDiagnostic = { ...diagnostic, invalidShape: true };
         if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
@@ -220,6 +264,11 @@
         trackCount: Number.isInteger(playlist.trackCount) ? playlist.trackCount : null,
       })).filter((playlist) => playlist.id && playlist.title);
       post('playlist-list-page', { playlists, hasMore });
+      if (releaseItems(collection?.releases) && reportReleasePage(collection.releases, pageInfo) === false) {
+        lastCollectionDiagnostic = { ...diagnostic, invalidPagination: true };
+        if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
+        return;
+      }
       if (!lastCollectionHasMore && location.pathname.startsWith('/collection')) {
         stopAutoScroll();
         post('collection-scroll-end');
@@ -253,11 +302,19 @@
       return;
     }
 
+    if (operationName === 'getReleases') {
+      const releases = payload.data?.getReleases || payload.data?.releases;
+      if (!Array.isArray(releases)) return;
+      post('release-metadata', { releases: releases.map(sanitizeRelease).filter((release) => release.id && release.title) });
+      return;
+    }
+
     if (operationName === 'getCollectionIds') {
       const collection = payload.data?.collection;
-      if (Array.isArray(collection?.tracks) || Array.isArray(collection?.playlists)) {
+      if (Array.isArray(collection?.tracks) || Array.isArray(collection?.playlists) || Array.isArray(collection?.releases)) {
         post('collection-count', {
           uniqueTrackCount: Array.isArray(collection.tracks) ? new Set(collection.tracks.map((item) => String(item.id || '')).filter(Boolean)).size : null,
+          uniqueReleaseCount: Array.isArray(collection.releases) ? new Set(collection.releases.map((item) => String(item.id || '')).filter(Boolean)).size : null,
           uniquePlaylistCount: Array.isArray(collection.playlists) ? new Set(collection.playlists.map((item) => String(item.id || '')).filter(Boolean)).size : null,
         });
       }
