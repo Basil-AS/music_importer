@@ -12,4 +12,8 @@ The local Chrome extension can search the signed-in Zvuk catalog and write match
 
 These are private, reverse-engineered GraphQL routes, not a supported public API. Names and shapes were cross-checked against [`korenskoy/zvuk-swift`](https://github.com/korenskoy/zvuk-swift) (MIT, HEAD `8245d4e`, 2026-10-20; operation documents note Zvuk Web v8.6.2) and [`trudenboy/zvuk-music`](https://github.com/trudenboy/zvuk-music) (MIT, HEAD `ed491f6`). Those project snapshots do not guarantee that the currently deployed Web API still accepts the same mutation names. No live write has been performed; fixtures cover search, idempotent favorites, batching, playlist order/repeats, and fail-closed behavior only.
 
+## Official import fallback
+
+Zvuk's [official migration guide](https://help.zvuk.com/article/42207) currently supports importing selected playlists from Apple Music, Spotify, Yandex Music, VK, Deezer, and YouTube Music, using provider login or a playlist link depending on source. It creates a separate playlist and imports only tracks present in Zvuk's catalog; it does not add them to favorites. The same guide says exporting a Zvuk library is not supported. This is a useful supported fallback for playlist→Zvuk when a user accepts the service's UI, but it does not replace the writer's favorites path or any Zvuk source connector.
+
 For a first live validation, use a disposable, complete source snapshot and a small transfer after inspecting the exact confirmation summary. Confirm the resulting likes and playlist in Zvuk before using the connector for a large library.
