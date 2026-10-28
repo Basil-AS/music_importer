@@ -847,14 +847,13 @@
       if (controller.signal.aborted) throw new DOMException('Поиск отменён', 'AbortError');
       const pendingSearch = [];
       const accountCatalogIndex = window.MusicAccountCatalog?.buildIndex(state.librarySnapshots[state.targetProvider], state.targetProvider) || new Map();
+      const accountMatches = window.MusicAccountCatalog?.resolveTracks(pending, accountCatalogIndex)?.matches || new Map();
       let accountLibraryCount = 0;
       for (const track of pending) {
         if (track.searched) continue;
         const key = window.MusicMatchCache?.keyFor(track, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true);
         const cached = key ? cacheHits.get(key) : null;
-        const accountCandidates = track.manualQuery
-          ? []
-          : (window.MusicAccountCatalog?.findByISRC(accountCatalogIndex, track) || []);
+        const accountCandidates = accountMatches.get(track) || [];
         const useAccountCandidates = accountCandidates.length > 0;
         if (!useAccountCandidates && !Array.isArray(cached?.candidates)) { pendingSearch.push(track); continue; }
         track.matches = useAccountCandidates ? accountCandidates : cached.candidates;

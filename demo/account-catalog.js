@@ -58,5 +58,16 @@
     return isValidISRC(isrc) ? index.get(isrc) || [] : [];
   }
 
-  window.MusicAccountCatalog = { buildIndex, findByISRC };
+  function resolveTracks(tracks, index) {
+    const matches = new Map();
+    const unresolved = [];
+    for (const track of tracks || []) {
+      const candidates = track?.manualQuery ? [] : findByISRC(index, track);
+      if (candidates.length) matches.set(track, candidates);
+      else unresolved.push(track);
+    }
+    return { matches, unresolved };
+  }
+
+  window.MusicAccountCatalog = { buildIndex, findByISRC, resolveTracks };
 })();

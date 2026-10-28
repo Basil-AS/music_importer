@@ -48,3 +48,29 @@ test('account catalog index refuses incomplete snapshots and never guesses witho
   assert.deepEqual(Array.from(index.keys()), []);
   assert.equal(accountCatalog.findByISRC(index, { title: 'Song', artist: 'Artist' }).length, 0);
 });
+
+test('full target snapshot resolves a 1,000-track transfer without catalog searches, leaving misses and manual queries queued', () => {
+  const accountCatalog = loadAccountCatalog();
+  const targetTracks = Array.from({ length: 1000 }, (_, index) => ({
+    id: `target-${index}`,
+    title: `Song ${index}`,
+    artists: ['Artist'],
+    isrc: `USABC${String(index).padStart(7, '0')}`,
+  }));
+  const snapshot = {
+    service: 'spotify',
+    completeness: { confirmed: true },
+    tracks: targetTracks,
+    playlists: [],
+  };
+  const sourceTracks = targetTracks.map((track) => ({ title: track.title, artist: 'Artist', isrc: track.isrc }));
+  sourceTracks.push({ title: 'Unindexed', artist: 'Artist', isrc: 'USABC9999999' });
+  sourceTracks.push({ title: 'Manual query', artist: 'Artist', isrc: targetTracks[0].isrc, manualQuery: true });
+
+  const index = accountCatalog.buildIndex(snapshot, 'spotify');
+  const resolution = accountCatalog.resolveTracks(sourceTracks, index);
+  assert.equal(resolution.matches.size, 1000);
+  assert.equal(resolution.unresolved.length, 2);
+  assert.equal(resolution.matches.get(sourceTracks[0])[0].trackId, 'target-0');
+  assert.equal(resolution.unresolved[1].manualQuery, true);
+});
