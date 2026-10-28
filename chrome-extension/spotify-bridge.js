@@ -74,7 +74,7 @@
       return false;
     }
     if (message?.type !== 'spotify:command' || !/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || ''))
-      || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) return false;
+      || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'write-albums', 'execute-transfer'].includes(message.action)) return false;
     const requestId = String(message.requestId);
     const timer = setTimeout(() => {
       pendingCommands.delete(requestId);
@@ -89,6 +89,11 @@
       query: String(message.query || '').slice(0, 400),
       album: String(message.album || '').slice(0, 200),
       artist: String(message.artist || '').slice(0, 200),
+      upc: String(message.upc || '').slice(0, 20),
+      ids: Array.isArray(message.ids) ? message.ids.slice(0, 500).map((id) => String(id).slice(0, 80)) : undefined,
+      targets: message.action === 'write-albums' && Array.isArray(message.targets)
+        ? message.targets.slice(0, 500).map((target) => ({ provider: String(target?.provider || ''), providerId: String(target?.providerId || '').slice(0, 80) }))
+        : undefined,
       plan: message.action === 'execute-transfer' ? message.plan : undefined,
     }, location.origin);
     return true;
