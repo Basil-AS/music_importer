@@ -27,6 +27,20 @@
   const playlistTracksQuery = `query getPlaylistTracks($id: ID!, $limit: Int = 100, $offset: Int = 0) {
     playlistTracks(id: $id, limit: $limit, offset: $offset) { id }
   }`;
+  // Zvuk calls albums "releases". The web client sends lowercase item types ('track' is observed in
+  // AddItemsToCollection); the release value follows the same convention but has NOT been observed live.
+  // Keep it a single constant so one edit corrects it if the live write is rejected.
+  const RELEASE_ITEM_TYPE = 'release';
+  const searchReleasesQuery = `query search($query: String, $limit: Int = 20) {
+    search(query: $query) {
+      releases(limit: $limit) {
+        items { id title date artists { id title } tracks { id } }
+      }
+    }
+  }`;
+  const collectionReleaseIdsQuery = `query getCollectionIds {
+    collection { releases { id } }
+  }`;
   const batchSize = 100;
   const checkpointWaiters = new Map();
   let checkpointSequence = 0;
@@ -112,6 +126,67 @@
     const items = data?.search?.tracks?.items;
     if (!Array.isArray(items)) throw new Error('Звук вернул неизвестный формат поиска.');
     return items.map(normalizeCandidate).filter(Boolean);
+  }
+
+  function normalizeAlbumCandidate(item) {
+    const id = idOf(item);
+    const title = String(item?.title || '').trim();
+    const artists = Array.isArray(item?.artists) ? item.artists.map((artist) => String(artist?.title || '')).filter(Boolean) : [];
+    if (!id || !title || !artists.length) return null;
+    const trackCount = Number.isInteger(item?.trackCount) ? item.trackCount : Array.isArray(item?.tracks) ? item.tracks.length : null;
+    return {
+      providerId: id,
+      title,
+      artists,
+      upc: '', // Zvuk exposes no UPC.
+      trackCount,
+      releaseDate: String(item?.releaseDate || item?.date || item?.year || ''),
+      artworkUrl: String(item?.artwork?.url || item?.image?.src || item?.image?.url || item?.coverUrl || ''),
+      albumViewUrl: `https://zvuk.com/release/${encodeURIComponent(id)}`,
+    };
+  }
+
+  async function searchAlbums(query) {
+    const value = String(query || '').trim().slice(0, 400);
+    if (!value) throw new Error('Введите название или исполнителя для поиска альбомов в Звуке.');
+    const data = await graphql('search', searchReleasesQuery, { query: value, limit: 20 });
+    const items = data?.search?.releases?.items;
+    if (!Array.isArray(items)) throw new Error('Звук вернул неизвестный формат поиска альбомов.');
+    return items.map(normalizeAlbumCandidate).filter(Boolean);
+  }
+
+  async function readCollectionReleaseIds() {
+    const data = await graphql('getCollectionIds', collectionReleaseIdsQuery, {});
+    const releases = data?.collection?.releases;
+    if (!Array.isArray(releases)) throw new Error('Звук не вернул список сохранённых альбомов.');
+    const ids = releases.map(idOf);
+    if (ids.some((id) => !id)) throw new Error('В сохранённых альбомах Звука найден релиз без ID.');
+    return new Set(ids);
+  }
+
+  async function writeAlbums(operations, progress, onWriteStarted, checkpoint) {
+    const wanted = [...new Set(operations.map((operation) => String(operation?.target?.providerId || '')).filter(Boolean))];
+    if (!wanted.length) return { requested: 0, added: 0, alreadyPresent: 0, verified: 0 };
+    const before = await readCollectionReleaseIds();
+    const missing = wanted.filter((id) => !before.has(id));
+    let added = 0;
+    if (missing.length && !await checkpoint({ phase: 'albums-writing', completed: 0, total: missing.length })) {
+      throw new Error('Не удалось локально сохранить контрольную точку перед добавлением альбомов. Запись остановлена без изменения аккаунта.');
+    }
+    for (let offset = 0; offset < missing.length; offset += batchSize) {
+      const ids = missing.slice(offset, offset + batchSize);
+      onWriteStarted?.();
+      const data = await graphql('AddItemsToCollection', addFavoritesMutation, {
+        items: ids.map((id) => ({ id, type: RELEASE_ITEM_TYPE })),
+      });
+      if (!data?.collection || !Object.hasOwn(data.collection, 'addItems')) throw new Error('Звук не подтвердил добавление альбомов.');
+      added += ids.length;
+      progress?.({ phase: 'albums-write', completed: added, total: missing.length, message: `Добавляем альбомы в Звук: ${added} из ${missing.length}.` });
+    }
+    const after = await readCollectionReleaseIds();
+    const verified = wanted.filter((id) => after.has(id)).length;
+    if (verified !== wanted.length) throw new Error(`Обратная сверка альбомов Звука подтвердила ${verified} из ${wanted.length}.`);
+    return { requested: wanted.length, added, alreadyPresent: wanted.length - missing.length, verified };
   }
 
   async function readFavoriteIds(progress = null, expectedIds = []) {
@@ -209,22 +284,25 @@
   async function executeTransfer(plan, requestId) {
     if (!plan || plan.type !== 'music-transfer-plan' || plan.target?.provider !== 'zvuk') throw new Error('Нужен план переноса с целью «Звук».');
     if (!Array.isArray(plan.operations) || (!plan.operations.length && !plan.collectionMappings?.length)) throw new Error('В плане нет выбранных совпадений или плейлистов.');
-    if (!['favorites', 'playlists', 'library'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
+    if (!['favorites', 'playlists', 'library', 'albums'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
     if (!Array.isArray(plan.completeness?.source) || !plan.completeness.source.length || plan.completeness.source.some((status) => status?.confirmed !== true)) {
       throw new Error('Запись остановлена: полнота исходной библиотеки не подтверждена.');
     }
     if (plan.operations.some((operation) => !operation?.target?.providerId)) throw new Error('В плане есть совпадение без ID трека назначения.');
-    const report = { status: 'writing', targetProvider: 'zvuk', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
+    const report = { status: 'writing', targetProvider: 'zvuk', startedAt: new Date().toISOString(), favorites: null, albums: null, playlists: [], failures: [] };
     let writesStarted = false;
     const progress = (value) => post('transfer-progress', {
       requestId,
       progress: { ...value, message: value.message || `Перенос в Звук: ${value.completed || 0}${value.total ? ` из ${value.total}` : ''}.` },
     });
     try {
-      const favorites = plan.target.collectionType === 'playlists' ? [] : plan.operations.filter((operation) => operation.operation === 'add_to_favorites');
+      const favorites = ['playlists', 'albums'].includes(plan.target.collectionType) ? [] : plan.operations.filter((operation) => operation.operation === 'add_to_favorites');
       report.favorites = await writeFavorites(favorites, progress, () => { writesStarted = true; });
+      const albumOperations = plan.operations.filter((operation) => operation.operation === 'add_album');
+      report.albums = await writeAlbums(albumOperations, progress, () => { writesStarted = true; },
+        (value) => awaitCheckpoint(requestId, value));
       const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist');
-      const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+      const mappings = ['favorites', 'albums'].includes(plan.target.collectionType) ? [] : (plan.collectionMappings || []);
       const recovery = plan.recovery && typeof plan.recovery === 'object' ? plan.recovery : {};
       const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
       const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
@@ -287,7 +365,7 @@
       report.finishedAt = new Date().toISOString();
       return report;
     } catch (error) {
-      report.status = writesStarted || report.favorites?.verified || report.playlists.length ? 'partial_failure' : 'failed';
+      report.status = writesStarted || report.favorites?.verified || report.albums?.verified || report.playlists.length ? 'partial_failure' : 'failed';
       report.error = error instanceof Error ? error.message : 'Звук не завершил перенос.';
       report.finishedAt = new Date().toISOString();
       throw Object.assign(new Error(report.error), { transferReport: report });
@@ -306,6 +384,19 @@
         post('command-response', {
           requestId, ok: false,
           error: error instanceof Error ? error.message : 'Поиск в Звуке не выполнен.',
+          status: Number(error?.status) || null,
+          retryAfter: error?.retryAfter || null,
+        });
+      }
+    }
+    if (event.data.type === 'search-albums') {
+      try {
+        const results = await searchAlbums(event.data.query);
+        post('command-response', { requestId, ok: true, results });
+      } catch (error) {
+        post('command-response', {
+          requestId, ok: false,
+          error: error instanceof Error ? error.message : 'Поиск альбомов в Звуке не выполнен.',
           status: Number(error?.status) || null,
           retryAfter: error?.retryAfter || null,
         });
