@@ -172,7 +172,7 @@
       const artist = escapeHTML(track.artist || (missingMetadata ? 'Введите название или исполнителя для ручного поиска' : ''));
       const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.userExcluded ? 'Исключено вами' : missingMetadata && !track.query ? 'Нужны данные' : track.searched && !track.matches.length ? (track.cachedResults ? 'Нет совпадений · кэш' : 'Не найдено') : track.match ? (track.accountLibraryMatch ? `Уже в аккаунте · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? (track.cachedResults ? 'Проверьте · кэш' : 'Проверьте') : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : !track.userExcluded && track.searched && track.matches.length ? 'review' : 'pending';
-      const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
+      const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', spotify: 'Spotify', zvuk: 'Сбер.Звук' })[state.targetProvider] || state.targetProvider;
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
       const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.accountLibraryMatch ? `Уже в библиотеке аккаунта · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Из локального кэша · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
@@ -255,7 +255,7 @@
     if (state.targetProvider) void searchCatalog();
   }
 
-  const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+  const sourceLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
 
   function renderSourceAvailability(statuses = {}) {
     if (Object.keys(statuses).length) state.libraryStatuses = { ...statuses };
@@ -614,7 +614,7 @@
     async searchTracks(track) {
       return searchWithMetadataFallback(track, async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query });
-        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Яндекс Музыки.');
+        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Яндекс.Музыки.');
         return response.results;
       });
     },
@@ -630,7 +630,7 @@
     async searchTracks(track) {
       return searchWithMetadataFallback(track, async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query }, 'zvuk');
-        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Звука.');
+        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Сбер.Звука.');
         return response.results;
       });
     },
@@ -747,8 +747,13 @@
   }
 
   function updateTargetLabel() {
-    const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' };
-    const symbols = { 'apple-music': '♫', 'yandex-music': 'Я', spotify: '●', zvuk: 'з' };
+    const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', spotify: 'Spotify', zvuk: 'Сбер.Звук' };
+    const logoPaths = {
+      'apple-music': 'assets/providers/apple-music.png',
+      'yandex-music': 'assets/providers/yandex-music.png',
+      spotify: 'assets/providers/spotify.png',
+      zvuk: 'assets/providers/zvuk.png',
+    };
     const sourceProvider = state.sourceSnapshot?.provider || (state.loaded ? state.sourceProvider : '');
     const targetSelect = $('#targetProvider');
     for (const option of targetSelect.options) {
@@ -760,7 +765,16 @@
     }
     const label = labels[state.targetProvider] || '';
     const providerIcon = $('#targetProviderIcon');
-    providerIcon.textContent = symbols[state.targetProvider] || '♫';
+    const logoPath = logoPaths[state.targetProvider];
+    if (logoPath) {
+      const logo = document.createElement('img');
+      logo.className = 'provider-logo';
+      logo.src = logoPath;
+      logo.alt = '';
+      providerIcon.replaceChildren(logo);
+    } else {
+      providerIcon.textContent = '♫';
+    }
     providerIcon.dataset.provider = state.targetProvider || '';
     $('#targetProviderName').textContent = label;
     $('#review-heading').textContent = label ? `Сверка с каталогом ${label}` : 'Сверка с каталогом назначения';
@@ -770,7 +784,7 @@
     $('#importBtn').innerHTML = ({
       'yandex-music': 'Перенести в Яндекс Музыку <span aria-hidden="true">→</span>',
       'apple-music': 'Перенести в Apple Music <span aria-hidden="true">→</span>',
-      zvuk: 'Перенести в Звук <span aria-hidden="true">→</span>',
+      zvuk: 'Перенести в Сбер.Звук <span aria-hidden="true">→</span>',
       spotify: 'Перенести в Spotify <span aria-hidden="true">→</span>',
     })[state.targetProvider] || 'Выберите сервис назначения';
     $('#targetCollection').textContent = state.collectionType === 'library'
@@ -1014,11 +1028,11 @@
         },
         signal: controller.signal,
         onRequestStart: ({ completed: finishedGroups, total }) => {
-          const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыки', spotify: 'Spotify', zvuk: 'Звука' };
+          const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыки', spotify: 'Spotify', zvuk: 'Сбер.Звука' };
           $('#searchStatus').textContent = `Ищем в каталоге ${labels[state.targetProvider] || state.targetProvider}: обработано ${completed} из ${state.tracks.length} · запросы ${finishedGroups} из ${total}`;
         },
         onRetry: ({ status, attempt, maxRetries, delayMs }) => {
-          const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' };
+          const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', spotify: 'Spotify', zvuk: 'Сбер.Звук' };
           const seconds = Math.ceil(delayMs / 1000);
           $('#searchStatus').textContent = `${labels[state.targetProvider] || state.targetProvider}: HTTP ${status || 'network'}; повтор ${attempt}/${maxRetries} через ${seconds} с · обработано ${completed} из ${state.tracks.length}`;
         },
@@ -1072,7 +1086,7 @@
     } finally {
       state.searching = false;
       if (activeSearchController === controller) activeSearchController = null;
-      const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыке', spotify: 'Spotify', zvuk: 'Звуке' };
+      const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыке', spotify: 'Spotify', zvuk: 'Сбер.Звуке' };
       $('#searchBtn').textContent = `Найти в ${labels[state.targetProvider] || state.targetProvider}`;
       renderTracks();
     }
@@ -1091,7 +1105,7 @@
     });
   }
 
-  const providerLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+  const providerLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
 
   function renderUnresolvedTransferJob() {
     const job = state.unresolvedTransferJob;
@@ -1194,7 +1208,7 @@
       let label = file.name;
       let tracks;
       let payload = null;
-      const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+      const sourceLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
       if (file.name.toLowerCase().endsWith('.json')) {
         payload = JSON.parse(text);
         tracks = normalizeJSON(payload);
@@ -1277,7 +1291,7 @@
     try {
       const response = await requestOpenProviderTabs();
       if (!response?.ok) throw new Error(response?.error || 'Не удалось открыть сервисы.');
-      const names = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+      const names = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
       const opened = (response.opened || []).map((id) => names[id] || id);
       const alreadyOpen = (response.alreadyOpen || []).map((id) => names[id] || id);
       $('#extensionStatus').textContent = opened.length
@@ -1485,7 +1499,7 @@
           throw new Error('Для записи нужен полный snapshot. Пример и ручной CSV остаются в preview-only режиме.');
         }
         const playlistCount = plan.collectionMappings.length;
-        const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', zvuk: 'Звук', spotify: 'Spotify' })[state.targetProvider] || state.targetProvider;
+        const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', zvuk: 'Сбер.Звук', spotify: 'Spotify' })[state.targetProvider] || state.targetProvider;
         if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
         state.transferInProgress = true;
         $('#importBtn').disabled = true;

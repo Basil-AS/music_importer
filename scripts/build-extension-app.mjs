@@ -17,6 +17,10 @@ const assets = [
   'transfer-engine.js',
   'transfer-safety.js',
   'transfer-job-store.js',
+  'assets/providers/spotify.png',
+  'assets/providers/apple-music.png',
+  'assets/providers/yandex-music.png',
+  'assets/providers/zvuk.png',
 ];
 const checkOnly = process.argv.includes('--check');
 const staleAssets = [];

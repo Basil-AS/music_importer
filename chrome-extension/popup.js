@@ -130,7 +130,7 @@ function getCompleteness(state) {
   const completePlaylists = state.playlists.filter((playlist) => playlist.complete).length;
   const playlistsWithItems = state.playlists.filter((playlist) => playlist.pagesSeen).length;
   if (playlistsWithItems) parts.push(`Треки собраны для ${completePlaylists} из ${state.playlists.length} плейлистов.`);
-  return parts.join(' ') || 'Откройте «Любимое» или «Коллекция» в Звуке.';
+  return parts.join(' ') || 'Откройте «Любимое» или «Коллекция» в Сбер.Звуке.';
 }
 
 async function render() {
@@ -164,7 +164,7 @@ $('#startBtn').addEventListener('click', async () => {
   let isZvuk = false;
   try { isZvuk = new URL(tab?.url || '').origin === 'https://zvuk.com'; } catch { /* No active page URL. */ }
   if (!tab?.id || !isZvuk) {
-    $('#completeness').textContent = 'Откройте Звук и войдите в свой аккаунт. Запуск не читает пароль или токены.';
+    $('#completeness').textContent = 'Откройте Сбер.Звук и войдите в свой аккаунт. Запуск не читает пароль или токены.';
     return;
   }
   const result = await send('start-library', { tabId: tab.id });

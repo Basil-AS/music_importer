@@ -220,7 +220,7 @@ async function advanceAccountScan(state) {
     }
     const tab = await chrome.tabs.get(state.scan.tabId).catch(() => null);
     if (!tab || pageKind(tab.url) !== 'collection') {
-      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Не удалось открыть список плейлистов в Звуке.' };
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Не удалось открыть список плейлистов в Сбер.Звуке.' };
       await writeState(state);
       return;
     }
@@ -237,9 +237,9 @@ async function startAccountScan(tabId, { forceRefresh = false } = {}) {
   const tab = Number.isInteger(numericTabId) ? await chrome.tabs.get(numericTabId).catch(() => null) : null;
   let origin = '';
   try { origin = new URL(tab?.url || '').origin; } catch { /* Invalid or unavailable tab URL. */ }
-  if (!tab || origin !== 'https://zvuk.com') return { ok: false, error: 'Войдите в Звук в этой вкладке и повторите запуск.' };
+  if (!tab || origin !== 'https://zvuk.com') return { ok: false, error: 'Войдите в Сбер.Звук в этой вкладке и повторите запуск.' };
   const state = await readState();
-  if (state.scan?.active) return { ok: false, error: 'Сбор библиотеки Звука уже выполняется.' };
+  if (state.scan?.active) return { ok: false, error: 'Сбор библиотеки Сбер.Звука уже выполняется.' };
   if ((state.tracks.length || state.playlists.length) && !forceRefresh) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
   const currentSnapshot = createLibraryPayload(state);
   if (currentSnapshot.completeness.confirmed) state.previousCompleteSnapshot = currentSnapshot;
@@ -435,7 +435,7 @@ async function requestZvukLibrary(refresh) {
   if (state.scan?.active) {
     const lastActivity = Date.parse(state.updatedAt || state.scan.startedAt || '');
     if (Number.isFinite(lastActivity) && Date.now() - lastActivity > PROVIDER_SCAN_STALE_AFTER_MS) {
-      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; повторите сканирование.' };
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Сбер.Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; повторите сканирование.' };
       state.captureEnabled = false;
       state.automation = { ...state.automation, active: false };
       state.error = state.scan.error;
@@ -445,31 +445,31 @@ async function requestZvukLibrary(refresh) {
     }
     return {
       pending: true,
-      progress: state.scan.message || `Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
+      progress: state.scan.message || `Сбер.Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
       payload: state.previousCompleteSnapshot || null,
       cached: Boolean(state.previousCompleteSnapshot),
       stale: Boolean(state.previousCompleteSnapshot),
     };
   }
   if (!refresh && lastGoodSnapshot?.completeness?.confirmed === true) {
-    return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Звука.' };
+    return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Сбер.Звука.' };
   }
-  if (!refresh) return { error: state.error || 'Сбор библиотеки Звука не запускался.' };
+  if (!refresh) return { error: state.error || 'Сбор библиотеки Сбер.Звука не запускался.' };
   let tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
   if (!tabs.length) tabs = await chrome.tabs.query({ url: 'https://zvuk.com/*' });
   const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
   if (!tab?.id) {
-    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: 'Откройте Звук, чтобы обновить сохранённый снимок.' };
-    return { error: 'Откройте Звук в Chrome и войдите в аккаунт.' };
+    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: 'Откройте Сбер.Звук, чтобы обновить сохранённый снимок.' };
+    return { error: 'Откройте Сбер.Звук в Chrome и войдите в аккаунт.' };
   }
   const result = await startAccountScan(tab.id, { forceRefresh: true });
   if (!result?.ok) {
-    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: result?.error || 'Не удалось обновить Звук; сохранён последний полный снимок.' };
-    return { error: result?.error || 'Не удалось запустить сбор библиотеки Звука.' };
+    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: result?.error || 'Не удалось обновить Сбер.Звук; сохранён последний полный снимок.' };
+    return { error: result?.error || 'Не удалось запустить сбор библиотеки Сбер.Звука.' };
   }
   return {
     pending: true,
-    progress: 'Звук: собираем лайки, каталог и содержимое плейлистов.',
+    progress: 'Сбер.Звук: собираем лайки, каталог и содержимое плейлистов.',
     payload: lastGoodSnapshot?.completeness?.confirmed === true ? lastGoodSnapshot : null,
     cached: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
     stale: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
@@ -603,7 +603,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
-        sendResponse({ ok: false, error: 'Некорректная команда Звука.' });
+        sendResponse({ ok: false, error: 'Некорректная команда Сбер.Звука.' });
         return;
       }
       if (message.action === 'execute-transfer') {
@@ -613,7 +613,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           || plan.operations.some((operation) => operation?.target?.provider !== 'zvuk' || !operation?.target?.providerId)
           || !Array.isArray(plan.completeness?.source) || !plan.completeness.source.length
           || plan.completeness.source.some((status) => status?.confirmed !== true)) {
-          sendResponse({ ok: false, error: 'План Звука неполный или содержит другую цель.' });
+          sendResponse({ ok: false, error: 'План Сбер.Звука неполный или содержит другую цель.' });
           return;
         }
       }
@@ -622,7 +622,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
         || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
       if (!tab?.id) {
-        sendResponse({ ok: false, error: 'Откройте вкладку Звука и войдите в аккаунт, затем повторите.' });
+        sendResponse({ ok: false, error: 'Откройте вкладку Сбер.Звука и войдите в аккаунт, затем повторите.' });
         return;
       }
       try {
@@ -635,9 +635,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           artist: String(message.artist || '').slice(0, 200),
           plan: message.action === 'execute-transfer' ? message.plan : undefined,
         });
-        sendResponse(response || { ok: false, error: 'Звук не вернул результат.' });
+        sendResponse(response || { ok: false, error: 'Сбер.Звук не вернул результат.' });
       } catch {
-        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Звука. Перезагрузите её и повторите.' });
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Сбер.Звука. Перезагрузите её и повторите.' });
       }
       return;
     }
@@ -769,7 +769,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       if (!['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
-        sendResponse({ ok: false, error: 'Неизвестная команда Яндекс Музыки.' });
+        sendResponse({ ok: false, error: 'Неизвестная команда Яндекс.Музыки.' });
         return;
       }
       const tabs = await chrome.tabs.query({ url: 'https://music.yandex.ru/*' });
@@ -790,9 +790,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           artist: String(message.artist || '').slice(0, 200),
           plan: message.plan,
         });
-        sendResponse(response || { ok: false, error: 'Расширение Яндекс Музыки не вернуло результат.' });
+        sendResponse(response || { ok: false, error: 'Расширение Яндекс.Музыки не вернуло результат.' });
       } catch {
-        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Яндекс Музыки. Перезагрузите её.' });
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Яндекс.Музыки. Перезагрузите её.' });
       }
       return;
     }
@@ -805,7 +805,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const state = await readState();
       const payload = createLibraryPayload(state);
       if (!payload.completeness.confirmed) {
-        sendResponse({ error: 'Сначала завершите полный сбор Звука и дождитесь подтверждения лайков и всех плейлистов.' });
+        sendResponse({ error: 'Сначала завершите полный сбор Сбер.Звука и дождитесь подтверждения лайков и всех плейлистов.' });
         return;
       }
       sendResponse({ payload });
@@ -1016,7 +1016,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === 'zvuk:scan-progress') {
-      state.scan = { ...state.scan, message: String(message.message || 'Сканируем библиотеку Звука.').slice(0, 240) };
+      state.scan = { ...state.scan, message: String(message.message || 'Сканируем библиотеку Сбер.Звука.').slice(0, 240) };
       state.updatedAt = new Date().toISOString();
       await writeState(state);
       sendResponse({ ok: true });
@@ -1130,7 +1130,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === 'zvuk:read-error') {
-      state.error = 'Звук вернул ошибку при чтении страницы.';
+      state.error = 'Сбер.Звук вернул ошибку при чтении страницы.';
       const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
       const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;
       if (state.scan?.active && state.scan.tabId === sender.tab?.id && state.scan.phase !== 'playlists_items') {
