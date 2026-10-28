@@ -90,28 +90,8 @@ chrome.runtime.onInstalled?.addListener((details) => {
   void chrome.tabs.create({ url: extensionAppUrl }).catch(() => {});
 });
 
-function isLocalImporterPage(urlValue) {
-  try {
-    const url = new URL(urlValue || '');
-    return APP_ORIGINS.has(url.origin) && url.origin !== 'https://basil-as.github.io' && url.pathname === '/';
-  } catch {
-    return false;
-  }
-}
-
 chrome.action?.onClicked?.addListener(async (activeTab) => {
   if (!extensionAppUrl) return;
-  if (isLocalImporterPage(activeTab?.url)) {
-    const optionsUrl = chrome.runtime.getURL('popup.html');
-    const optionsTabs = await chrome.tabs.query({}).catch(() => []);
-    const existingOptionsTab = optionsTabs.find((tab) => tab.id && tab.url === optionsUrl);
-    if (existingOptionsTab?.id) {
-      await chrome.tabs.update(existingOptionsTab.id, { active: true });
-      return;
-    }
-    await chrome.tabs.create({ url: optionsUrl });
-    return;
-  }
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find((tab) => tab.url === extensionAppUrl);
   if (existing?.id) {

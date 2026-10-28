@@ -153,11 +153,11 @@ test('extension updates do not open an extra importer tab', async () => {
   assert.deepEqual(worker.createdTabs, []);
 });
 
-test('extension icon opens the local-page connection panel when the localhost app is active', async () => {
+test('extension icon opens the importer app when the localhost app is active', async () => {
   const worker = bootWorker({}, [{ id: 7, url: 'http://127.0.0.1:8001/', active: true }]);
   await worker.clickAction({ id: 7, url: 'http://127.0.0.1:8001/' });
   assert.deepEqual(JSON.parse(JSON.stringify(worker.createdTabs)), [
-    { url: 'chrome-extension://fixture-extension/popup.html' },
+    { url: 'chrome-extension://fixture-extension/app/index.html' },
   ]);
 });
 
