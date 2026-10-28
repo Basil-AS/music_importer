@@ -12,23 +12,39 @@ function loadFlow() {
 test('unavailable account cards offer a login action only after the extension connects', () => {
   const { sourceAction } = loadFlow();
   assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: false }))), {
+    action: 'none',
     disabled: true,
     label: 'Нет соединения',
     title: 'Сначала запустите Music Importer в Chrome.',
   });
   assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true }))), {
+    action: 'login',
     disabled: false,
     label: 'Войти / открыть',
     title: 'Откроется страница входа в музыкальный сервис.',
   });
   assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true, opening: true }))), {
+    action: 'opening',
     disabled: true,
     label: 'Открываем…',
     title: '',
   });
   assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true, status: { status: 'scanning' } }))), {
+    action: 'none',
     disabled: true,
     label: 'Сканируем…',
+    title: '',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true, status: { status: 'failed', message: 'Ошибка чтения' } }))), {
+    action: 'retry',
+    disabled: false,
+    label: 'Повторить сбор',
+    title: 'Ошибка чтения',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true, snapshot: {}, selected: true }))), {
+    action: 'select',
+    disabled: false,
+    label: '✓ Источник',
     title: '',
   });
 });
@@ -50,6 +66,11 @@ test('account cards call the selected-provider opener and focus refresh includes
   assert.match(app, /providersForFocusRefresh\([\s\S]*state\.pendingLoginProviders/);
   assert.match(app, /document\.addEventListener\('visibilitychange'/);
   assert.doesNotMatch(app, /if \(!extensionApp \|\| !state\.extensionAvailable \|\| document\.visibilityState/);
+});
+
+test('failed provider cards retry only that provider instead of reopening its login page', () => {
+  const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
+  assert.match(app, /action\.action === 'retry'[\s\S]*?scanOpenAccounts\(false, \[provider\]\)/);
 });
 
 test('account-first copy names likes and playlists and presents CSV/JSON as an alternative', () => {

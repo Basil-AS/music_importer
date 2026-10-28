@@ -1250,8 +1250,24 @@
     }
     const card = button.closest('.source');
     const provider = card.dataset.provider;
+    const action = window.MusicProviderConnectionFlow.sourceAction({
+      extensionAvailable: state.extensionAvailable,
+      snapshot: state.librarySnapshots[provider],
+      status: state.libraryStatuses[provider],
+      providerName: sourceLabels[provider],
+      selected: card.classList.contains('selected'),
+      opening: state.openingProviderTabs.has(provider),
+    });
     if (provider && state.librarySnapshots[provider]) {
       selectProviderSnapshot(provider);
+      return;
+    }
+    if (action.action === 'retry') {
+      if (accountScanInProgress) {
+        toast('Дождитесь завершения текущего сбора библиотек.');
+        return;
+      }
+      void scanOpenAccounts(false, [provider]);
       return;
     }
     void openProviderLogin(provider);
