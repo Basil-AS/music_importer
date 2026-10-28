@@ -16,6 +16,12 @@
 | Создать playlist | `POST /users/{uid}/playlists/create` | Form fields `title`, `visibility=private`; далее из ответа требуется playlist `kind`. |
 | Добавить playlist items | `POST /users/{uid}/playlists/{kind}/change-relative` | Form fields `revision` и `diff={op:"insert",at,tracks:[{id,albumId}]}`. Перед batch читается свежая revision и текущий trackCount. После вставки перечитываются IDs и порядок. |
 
+## Чтение длинных плейлистов
+
+Для чтения detail endpoint `GET /users/{uid}/playlists/{kind}` поддерживает `page`, `pageSize`, `trackPlayCounts` и `richTracks` в актуальном reverse-engineered Rust-клиенте; модель `Pager` описывает `total` как общее число треков и `per_page` как размер страницы. Поэтому reader запрашивает страницы последовательно с `page=1&pageSize=100&trackPlayCounts=false&richTracks=true`, проверяет номер/размер/total на каждой странице и сверяет агрегат с независимым `trackCount` каталога. Если сервер перестаёт отдавать pager, меняет total или возвращает пустую страницу раньше конца, snapshot отклоняется целиком.
+
+Это неофициальный контракт: Rust client и MarshalX — reverse-engineered community sources, а не документация/SLA Яндекса. Pagination покрыта fixtures для двух страниц и fail-closed ошибок, но пока не подтверждена на живом аккаунте. [Параметры endpoint](https://docs.rs/yandex-music/latest/yandex_music/api/playlist/get_playlist/struct.GetPlaylistOptions.html) · [модель Pager](https://ym.marshal.dev/yandex_music.pager/).
+
 Route families и формы сверены со статическим source audit community clients: [sonrac/yandex-music-api](https://github.com/sonrac/yandex-music-api/blob/master/src/Yandex.php), [MarshalX/yandex-music-api docs](https://github.com/MarshalX/yandex-music-api) и современным [okhsunrog/yamu](https://github.com/okhsunrog/yamu). Это не официальный SLA Яндекса.
 
 ## Защита от неверного переноса

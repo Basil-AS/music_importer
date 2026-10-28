@@ -2,6 +2,8 @@
   const marker = 'music-importer-yandex';
   const api = 'https://api.music.yandex.ru';
   const batchSize = 25;
+  const playlistPageSize = 100;
+  const maxPlaylistPages = 2000;
   let scanPromise = null;
   const checkpointWaiters = new Map();
   let checkpointSequence = 0;
@@ -221,25 +223,76 @@
     return null;
   }
 
+  function playlistPager(detail, requestedPage, refs, expectedTotal, title) {
+    const pager = detail?.pager;
+    if (!pager || typeof pager !== 'object' || Array.isArray(pager)) return null;
+    const total = Number(pager.total);
+    const page = Number(pager.page);
+    const perPage = Number(pager.perPage ?? pager.per_page ?? pager.pageSize ?? pager.page_size);
+    if (!Number.isInteger(total) || total !== expectedTotal
+      || !Number.isInteger(page) || page !== requestedPage
+      || !Number.isInteger(perPage) || perPage < 0
+      || (perPage > 0 && refs.length > perPage)) {
+      throw new Error(`Счётчик страниц плейлиста «${title}» не сошёлся с библиотекой.`);
+    }
+    return { total, page, perPage };
+  }
+
   async function readPlaylist(uid, playlist) {
     const ownerId = String(playlist.uid ?? playlist.owner?.uid ?? uid);
     const kind = String(playlist.kind ?? playlist.id ?? '');
     if (!kind) throw new Error('В каталоге Яндекс Музыки есть playlist без kind.');
-    const result = await libraryRequest(`/users/${encodeURIComponent(ownerId)}/playlists/${encodeURIComponent(kind)}`);
-    const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
-    const refs = asArray(detail);
-    const total = Number(detail?.trackCount ?? detail?.track_count ?? playlist.trackCount ?? playlist.track_count);
-    if (!refs || !Number.isInteger(total)) throw new Error(`Нет подтверждённого состава плейлиста «${playlist.title || playlist.name || kind}».`);
+    const title = String(playlist.title || playlist.name || kind);
+    const rawCatalogTotal = playlist.trackCount ?? playlist.track_count;
+    const totalFromCatalog = rawCatalogTotal === undefined || rawCatalogTotal === null ? null : Number(rawCatalogTotal);
+    const getPage = async (page) => {
+      const params = new URLSearchParams({
+        page: String(page), pageSize: String(playlistPageSize), trackPlayCounts: 'false', richTracks: 'true',
+      });
+      const result = await libraryRequest(`/users/${encodeURIComponent(ownerId)}/playlists/${encodeURIComponent(kind)}?${params}`);
+      const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
+      const refs = asArray(detail);
+      return { detail, refs };
+    };
+    const first = await getPage(1);
+    const refs = first.refs;
+    const total = Number(first.detail?.trackCount ?? first.detail?.track_count ?? totalFromCatalog);
+    if (!refs || !Number.isInteger(total) || total < 0
+      || (totalFromCatalog !== null && (!Number.isInteger(totalFromCatalog) || total !== totalFromCatalog))) {
+      throw new Error(`Нет подтверждённого состава плейлиста «${title}».`);
+    }
+    const pages = [...refs];
+    let pageInfo = playlistPager(first.detail, 1, refs, total, title);
+    if (pages.length > total) throw new Error(`Ответ плейлиста «${title}» содержит больше треков, чем каталог.`);
+    if (pages.length < total && !pageInfo) {
+      throw new Error(`Плейлист «${title}» обрезан, а API не вернул данные пагинации.`);
+    }
+    if (pages.length < total) post('scan-progress', { phase: 'playlists', message: `Плейлист «${title}»: получено ${pages.length} из ${total} треков.` });
+    let page = 1;
+    while (pages.length < total) {
+      if (!pageInfo || page >= maxPlaylistPages) throw new Error(`Не удалось дочитать все страницы плейлиста «${title}».`);
+      page += 1;
+      const next = await getPage(page);
+      if (!next.refs || !next.refs.length) throw new Error(`Страница ${page} плейлиста «${title}» оказалась пустой до конца списка.`);
+      const nextTotal = Number(next.detail?.trackCount ?? next.detail?.track_count ?? totalFromCatalog);
+      if (nextTotal !== total) throw new Error(`Размер плейлиста «${title}» изменился во время чтения; повторите сбор.`);
+      pageInfo = playlistPager(next.detail, page, next.refs, total, title);
+      if (!pageInfo) throw new Error(`Яндекс Музыка потеряла счётчик страниц плейлиста «${title}».`);
+      pages.push(...next.refs);
+      if (pages.length > total) throw new Error(`Страницы плейлиста «${title}» содержат больше треков, чем заявлено.`);
+      post('scan-progress', { phase: 'playlists', message: `Плейлист «${title}»: получено ${pages.length} из ${total} треков.` });
+    }
+    if (pageInfo && pageInfo.total !== total) throw new Error(`Полнота плейлиста «${title}» не сошлась с каталогом.`);
     let rows;
-    if (refs.every((row) => (row?.track || row)?.title && (row?.track || row)?.artists)) rows = refs.map((row) => row?.track || row);
-    else rows = await hydrate(refs.map(trackId), `Плейлист ${playlist.title || playlist.name || kind}`);
+    if (pages.every((row) => (row?.track || row)?.title && (row?.track || row)?.artists)) rows = pages.map((row) => row?.track || row);
+    else rows = await hydrate(pages.map(trackId), `Плейлист ${title}`);
     const tracks = rows.map((row, position) => normalizeLibraryTrack(row, position));
-    if (tracks.length !== total) throw new Error(`Полнота плейлиста «${playlist.title || playlist.name || kind}» не сошлась: ${tracks.length} из ${total}.`);
+    if (tracks.length !== total) throw new Error(`Полнота плейлиста «${title}» не сошлась: ${tracks.length} из ${total}.`);
     return {
       id: `yandex:${ownerId}:${kind}`,
-      title: String(playlist.title || playlist.name || detail.title || `Плейлист ${kind}`),
+      title: String(playlist.title || playlist.name || first.detail.title || `Плейлист ${kind}`),
       trackCount: total,
-      revision: String(detail?.revision || ''),
+      revision: String(first.detail?.revision || ''),
       complete: true,
       tracks,
       metadataIncompleteCount: tracks.filter((track) => !track.metadataComplete).length,
@@ -601,7 +654,11 @@
       const payload = await scanLibrary();
       post('library-snapshot', { payload });
     } catch (error) {
-      post('scan-error', { error: error instanceof Error ? error.message : 'Не удалось прочитать библиотеку Яндекс Музыки.' });
+      post('scan-error', {
+        error: typeof error?.message === 'string' && error.message
+          ? error.message.slice(0, 500)
+          : 'Не удалось прочитать библиотеку Яндекс Музыки.',
+      });
     }
   });
 })();

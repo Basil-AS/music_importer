@@ -105,6 +105,63 @@ test('Yandex source reader confirms favorites, every playlist, order, and empty 
   assert.ok(page.requests.every((request) => request.init.credentials === 'include'));
 });
 
+test('Yandex source reader follows playlist pages and preserves item order', async () => {
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') {
+      return { result: { playlists: [{ uid: 42, kind: 30, title: 'Paged', trackCount: 3 }] } };
+    }
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [30] };
+    if (parsed.pathname === '/users/42/playlists/30' && init.method !== 'POST') {
+      const requestedPage = Number(parsed.searchParams.get('page'));
+      assert.equal(parsed.searchParams.get('pageSize'), '100');
+      assert.equal(parsed.searchParams.get('trackPlayCounts'), 'false');
+      assert.equal(parsed.searchParams.get('richTracks'), 'true');
+      if (requestedPage === 1) return { result: { playlist: {
+        title: 'Paged', revision: 3, trackCount: 3, pager: { total: 3, page: 1, per_page: 2 }, tracks: [
+          { id: 'paged-1', track: song('paged-1', 'First') },
+          { id: 'paged-2', track: song('paged-2', 'Second') },
+        ],
+      } } };
+      if (requestedPage === 2) return { result: { playlist: {
+        title: 'Paged', revision: 3, trackCount: 3, pager: { total: 3, page: 2, per_page: 2 }, tracks: [
+          { id: 'paged-3', track: song('paged-3', 'Third') },
+        ],
+      } } };
+    }
+    throw new Error(`Unexpected Yandex request: ${init.method || 'GET'} ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => track.id), ['paged-1', 'paged-2', 'paged-3']);
+  assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => track.position), [0, 1, 2]);
+  assert.equal(page.requests.filter((request) => new URL(request.url).pathname === '/users/42/playlists/30').length, 2);
+});
+
+test('Yandex source reader refuses a truncated playlist when paging metadata is missing', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') {
+      return { result: { playlists: [{ uid: 42, kind: 31, title: 'Truncated', trackCount: 3 }] } };
+    }
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [31] };
+    if (parsed.pathname === '/users/42/playlists/31') return { result: { playlist: {
+      title: 'Truncated', revision: 3, trackCount: 3, tracks: [{ id: 'one', track: song('one', 'One') }],
+    } } };
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /обрезан.*пагинации/i.test(message.error)));
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
 test('Yandex source reader times out a response body that stalls after headers', async () => {
   const page = makePage(async () => ({ pendingBody: true }), 0.001);
   await page.dispatch('start-library-scan');
