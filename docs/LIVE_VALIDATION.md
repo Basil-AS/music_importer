@@ -94,4 +94,5 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 
 - The local importer showed `fetchLibraryTracks: HTTP 401` while the visible Spotify tab still rendered the signed-in Liked Songs page. The precise server-side rejection reason is not available from the sanitized response; no request or cookie values were inspected.
 - Reader code sent the captured bearer/client headers but omitted Fetch's `credentials` option for `api-partner.spotify.com`. Version `0.13.30` now uses `credentials: include` for Pathfinder calls so the browser may attach Spotify's own session cookies, without reading or storing cookie values. The privacy disclosure now describes this behavior.
+- Version `0.13.31` adds a bridge-health handshake on extension updates. Open provider tabs are reloaded only when the old content script no longer answers; healthy tabs are left alone. A scan still retries after a missing content script.
 - A fixture asserts credentialed requests. This is a hypothesis-driven fix, not live proof; it must be checked after Reload of the unpacked extension. No target search, account write, or read-back was run.

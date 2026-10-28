@@ -1,6 +1,12 @@
 (() => {
   const marker = 'music-importer-zvuk';
 
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== 'music-importer:bridge-health-check') return false;
+    sendResponse({ ok: true, provider: 'zvuk' });
+    return false;
+  });
+
   function sendRuntimeMessage(message) {
     try {
       if (!chrome?.runtime?.id) return Promise.resolve(null);

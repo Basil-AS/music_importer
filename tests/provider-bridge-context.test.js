@@ -12,6 +12,7 @@ const cases = [
 
 function createBridge({ file, origin, sendMessage }) {
   const listeners = new Map();
+  const runtimeListeners = [];
   const posted = [];
   const window = {
     addEventListener(type, listener) { listeners.set(type, listener); },
@@ -24,7 +25,7 @@ function createBridge({ file, origin, sendMessage }) {
     runtime: {
       id: 'fixture-extension-id',
       sendMessage,
-      onMessage: { addListener() {} },
+      onMessage: { addListener(listener) { runtimeListeners.push(listener); } },
     },
   };
   vm.runInNewContext(fs.readFileSync(require.resolve(`../chrome-extension/${file}`), 'utf8'), {
@@ -32,6 +33,11 @@ function createBridge({ file, origin, sendMessage }) {
   }, { filename: file });
   return {
     posted,
+    healthCheck() {
+      const responses = [];
+      for (const listener of runtimeListeners) listener({ type: 'music-importer:bridge-health-check' }, {}, (value) => responses.push(value));
+      return responses;
+    },
     dispatch(data) {
       listeners.get('message')?.({ source: window, origin, data });
     },
@@ -72,5 +78,10 @@ for (const bridgeCase of cases) {
     }));
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(bridge.posted.some((message) => message.type === 'transfer-progress-ack' && message.ok === false));
+  });
+
+  test(`${bridgeCase.file} answers extension bridge health checks`, () => {
+    const bridge = createBridge({ ...bridgeCase, origin: 'https://provider.example', sendMessage() { return Promise.resolve(null); } });
+    assert.ok(bridge.healthCheck().some((response) => response?.ok === true));
   });
 }

@@ -96,9 +96,10 @@ async function openImporterApp() {
   await chrome.tabs.create({ url: extensionAppUrl });
 }
 
-chrome.runtime.onInstalled?.addListener((details) => {
+chrome.runtime.onInstalled?.addListener(async (details) => {
   if (!['install', 'update'].includes(details?.reason) || !extensionAppUrl) return;
-  return openImporterApp().catch(() => {});
+  if (details.reason === 'update') await repairStaleProviderTabs();
+  await openImporterApp().catch(() => {});
 });
 
 chrome.action?.onClicked?.addListener(() => {
@@ -331,6 +332,27 @@ async function reloadTabForReader(tabId, timeoutMs = 30000) {
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.reload(tabId).catch(finish);
   });
+}
+
+async function repairStaleProviderTabs() {
+  const patterns = [
+    'https://open.spotify.com/*',
+    'https://music.apple.com/*',
+    'https://music.yandex.ru/*',
+    'https://zvuk.com/favorites*',
+    'https://zvuk.com/collection*',
+    'https://zvuk.com/playlist/*',
+  ];
+  const tabs = await chrome.tabs.query({ url: patterns }).catch(() => []);
+  await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
+    try {
+      const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
+      if (health?.ok === true) return;
+    } catch {
+      // A stale content script loses its extension context after the worker update.
+    }
+    await reloadTabForReader(tab.id).catch(() => {});
+  }));
 }
 
 async function startProviderLibraryScan(tabId, startMessage) {

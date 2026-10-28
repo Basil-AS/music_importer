@@ -84,6 +84,10 @@ function bootWorker(storageState, tabs = [], options = {}) {
       async create(createProperties) { createdTabs.push(createProperties); return { id: 99, ...createProperties }; },
       async sendMessage(tabId, message) {
         messages.push({ tabId, message });
+        if (message.type === 'music-importer:bridge-health-check'
+          && options.healthFailureTabIds?.includes(tabId) && !reloadedTabs.has(tabId)) {
+          throw new Error('Receiving end does not exist');
+        }
         if (options.missingReceiverOnce?.includes(tabId) && !reloadedTabs.has(tabId)) throw new Error('Receiving end does not exist');
         return { ok: true };
       },
@@ -151,6 +155,17 @@ test('extension update opens the importer app when it is not already open', asyn
   const worker = bootWorker({});
   await worker.install('update');
   assert.deepEqual(JSON.parse(JSON.stringify(worker.createdTabs)), [{ url: 'chrome-extension://fixture-extension/app/index.html' }]);
+});
+
+test('extension update reloads only provider tabs whose bridge health check fails', async () => {
+  const worker = bootWorker({}, [
+    { id: 41, url: 'https://music.apple.com/us/home', status: 'complete' },
+    { id: 42, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
+  ], { healthFailureTabIds: [41] });
+  await worker.install('update');
+  assert.deepEqual(worker.reloads, [41]);
+  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 41 && message.type === 'music-importer:bridge-health-check'));
+  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 42 && message.type === 'music-importer:bridge-health-check'));
 });
 
 test('extension update focuses the existing importer app without creating another tab', async () => {

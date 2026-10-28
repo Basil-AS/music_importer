@@ -2,6 +2,12 @@
   const marker = 'music-importer-yandex';
   const accepted = new Set(['scan-progress', 'library-snapshot', 'scan-error', 'command-response', 'transfer-progress']);
 
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== 'music-importer:bridge-health-check') return false;
+    sendResponse({ ok: true, provider: 'yandex-music' });
+    return false;
+  });
+
   function sendRuntimeMessage(message) {
     try {
       if (!chrome?.runtime?.id) return Promise.resolve(null);
