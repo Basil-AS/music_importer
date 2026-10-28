@@ -34,7 +34,7 @@ node scripts/build-extension-app.mjs
 
 Поддерживаемый CSV: обязательные `title,artist`, дополнительные `album,isrc,duration_ms,id` (также понимаются `Track Name,Artist Name(s)` и русские `название,исполнитель`; разделители запятая, точка с запятой или табуляция). JSON — массив объектов с `title`/`artist` либо `tracks`, `items` или `data` с таким массивом. Для объектов с вложенным `track` поля также распознаются. Общая provider-neutral модель snapshot/plan находится в [`demo/transfer-core.js`](demo/transfer-core.js), общий контракт поиска и постраничного чтения — в [`demo/transfer-engine.js`](demo/transfer-engine.js), контракт account adapters — в [`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md). Yandex writer использует вкладку с активной сессией, не читает и не сохраняет токены, требует подтверждённый полный snapshot и явное согласие перед записью.
 
-Это ещё не готовый универсальный перенос. Все target writers проверены на fixtures, но ни один не проверен записью в живой аккаунт; Spotify использует частные Web Player API. Все 12 комбинаций перечислены в [матрице возможностей](docs/TRANSFER_CAPABILITY_MATRIX.md), включая обязательные live-проверки.
+Это ещё не готовый универсальный перенос. Все target writers проверены на fixtures, но ни один не проверен записью в живой аккаунт; Spotify использует частные Web Player API. Все 12 комбинаций перечислены в [матрице возможностей](docs/TRANSFER_CAPABILITY_MATRIX.md), включая обязательные live-проверки. Полный охват и критерии готовности описаны в [PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md).
 
 Подробности сценария и границ прототипа: [`docs/MVP.md`](docs/MVP.md). Правила сопоставления и ограничения confidence: [`docs/MATCHING.md`](docs/MATCHING.md).
 
