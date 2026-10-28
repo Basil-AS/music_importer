@@ -29,8 +29,6 @@
   function checkLocalExtension() {
     const button = $('#extensionImportBtn');
     const status = $('#extensionStatus');
-    const appOriginValue = $('#appOriginValue');
-    if (appOriginValue) appOriginValue.textContent = location.origin;
     if (extensionCheckInProgress || state.extensionAvailable) return;
     if (!window.crypto?.randomUUID) {
       status.textContent = 'Этот браузер не поддерживает проверку локального расширения. Используйте Chrome.';
@@ -48,7 +46,7 @@
       if (answered) return;
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
-      status.textContent = 'Расширение Music Importer не ответило. Откройте эту страницу в Chrome, включите или обновите расширение, проверьте доступ к локальному адресу и нажмите «Повторить проверку».';
+      status.textContent = 'Расширение Music Importer не ответило. Откройте его popup на этой вкладке и нажмите «Разрешить доступ и подключить». Если этой кнопки нет, обновите расширение из текущей папки chrome-extension.';
       button.textContent = 'Повторить проверку';
       button.disabled = false;
       $('#extensionHelp').open = true;
@@ -868,13 +866,10 @@
       const active = item === card;
       item.classList.toggle('selected', active);
       const provider = item.dataset.provider;
-      const sourceStatus = ['spotify', 'yandex-music'].includes(provider)
-        ? 'Выбран · экспериментальное чтение'
-        : ['zvuk', 'apple-music'].includes(provider) ? 'Выбран · локальное расширение' : 'Выбран · импорт из файла';
       item.querySelector('.source-status').textContent = active
-        ? sourceStatus
-        : 'Не выбран';
-      item.querySelector('.source-status').classList.toggle('connected', active);
+        ? 'Источник выбран · снимка библиотеки пока нет'
+        : (state.librarySnapshots[provider] ? 'Библиотека подключена' : 'Нет снимка библиотеки');
+      item.querySelector('.source-status').classList.toggle('connected', Boolean(state.librarySnapshots[provider]));
       item.querySelector('.connect').disabled = active;
       item.querySelector('.connect').textContent = active ? '✓ Выбрано' : 'Выбрать';
     });
