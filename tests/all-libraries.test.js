@@ -180,6 +180,17 @@ test('one-click library scan starts readers in every open provider tab', async (
   assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url.includes('/favorites?music_importer_capture=1')));
 });
 
+test('one-click Zvuk scan reuses an open migrations tab and navigates it to favorites', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/migrations' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);
+  const response = await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+
+  assert.equal(response.pending, true);
+  assert.equal(response.statuses.zvuk.status, 'scanning');
+  assert.ok(app.updates.some((entry) => entry.tabId === 1
+    && entry.update.url === 'https://zvuk.com/favorites?music_importer_capture=1'));
+});
+
 test('extension-hosted app can start a library scan without localhost origin permission', async () => {
   const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
   const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);

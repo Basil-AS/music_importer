@@ -384,7 +384,8 @@ async function requestZvukLibrary(refresh) {
     return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Звука.' };
   }
   if (!refresh) return { error: state.error || 'Сбор библиотеки Звука не запускался.' };
-  const tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
+  let tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
+  if (!tabs.length) tabs = await chrome.tabs.query({ url: 'https://zvuk.com/*' });
   const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
   if (!tab?.id) {
     if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: 'Откройте Звук, чтобы обновить сохранённый снимок.' };
