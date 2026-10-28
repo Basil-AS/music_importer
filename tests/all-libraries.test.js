@@ -97,7 +97,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
         }
         if (options.missingReceiverOnce?.includes(tabId) && !reloadedTabs.has(tabId)) throw new Error('Receiving end does not exist');
         if (message.type === 'music-importer:bridge-health-check') {
-          return { ok: true, bridgeProtocol: options.oldBridgeTabIds?.includes(tabId) ? 1 : 2 };
+          return { ok: true, bridgeProtocol: options.oldBridgeTabIds?.includes(tabId) && !reloadedTabs.has(tabId) ? 1 : 2 };
         }
         return { ok: true };
       },
@@ -320,6 +320,18 @@ function makeZvukState(complete = false) {
   };
 }
 
+test('Zvuk reader error is shown with safe operation and HTTP status metadata', async () => {
+  const storage = { [ZVUK_KEY]: { ...makeZvukState(), captureEnabled: true, scan: { active: true, phase: 'catalog', tabId: 1 } } };
+  const worker = bootWorker(storage, [{ id: 1, url: 'https://zvuk.com/collection', status: 'complete' }]);
+  await worker.pageMessage({
+    type: 'zvuk:read-error', operation: 'getPaginatedCollectionAll', httpStatus: 401, graphqlError: true,
+    authorization: 'must-not-be-displayed',
+  }, 1);
+  assert.match(storage[ZVUK_KEY].error, /getPaginatedCollectionAll.*HTTP 401/);
+  assert.ok(!storage[ZVUK_KEY].error.includes('must-not-be-displayed'));
+  assert.equal(storage[ZVUK_KEY].captureEnabled, false);
+});
+
 test('one-click library scan starts readers in every open provider tab', async () => {
   const tabs = [
     { id: 1, url: 'https://zvuk.com/favorites' },
@@ -332,7 +344,7 @@ test('one-click library scan starts readers in every open provider tab', async (
   assert.equal(response.pending, true);
   assert.deepEqual(Object.keys(response.statuses).sort(), ['apple-music', 'spotify', 'yandex-music', 'zvuk']);
   assert.ok(Object.values(response.statuses).every((status) => status.status === 'scanning'));
-  assert.deepEqual(app.messages.map((entry) => entry.message.type).sort(), [
+  assert.deepEqual(app.messages.map((entry) => entry.message.type).filter((type) => type !== 'music-importer:bridge-health-check').sort(), [
     'apple:start-library-scan', 'spotify:start-library-scan', 'yandex:start-library-scan',
   ]);
   assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url.includes('/favorites?music_importer_capture=1')));
@@ -378,7 +390,7 @@ test('selective library refresh rescans only the requested provider', async () =
 
   assert.equal(response.pending, true);
   assert.equal(response.statuses['apple-music'].status, 'scanning');
-  assert.deepEqual(app.messages.map((entry) => entry.message.type), ['apple:start-library-scan']);
+  assert.deepEqual(app.messages.map((entry) => entry.message.type).filter((type) => type !== 'music-importer:bridge-health-check'), ['apple:start-library-scan']);
   assert.ok(!app.updates.some((entry) => entry.update.url?.includes('/favorites?music_importer_capture=1')));
 });
 
@@ -522,7 +534,7 @@ test('library scan reloads an old provider tab once when its extension content s
   const response = await app.callFrom({ type: 'music-importer:get-all-libraries', refresh: true }, 'chrome-extension://fixture-extension/app/index.html');
   assert.equal(response.pending, true);
   assert.deepEqual(app.reloads, [4]);
-  assert.equal(app.messages.filter(({ tabId, message }) => tabId === 4 && message.type === 'apple:start-library-scan').length, 2);
+  assert.equal(app.messages.filter(({ tabId, message }) => tabId === 4 && message.type === 'apple:start-library-scan').length, 1);
   assert.equal(response.statuses['apple-music'].status, 'scanning');
 });
 
@@ -537,6 +549,18 @@ test('extension-hosted app can send a catalog command to a signed-in service tab
     storefront: 'AE',
   }, 'chrome-extension://fixture-extension/app/index.html');
   assert.equal(response.ok, true);
+  assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'apple:command'));
+});
+
+test('service command repairs a stale provider bridge before sending the command', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library', status: 'complete' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs, { oldBridgeTabIds: [4] });
+  const response = await app.callFrom({
+    type: 'music-importer:apple-command', requestId: 'fixture-request-0009', action: 'search-tracks', query: 'fixture',
+  }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.ok, true);
+  assert.deepEqual(app.reloads, [4]);
+  assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'music-importer:bridge-health-check'));
   assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'apple:command'));
 });
 

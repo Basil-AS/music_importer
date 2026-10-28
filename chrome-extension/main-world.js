@@ -11,7 +11,9 @@
   let favoriteScanStarted = false;
   let favoriteCursorError = '';
   let lastCollectionPageAt = 0;
+  let firstCollectionRequestAt = 0;
   let lastCollectionHasMore = true;
+  let lastCollectionDiagnostic = null;
   const captureAckWaiters = new Map();
   const xhrRequestHeaders = new WeakMap();
   const xhrRequestMethods = new WeakMap();
@@ -70,13 +72,14 @@
         stopAutoScroll();
         post('read-error');
       }
-      if (Date.now() - startedAt > 20000 && isCollection && !lastCollectionPageAt) {
+      const collectionDeadlineFrom = firstCollectionRequestAt || startedAt;
+      if (isCollection && Date.now() - collectionDeadlineFrom > 60000 && !lastCollectionPageAt) {
         stopAutoScroll();
-        post('collection-scroll-stall');
+        post('collection-scroll-stall', lastCollectionDiagnostic || { reason: 'no-response' });
       }
       if (isCollection && lastCollectionPageAt && lastCollectionHasMore && Date.now() - lastCollectionPageAt > 12000) {
         stopAutoScroll();
-        post('collection-scroll-stall');
+        post('collection-scroll-stall', lastCollectionDiagnostic || { reason: 'pagination-stalled' });
       }
       if (isFavorites && lastFavoritePageAt && Date.now() - lastFavoritePageAt > 5000) {
         if (!lastFavoriteHasMore && !favoriteEndReported) {
@@ -167,10 +170,22 @@
     };
   }
 
-  function reportOperation(operation, payload) {
+  function reportOperation(operation, payload, httpStatus = 200) {
     const operationName = operation.name;
-    if (!enabled || !payload || payload.errors?.length) {
-      if (enabled && payload?.errors?.length && ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPlaylistTracks'].includes(operationName)) post('read-error');
+    const diagnostic = {
+      operation: ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(operationName)
+        ? operationName : 'unknown',
+      httpStatus: Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? httpStatus : null,
+      graphqlError: Boolean(payload?.errors?.length),
+    };
+    if (operationName === 'getPaginatedCollectionAll' || operationName === 'getPaginatedCollectionAllSections') {
+      lastCollectionDiagnostic = diagnostic;
+    }
+    if (!enabled || !payload || payload.errors?.length || (Number.isInteger(httpStatus) && httpStatus >= 400)) {
+      if (enabled && ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(operationName)) {
+        stopAutoScroll();
+        post('read-error', diagnostic);
+      }
       return;
     }
 
@@ -341,15 +356,32 @@
     const body = typeof init?.body === 'string'
       ? Promise.resolve(init.body)
       : input instanceof Request ? input.clone().text().catch(() => '') : Promise.resolve('');
-    const request = body.then((text) => ({ text, operation: operationFor(url, text) }));
+    const request = body.then((text) => {
+      const operation = operationFor(url, text);
+      if (location.pathname.startsWith('/collection')
+        && ['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(operation.name)) {
+        if (!firstCollectionRequestAt) firstCollectionRequestAt = Date.now();
+      }
+      return { text, operation };
+    });
     return originalFetch.call(receiver, input, init).then((response) => {
       request.then(({ text, operation }) => {
         if (operation.name) response.clone().json().then((payload) => {
-          const reported = reportOperation(operation, payload);
+          const reported = reportOperation(operation, payload, response.status);
           if (operation.name === 'getPaginatedCollection') void continueFavoriteScan(
             url, replayRequestOptions(input, init), text, payload?.data?.paginatedCollection?.tracks, reported,
           );
-        }).catch(() => {});
+        }).catch(() => {
+          if (['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(operation.name)) {
+            lastCollectionDiagnostic = {
+              operation: operation.name,
+              httpStatus: Number.isInteger(response.status) ? response.status : null,
+              graphqlError: false,
+              invalidJson: true,
+            };
+            if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
+          }
+        });
       });
       return response;
     });
@@ -381,10 +413,14 @@
     if (url.includes('/api/v1/graphql')) {
       const parsed = parseOperation(body);
       if (parsed.name) {
+        if (location.pathname.startsWith('/collection')
+          && ['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(parsed.name)) {
+          if (!firstCollectionRequestAt) firstCollectionRequestAt = Date.now();
+        }
         this.addEventListener('load', () => {
           try {
             const payload = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
-            const reported = reportOperation(parsed, payload);
+            const reported = reportOperation(parsed, payload, this.status);
             if (parsed.name === 'getPaginatedCollection') void continueFavoriteScan(
               this.responseURL || url,
               {
@@ -395,7 +431,17 @@
               payload?.data?.paginatedCollection?.tracks,
               reported,
             );
-          } catch { /* A non-JSON provider response is ignored. */ }
+          } catch {
+            if (['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(parsed.name)) {
+              lastCollectionDiagnostic = {
+                operation: parsed.name,
+                httpStatus: Number.isInteger(this.status) ? this.status : null,
+                graphqlError: false,
+                invalidJson: true,
+              };
+              if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
+            }
+          }
         }, { once: true });
       }
     }

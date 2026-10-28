@@ -227,6 +227,24 @@ test('Zvuk source reader exposes a failed cursor request when scroll fallback st
   assert.match(stalled.reason, /GraphQL ответил HTTP 503/);
 });
 
+test('Zvuk playlist catalog timeout allows slow page hydration before reporting a stall', async () => {
+  const page = makePage('/collection', null, 1);
+  await page.tickScrollAfter(20000);
+  assert.equal(page.messages.some((message) => message.type === 'collection-scroll-stall'), false);
+  await page.tickScrollAfter(41000);
+  assert.equal(page.messages.find((message) => message.type === 'collection-scroll-stall')?.reason, 'no-response');
+});
+
+test('Zvuk playlist catalog read errors carry only safe operation and HTTP metadata', async () => {
+  const page = makePage('/collection', () => ({ statusCode: 401, payload: { errors: [{ message: 'private response detail' }] } }));
+  await page.request('getPaginatedCollectionAll', { first: 100, after: null });
+  const error = page.messages.find((message) => message.type === 'read-error');
+  assert.equal(error.operation, 'getPaginatedCollectionAll');
+  assert.equal(error.httpStatus, 401);
+  assert.equal(error.graphqlError, true);
+  assert.ok(!JSON.stringify(error).includes('private response detail'));
+});
+
 test('Zvuk source reader keeps its deadline active while reading cursor response JSON', async () => {
   const page = makePage('/favorites', ({ payload }) => {
     if (payload.variables?.after) return { pendingBody: true };

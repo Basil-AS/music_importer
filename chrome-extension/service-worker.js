@@ -359,7 +359,21 @@ async function repairStaleProviderTabs() {
   }));
 }
 
+async function ensureCurrentProviderBridge(tabId) {
+  let health = null;
+  try {
+    health = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
+  } catch { /* The tab may still host scripts from an earlier extension version. */ }
+  if (health?.ok === true && health.bridgeProtocol === 2) return;
+  await reloadTabForReader(tabId);
+  const reloadedHealth = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
+  if (reloadedHealth?.ok !== true || reloadedHealth.bridgeProtocol !== 2) {
+    throw new Error('Вкладка музыкального сервиса не подключилась после обновления.');
+  }
+}
+
 async function startProviderLibraryScan(tabId, startMessage) {
+  await ensureCurrentProviderBridge(tabId);
   try {
     await chrome.tabs.sendMessage(tabId, { type: startMessage });
     return;
@@ -677,6 +691,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       try {
+        await ensureCurrentProviderBridge(tab.id);
         const response = await chrome.tabs.sendMessage(tab.id, {
           type: 'zvuk:command',
           requestId: String(message.requestId),
@@ -735,6 +750,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       try {
+        await ensureCurrentProviderBridge(tab.id);
         const response = await chrome.tabs.sendMessage(tab.id, {
           type: 'spotify:command', requestId, action: message.action,
           query: String(message.query || '').slice(0, 400),
@@ -785,6 +801,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       try {
+        await ensureCurrentProviderBridge(tab.id);
         const response = await chrome.tabs.sendMessage(tab.id, {
           type: 'apple:command',
           requestId,
@@ -832,6 +849,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       try {
+        await ensureCurrentProviderBridge(tab.id);
         const response = await chrome.tabs.sendMessage(tab.id, {
           type: 'yandex:command',
           action: message.action,
@@ -1171,9 +1189,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === 'zvuk:collection-scroll-stall') {
-      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Каталог плейлистов не загрузился; проверьте вход и повторите сбор.' };
+      const operation = ['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(message.operation)
+        ? message.operation : '';
+      const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
+        ? message.httpStatus : null;
+      const error = status
+        ? `Каталог плейлистов: ${operation || 'запрос'} вернул HTTP ${status}. Проверьте вход в Сбер.Звук и повторите сбор.`
+        : operation
+          ? `Каталог плейлистов: запрос ${operation} ${message.graphqlError === true ? 'вернул GraphQL-ошибку' : message.invalidJson === true ? 'вернул не JSON' : 'не вернул ожидаемую страницу'}. Возможно, сервис изменил формат ответа.`
+          : message.reason === 'pagination-stalled'
+            ? 'Загрузка каталога остановилась до следующей страницы. Повторите сбор; если повторится, пришлите диагностику.'
+            : 'Каталог не ответил за минуту. Проверьте, что Сбер.Звук загрузился, и повторите сбор.';
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error };
       state.captureEnabled = false;
-      state.error = state.scan.error;
+      state.error = error;
       state.updatedAt = new Date().toISOString();
       await writeState(state);
       sendResponse({ ok: true });
@@ -1181,7 +1210,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === 'zvuk:read-error') {
-      state.error = 'Сбер.Звук вернул ошибку при чтении страницы.';
+      const operation = ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(message.operation)
+        ? message.operation : 'запрос чтения';
+      const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
+        ? message.httpStatus : null;
+      state.error = status
+        ? `Сбер.Звук: ${operation} вернул HTTP ${status}. Проверьте вход и повторите сбор.`
+        : message.graphqlError === true
+          ? `Сбер.Звук вернул GraphQL-ошибку при запросе ${operation}. Повторите сбор; при повторе потребуется обновить коннектор.`
+          : message.invalidJson === true
+            ? `Сбер.Звук вернул не JSON при запросе ${operation}. Возможно, изменился API.`
+            : `Сбер.Звук вернул неподдерживаемый ответ при запросе ${operation}. Возможно, изменился API.`;
       const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
       const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;
       if (state.scan?.active && state.scan.tabId === sender.tab?.id && state.scan.phase !== 'playlists_items') {
