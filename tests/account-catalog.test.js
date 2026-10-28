@@ -4,7 +4,8 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 function loadAccountCatalog() {
-  const context = { window: {}, String, Number, Array, Map, Set, Object };
+  const context = { window: {}, String, Number, Array, Map, Set, Object, Math };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../demo/matcher.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(require.resolve('../demo/account-catalog.js'), 'utf8'), context);
   return context.window.MusicAccountCatalog;
 }
@@ -73,4 +74,30 @@ test('full target snapshot resolves a 1,000-track transfer without catalog searc
   assert.equal(resolution.unresolved.length, 2);
   assert.equal(resolution.matches.get(sourceTracks[0])[0].trackId, 'target-0');
   assert.equal(resolution.unresolved[1].manualQuery, true);
+});
+
+test('target account metadata auto-matches exact-title transliterations only above the matcher confidence threshold', () => {
+  const accountCatalog = loadAccountCatalog();
+  const index = accountCatalog.buildIndex({
+    service: 'spotify',
+    completeness: { confirmed: true },
+    tracks: [
+      { id: 'spotify:track:romanized', title: 'Vremya', artists: ['Moya Mishel'], album: 'Zima', isrc: '' },
+      { id: 'spotify:track:ambiguous', title: 'Vremya', artists: ['Moya Mishel'], album: 'Vremya (Live)', isrc: '' },
+      { id: 'spotify:track:same-a', title: 'Same Name', artists: ['Artist'], album: 'Album A', isrc: '' },
+      { id: 'spotify:track:same-b', title: 'Same Name', artists: ['Artist'], album: 'Album B', isrc: '' },
+    ],
+    playlists: [],
+  }, 'spotify');
+  const exact = { title: 'Время', artist: 'Моя Мишель', album: 'Зима' };
+  const manual = { ...exact, manualQuery: true };
+  const unmatched = { title: 'Different track', artist: 'Artist' };
+  const ambiguous = { title: 'Same Name', artist: 'Artist' };
+  const resolution = accountCatalog.resolveTracks([exact, manual, unmatched, ambiguous], index);
+
+  assert.equal(resolution.matches.has(exact), true);
+  assert.equal(resolution.matches.get(exact)[0].trackId, 'spotify:track:romanized');
+  assert.equal(resolution.matches.has(manual), false);
+  assert.equal(resolution.unresolved.length, 3);
+  assert.equal(resolution.unresolved.includes(ambiguous), true);
 });
