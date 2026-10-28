@@ -54,3 +54,7 @@ Fixture coverage remains separate from this live observation. None of the 12 sou
 ### Spotify catalog limiter follow-up — 2026-10-28
 
 Code review of the live `HTTP 429` observed in the importer showed that the `0.13.6` request-start scheduler covered Pathfinder operations but not the Spotify catalog `GET /v1/search` or album-track reads. Version `0.13.8` applies the same serialized request-start interval to these catalog calls; their `Retry-After` values already flow into the shared bulk-search backoff. The change is covered by a fixture that checks start spacing between album search and track-list requests. It is not yet live-verified because the user's Chrome still has the previous importer page open and the unpacked extension has not been reloaded.
+
+### Spotify reader preflight/hash follow-up — 2026-10-28
+
+Static review found that source scanning fetched and buffered a Spotify CDN bundle even when all required persisted-query hashes were already available in the reader. It also found that a `PersistedQueryNotFound` response could rediscover the cached old hash instead of refreshing it. Version `0.13.20` skips the unnecessary preflight fetch and removes the stale hash before discovery. Fixtures prove the no-download path and successful retry with a refreshed query hash. The prior live Liked Songs stall remains unexplained and this fix has not been retested in the user's account.

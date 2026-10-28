@@ -6,12 +6,12 @@ const vm = require('node:vm');
 const origin = 'https://open.spotify.com';
 const endpoint = 'https://api-partner.spotify.com/pathfinder/v2/query';
 
-function makePage(respond, timerScale = 1) {
+function makePage(respond, timerScale = 1, scriptUrls = []) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
   const location = { origin, href: `${origin}/collection/tracks` };
-  const document = { querySelectorAll: () => [] };
+  const document = { querySelectorAll: () => scriptUrls.map((src) => ({ src })) };
   const window = {
     location,
     addEventListener(name, callback) { listeners.set(name, callback); },
@@ -105,6 +105,42 @@ test('Spotify source reader imports liked tracks and every playlist with item or
   assert.ok(!emitted.includes('fixture-secret'));
   assert.ok(!emitted.includes('fixture-client-secret'));
   assert.ok(page.requests.filter((request) => request.url === endpoint).every((request) => request.init.headers.authorization === 'Bearer fixture-secret'));
+});
+
+test('Spotify source reader skips downloading the web-player bundle when seeded query hashes are available', async () => {
+  const page = makePage(({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 1, ['https://open.spotifycdn.com/cdn/build/web-player.fixture.js']);
+
+  await page.startScan();
+
+  assert.equal(page.requests.some((request) => request.url.includes('spotifycdn.com')), false);
+  assert.ok(page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Spotify source reader refreshes a persisted query hash after PersistedQueryNotFound', async () => {
+  const refreshedHash = 'f'.repeat(64);
+  let favoritesRequests = 0;
+  const page = makePage(({ url, payload }) => {
+    if (url.includes('spotifycdn.com')) return { text: ` fetchLibraryTracks ${refreshedHash}`, payload: {} };
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks' && favoritesRequests++ === 0) {
+      return { payload: { errors: [{ message: 'PersistedQueryNotFound' }] } };
+    }
+    if (payload?.operationName === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 0.01, ['https://open.spotifycdn.com/cdn/build/web-player.fixture.js']);
+
+  await page.startScan();
+
+  const favoriteRequests = page.requests.filter((request) => request.payload?.operationName === 'fetchLibraryTracks');
+  assert.equal(favoriteRequests.length, 2);
+  assert.equal(favoriteRequests[1].payload.extensions.persistedQuery.sha256Hash, refreshedHash);
+  assert.ok(page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
 test('Spotify source reader times out when an HTTP response body stalls after headers', async () => {

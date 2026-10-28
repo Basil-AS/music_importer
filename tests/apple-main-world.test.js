@@ -437,7 +437,7 @@ test('local app bridge forwards only the selected providers for onboarding', asy
   const context = {
     window, location, URL, Set, String, chrome: { runtime: {
       sendMessage: async (message) => { sent.push(message); return { ok: true, opened: ['spotify'], alreadyOpen: ['apple-music'] }; },
-      getManifest: () => ({ version: '0.13.19' }),
+      getManifest: () => ({ version: '0.13.20' }),
       onMessage: { addListener() {} },
     } },
   };

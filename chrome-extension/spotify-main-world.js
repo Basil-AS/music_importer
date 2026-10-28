@@ -104,6 +104,8 @@
   }
 
   async function discoverHashes(names) {
+    const unresolvedNames = names.filter((name) => !queryHashes.has(name));
+    if (!unresolvedNames.length) return;
     const scripts = [...document.querySelectorAll('script[src]')]
       .map((script) => script.src)
       .filter((src) => {
@@ -117,12 +119,12 @@
         if (!response.ok) continue;
         source = await response.text();
       } catch { continue; }
-      for (const name of names) {
+      for (const name of unresolvedNames) {
         const pattern = new RegExp(`\\W${escapeRegExp(name)}\\W[\\s\\S]{0,200}?(?<![0-9a-f])([0-9a-f]{64})(?![0-9a-f])`);
         const hash = pattern.exec(source)?.[1];
         if (hash) queryHashes.set(name, hash);
       }
-      if (names.every((name) => queryHashes.has(name))) return;
+      if (unresolvedNames.every((name) => queryHashes.has(name))) return;
     }
   }
 
@@ -210,6 +212,7 @@
         const errorMessage = String(payload.errors[0]?.message || 'ошибка GraphQL');
         if (/persisted.?query.?not.?found/i.test(errorMessage) && hashRefreshes < 1) {
           const previousHash = hash;
+          queryHashes.delete(operationName);
           await discoverHashes([operationName]);
           hash = queryHashes.get(operationName);
           hashRefreshes += 1;
