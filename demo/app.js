@@ -57,7 +57,7 @@
       if (answered) return;
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
-      status.textContent = 'Расширение не подключено к этой странице. Для обычного запуска нажмите значок Music Importer в панели Chrome — откроется приложение внутри расширения. Эта localhost-страница работает только как запасной режим.';
+      status.textContent = 'Расширение не подключено к этой странице. Если страница открыта во встроенном окне (например, Codex) или другом браузере, Chrome-расширение её не увидит. Откройте Music Importer значком в панели обычного Chrome: приложение внутри расширения просканирует открытые аккаунты. Эта localhost-страница — запасной режим.';
       button.textContent = 'Повторить проверку';
       button.disabled = false;
       $('#extensionHelp').open = true;
