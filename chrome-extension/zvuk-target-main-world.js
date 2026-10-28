@@ -112,11 +112,13 @@
     return items.map(normalizeCandidate).filter(Boolean);
   }
 
-  async function readFavoriteIds(progress = null) {
-    const ids = [];
+  async function readFavoriteIds(progress = null, expectedIds = []) {
     const seenCursors = new Set();
+    const expected = new Set(expectedIds.map(String));
+    const foundExpected = new Set();
     let cursor = null;
-    for (let page = 0; page < 10000; page += 1) {
+    let scannedCount = 0;
+    while (true) {
       const data = await graphql('getPaginatedCollection', favoritesQuery, { limit: 100, after: cursor });
       const tracks = data?.paginatedCollection?.tracks;
       if (!Array.isArray(tracks?.items) || !tracks?.page || !Object.hasOwn(tracks.page, 'endCursor')) {
@@ -124,23 +126,27 @@
       }
       const pageIds = tracks.items.map(idOf);
       if (pageIds.some((id) => !id)) throw new Error('В лайках Звука найден трек без ID.');
-      ids.push(...pageIds);
-      progress?.({ phase: 'favorites-read', completed: ids.length, message: `Сверяем лайки Звука: ${ids.length} прочитано.` });
+      scannedCount += pageIds.length;
+      pageIds.forEach((id) => {
+        if (expected.has(id)) foundExpected.add(id);
+      });
+      progress?.({ phase: 'favorites-read', completed: scannedCount, message: `Сверяем лайки Звука: ${scannedCount} прочитано.` });
+      if (expected.size && foundExpected.size === expected.size) return { foundIds: foundExpected };
       const next = tracks.page.endCursor === null || tracks.page.endCursor === undefined || tracks.page.endCursor === ''
         ? null : String(tracks.page.endCursor);
-      if (next === null) return { ids, uniqueIds: new Set(ids) };
+      if (next === null) return { foundIds: foundExpected };
+      if (!tracks.items.length) throw new Error('Звук вернул пустую страницу лайков с продолжением; остановил сверку.');
       if (seenCursors.has(next) || next === cursor) throw new Error('Звук повторил cursor списка лайков; остановил сверку.');
       seenCursors.add(next);
       cursor = next;
     }
-    throw new Error('Слишком много страниц лайков Звука; остановил сверку.');
   }
 
   async function writeFavorites(operations, progress, onWriteStarted) {
     const wanted = [...new Set(operations.map((operation) => String(operation?.target?.providerId || '')).filter(Boolean))];
     if (!wanted.length) return { requested: 0, added: 0, alreadyPresent: 0, verified: 0 };
-    const before = await readFavoriteIds(progress);
-    const missing = wanted.filter((id) => !before.uniqueIds.has(id));
+    const before = await readFavoriteIds(progress, wanted);
+    const missing = wanted.filter((id) => !before.foundIds.has(id));
     let added = 0;
     for (let offset = 0; offset < missing.length; offset += batchSize) {
       const ids = missing.slice(offset, offset + batchSize);
@@ -152,24 +158,35 @@
       added += ids.length;
       progress?.({ phase: 'favorites-write', completed: added, total: missing.length, message: `Добавляем лайки в Звук: ${added} из ${missing.length}.` });
     }
-    const after = await readFavoriteIds(progress);
-    const verified = wanted.filter((id) => after.uniqueIds.has(id)).length;
+    const after = await readFavoriteIds(progress, wanted);
+    const verified = wanted.filter((id) => after.foundIds.has(id)).length;
     if (verified !== wanted.length) throw new Error(`Обратная сверка лайков Звука подтвердила ${verified} из ${wanted.length}.`);
     return { requested: wanted.length, added, alreadyPresent: wanted.length - missing.length, verified };
   }
 
-  async function readPlaylistIds(playlistId) {
+  async function readPlaylistIds(playlistId, expectedIds = null) {
     const ids = [];
-    for (let offset = 0; offset < 1000000; offset += batchSize) {
+    const expected = Array.isArray(expectedIds) ? expectedIds.map(String) : null;
+    let offset = 0;
+    while (true) {
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Смещение плейлиста Звука вышло за безопасный диапазон.');
       const data = await graphql('getPlaylistTracks', playlistTracksQuery, { id: String(playlistId), limit: batchSize, offset });
       const page = data?.playlistTracks;
       if (!Array.isArray(page)) throw new Error('Звук вернул неизвестный формат треков плейлиста.');
       const pageIds = page.map(idOf);
       if (pageIds.some((id) => !id)) throw new Error('В плейлисте Звука найден трек без ID.');
+      if (expected) {
+        if (ids.length + pageIds.length > expected.length
+          || pageIds.some((id, index) => id !== expected[ids.length + index])) {
+          throw new Error('Содержимое плейлиста Звука не совпадает с префиксом плана; остановил сверку.');
+        }
+      }
       ids.push(...pageIds);
       if (page.length < batchSize) return ids;
+      const nextOffset = offset + page.length;
+      if (!Number.isSafeInteger(nextOffset) || nextOffset <= offset) throw new Error('Не удалось безопасно продолжить чтение плейлиста Звука.');
+      offset = nextOffset;
     }
-    throw new Error('Плейлист Звука превышает лимит сверки.');
   }
 
   function playlistItem(id) {
@@ -224,7 +241,7 @@
         let written = 0;
         let currentIds;
         if (playlistId) {
-          currentIds = await readPlaylistIds(playlistId);
+          currentIds = await readPlaylistIds(playlistId, expectedIds);
           const isPrefix = currentIds.length <= expectedIds.length
             && currentIds.every((id, position) => id === expectedIds[position]);
           if (!isPrefix) throw new Error(`Содержимое «${mapping.targetName || mapping.sourceName}» не является префиксом плана. Остановил продолжение без записи.`);
@@ -242,7 +259,7 @@
             phase: 'playlist-items', completed: 0, total: expectedIds.length, sourceKey: key, targetPlaylistId: playlistId, playlistIndex: index,
           });
           if (!targetCheckpointSaved) throw new Error(`Плейлист «${mapping.targetName || mapping.sourceName}» создан, но его ID не сохранён. Сверьте целевой аккаунт вручную; добавление треков остановлено.`);
-          currentIds = await readPlaylistIds(playlistId);
+          currentIds = await readPlaylistIds(playlistId, expectedIds);
           const seededPrefix = currentIds.length <= expectedIds.length
             && currentIds.every((id, position) => id === expectedIds[position]);
           if (!seededPrefix) throw new Error(`Созданный плейлист «${mapping.targetName || mapping.sourceName}» не совпал с началом плана.`);
@@ -258,7 +275,7 @@
           written += batch.length;
           progress({ phase: 'playlist-items', completed: offset + batch.length, total: matching.length, sourceKey: key, targetPlaylistId: playlistId, playlistIndex: index });
         }
-        const actualIds = await readPlaylistIds(playlistId);
+        const actualIds = await readPlaylistIds(playlistId, expectedIds);
         const verified = expectedIds.length === actualIds.length && expectedIds.every((id, position) => id === actualIds[position]);
         report.playlists.push({ title: mapping.targetName || mapping.sourceName, targetId: playlistId, written, verified: verified ? expectedIds.length : 0 });
         if (!verified) throw new Error(`Обратная сверка плейлиста «${mapping.targetName || mapping.sourceName}» обнаружила несовпадение треков или порядка.`);

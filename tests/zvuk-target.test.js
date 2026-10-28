@@ -117,6 +117,38 @@ test('Zvuk favorites write is idempotent and confirmed by cursor read-back', asy
   });
 });
 
+test('Zvuk favorite verification follows cursor pages beyond the former fixed page cap', async () => {
+  const pageCount = 10_001;
+  let added = false;
+  let readCount = 0;
+  const page = makePage((request) => {
+    const { operationName, variables } = graphRequest(request);
+    if (operationName === 'getPaginatedCollection') {
+      readCount += 1;
+      const index = Number(variables.after || 0);
+      return { payload: { data: { paginatedCollection: { tracks: {
+        items: [{ id: added && index === pageCount - 1 ? 'target-like' : `existing-${index}` }],
+        page: { endCursor: index === pageCount - 1 ? null : String(index + 1) },
+      } } } } };
+    }
+    if (operationName === 'AddItemsToCollection') {
+      added = true;
+      return { payload: { data: { collection: { addItems: true } } } };
+    }
+    throw new Error(`Unexpected operation: ${operationName}`);
+  });
+
+  const response = await page.command('execute-transfer', { plan: {
+    type: 'music-transfer-plan', target: { provider: 'zvuk', collectionType: 'favorites' },
+    completeness: { source: [{ confirmed: true }] }, collectionMappings: [],
+    operations: [{ operation: 'add_to_favorites', target: { provider: 'zvuk', providerId: 'target-like' } }],
+  } });
+
+  assert.equal(response.ok, true, response.error);
+  assert.equal(readCount, pageCount * 2);
+  assert.equal(response.report.favorites.verified, 1);
+});
+
 test('Zvuk playlist write chunks items and verifies exact order, including repeats', async () => {
   const tracks = Array.from({ length: 102 }, (_, index) => `target-${index < 101 ? index : 0}`);
   let playlistTracks = [];
