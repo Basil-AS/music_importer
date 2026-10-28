@@ -33,11 +33,20 @@
     toast.timer = setTimeout(() => element.classList.remove('show'), 3000);
   }
 
+  function updateSourceCount() {
+    const count = $('[aria-labelledby="source-heading"] .count');
+    if (!count) return;
+    count.textContent = state.extensionAvailable
+      ? `${Object.keys(state.librarySnapshots).length} из ${$$('.source').length}`
+      : 'Подключите расширение';
+  }
+
   function checkLocalExtension() {
     const button = $('#extensionImportBtn');
     const status = $('#extensionStatus');
     if (extensionApp) {
       state.extensionAvailable = true;
+      updateSourceCount();
       $('#openServicesBtn').disabled = false;
       status.textContent = 'Music Importer запущен в Chrome. Проверяю открытые аккаунты…';
       button.textContent = 'Подключаем аккаунты…';
@@ -63,6 +72,7 @@
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
       status.textContent = 'Расширение не подключено к этой странице. Если страница открыта во встроенном окне (например, Codex) или другом браузере, Chrome-расширение её не увидит. Откройте Music Importer значком в панели обычного Chrome: приложение внутри расширения просканирует открытые аккаунты. Эта localhost-страница — запасной режим.';
+      updateSourceCount();
       button.textContent = 'Повторить проверку';
       button.disabled = false;
       $('#extensionHelp').open = true;
@@ -76,6 +86,7 @@
       clearTimeout(timeout);
       window.removeEventListener('message', onMessage);
       state.extensionAvailable = true;
+      updateSourceCount();
       $('#openServicesBtn').disabled = false;
       status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}. Начинаю сбор открытых аккаунтов.`;
       button.textContent = 'Подключаем аккаунты…';
@@ -291,6 +302,7 @@
         button.textContent = state.extensionAvailable ? 'Нет библиотеки' : 'Нет соединения';
       }
     });
+    updateSourceCount();
     updateTargetLabel();
   }
 
@@ -309,7 +321,6 @@
       button.disabled = false;
       button.textContent = active ? '✓ Источник' : 'Выбрать источник';
     });
-    $('[aria-labelledby="source-heading"] .count').textContent = `1 из ${$$('.source').length}`;
     const tracks = normalizeJSON(payload);
     loadTracks(tracks, `${state.source} · библиотека из расширения`, {
       provider,
