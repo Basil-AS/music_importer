@@ -83,6 +83,77 @@ test('matching ignores featured-title decoration but keeps recording-version che
   assert.equal(differentVersion.automatic, false);
 });
 
+test('matching keeps unexplained extra artist credits in manual review', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Main Artist', album: 'Album', durationMs: 180000 },
+    [{
+      trackId: 'unexplained-collaboration',
+      trackName: 'Song',
+      artistName: 'Main Artist, Guest Artist',
+      collectionName: 'Album',
+      trackTimeMillis: 180000,
+    }],
+  );
+
+  assert.equal(result.ranked[0].collaboratorConflict, true);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'manual_review');
+});
+
+test('matching does not let an exact ISRC hide an unexplained extra artist credit', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Main Artist', album: 'Album', isrc: 'USAAA2600001', durationMs: 180000 },
+    [{
+      trackId: 'same-isrc-unexplained-collaboration',
+      trackName: 'Song',
+      artistName: 'Main Artist, Guest Artist',
+      collectionName: 'Album',
+      isrc: 'USAAA2600001',
+      trackTimeMillis: 180000,
+    }],
+  );
+
+  assert.equal(result.ranked[0].collaboratorConflict, true);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'manual_review');
+});
+
+test('matching permits one-sided featured-artist credit variance when the title declares it', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song (feat. Guest Artist)', artist: ['Main Artist', 'Guest Artist'], album: 'Album', durationMs: 180000 },
+    [{
+      trackId: 'feature-credit-omitted',
+      trackName: 'Song',
+      artistName: 'Main Artist',
+      collectionName: 'Album',
+      trackTimeMillis: 180000,
+    }],
+  );
+
+  assert.equal(result.ranked[0].collaboratorConflict, false);
+  assert.equal(result.automatic, true);
+});
+
+test('matching accepts featured-artist relationships declared in artist credits', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Main Artist feat. Guest Artist', album: 'Album', durationMs: 180000 },
+    [{
+      trackId: 'feature-artist-credit',
+      trackName: 'Song',
+      artistName: 'Main Artist',
+      collectionName: 'Album',
+      trackTimeMillis: 180000,
+    }],
+  );
+
+  assert.equal(result.ranked[0].collaboratorConflict, false);
+  assert.equal(result.automatic, true);
+});
+
 test('matching keeps explicitly different featured artists in the manual-review queue', () => {
   const matcher = loadMatcher();
   const result = matcher.suggestBestMatch(

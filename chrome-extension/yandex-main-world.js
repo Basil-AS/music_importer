@@ -257,7 +257,10 @@
     const first = await getPage(1);
     const refs = first.refs;
     const total = Number(first.detail?.trackCount ?? first.detail?.track_count ?? totalFromCatalog);
+    const revisionValue = first.detail?.revision;
+    const revision = revisionValue === null || revisionValue === undefined ? '' : String(revisionValue);
     if (!refs || !Number.isInteger(total) || total < 0
+      || !revision
       || (totalFromCatalog !== null && (!Number.isInteger(totalFromCatalog) || total !== totalFromCatalog))) {
       throw new Error(`Нет подтверждённого состава плейлиста «${title}».`);
     }
@@ -274,6 +277,11 @@
       page += 1;
       const next = await getPage(page);
       if (!next.refs || !next.refs.length) throw new Error(`Страница ${page} плейлиста «${title}» оказалась пустой до конца списка.`);
+      const nextRevisionValue = next.detail?.revision;
+      const nextRevision = nextRevisionValue === null || nextRevisionValue === undefined ? '' : String(nextRevisionValue);
+      if (!nextRevision || nextRevision !== revision) {
+        throw new Error(`Плейлист «${title}» изменился во время чтения (revision); повторите сбор.`);
+      }
       const nextTotal = Number(next.detail?.trackCount ?? next.detail?.track_count ?? totalFromCatalog);
       if (nextTotal !== total) throw new Error(`Размер плейлиста «${title}» изменился во время чтения; повторите сбор.`);
       pageInfo = playlistPager(next.detail, page, next.refs, total, title);
@@ -292,7 +300,7 @@
       id: `yandex:${ownerId}:${kind}`,
       title: String(playlist.title || playlist.name || first.detail.title || `Плейлист ${kind}`),
       trackCount: total,
-      revision: String(first.detail?.revision || ''),
+      revision,
       complete: true,
       tracks,
       metadataIncompleteCount: tracks.filter((track) => !track.metadataComplete).length,

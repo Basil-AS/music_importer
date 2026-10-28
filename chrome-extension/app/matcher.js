@@ -174,6 +174,39 @@
     return !contains(sourceCredits, targetCredits) || !contains(targetCredits, sourceCredits);
   }
 
+  function splitArtistCredits(value) {
+    const names = Array.isArray(value)
+      ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '')
+      : [String(value || '')];
+    return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with|and)\s+|,|;|\s*&\s*/i))
+      .map(normalizeText).filter(Boolean);
+  }
+
+  function uncreditedArtistConflict(sourceArtist, candidateArtist, sourceTitle, candidateTitle) {
+    const source = splitArtistCredits(sourceArtist);
+    const candidate = splitArtistCredits(candidateArtist);
+    if (!source.length || !candidate.length) return false;
+
+    const hasSimilarCredit = (name, credits) => credits.some((credit) => similarity(name, credit) >= 0.82);
+    const extraSource = source.filter((name) => !hasSimilarCredit(name, candidate));
+    const extraCandidate = candidate.filter((name) => !hasSimilarCredit(name, source));
+    if (!extraSource.length && !extraCandidate.length) return false;
+
+    // Catalogs may omit a featured artist from their artist field. Accept that
+    // variance only if a title on either side explicitly identifies each extra
+    // credit as featured; unexplained extra credits remain review-only.
+    const creditValues = [sourceArtist, candidateArtist]
+      .flatMap((value) => Array.isArray(value) ? value : [value])
+      .map((item) => typeof item === 'string' ? item : item?.name || item?.title || '');
+    const declaredFeatures = [sourceTitle, candidateTitle, ...creditValues]
+      .map(featuredArtistCredit)
+      .flatMap((credit) => credit.split(/\s*(?:,|;|&|\band\b|\bwith\b)\s*/i))
+      .map(normalizeText).filter(Boolean);
+    const isDeclaredFeature = (name) => hasSimilarCredit(name, declaredFeatures);
+    return extraSource.some((name) => !isDeclaredFeature(name))
+      || extraCandidate.some((name) => !isDeclaredFeature(name));
+  }
+
   function titleSearchKeys(value) {
     const original = String(value || '');
     const withoutFeatures = titleWithoutFeatureCredits(original);
@@ -186,13 +219,8 @@
   }
 
   function artistScore(sourceArtist, candidateArtist) {
-    const splitCredits = (value) => {
-      const names = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '') : [String(value || '')];
-      return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with|and)\s+|,|;|\s*&\s*/i))
-        .map(normalizeText).filter(Boolean);
-    };
-    const source = splitCredits(sourceArtist);
-    const candidate = splitCredits(candidateArtist);
+    const source = splitArtistCredits(sourceArtist);
+    const candidate = splitArtistCredits(candidateArtist);
     if (!source.length || !candidate.length) return 0;
     const matrix = source.map((name) => candidate.map((other) => similarity(name, other)));
     if (source.length === 1 || candidate.length === 1) {
@@ -228,6 +256,12 @@
   function scoreCandidate(source, candidate) {
     const candidateTitle = candidate.trackName || candidate.title || candidate.name;
     const featuredConflict = featuredArtistConflict(source.title || source.name, candidateTitle);
+    const collaboratorConflict = uncreditedArtistConflict(
+      source.artist || source.artists,
+      candidate.artistName || candidate.artist || candidate.artists,
+      source.title || source.name,
+      candidateTitle,
+    );
     const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
     const candidateISRC = normalizeISRC(candidate.isrc || candidate.ISRC || candidate.externalIds?.isrc);
     const title = similarity(
@@ -244,7 +278,7 @@
     if (sourceISRC && candidateISRC && sourceISRC === candidateISRC) {
       return {
         score: 1, exactISRC: true, isrcConflict: false, isrcMetadataConflict,
-        versionConflict: hasVersionConflict(source, candidate), featuredConflict,
+        versionConflict: hasVersionConflict(source, candidate), featuredConflict, collaboratorConflict,
         titleScore: title, artistScore: artist, durationScore: duration,
       };
     }
@@ -260,7 +294,7 @@
     if (album !== null) { total += album * 0.04; weight += 0.04; }
     if (duration !== null) { total += duration * 0.04; weight += 0.04; }
     const score = Math.max(0, Math.min(0.98, total / weight - (versionConflict ? 0.2 : 0)));
-    return { score, exactISRC: false, isrcConflict, isrcMetadataConflict: false, versionConflict, featuredConflict, titleScore: title, artistScore: artist, albumScore: album, durationScore: duration };
+    return { score, exactISRC: false, isrcConflict, isrcMetadataConflict: false, versionConflict, featuredConflict, collaboratorConflict, titleScore: title, artistScore: artist, albumScore: album, durationScore: duration };
   }
 
   function candidateISRC(candidate) {
@@ -307,7 +341,7 @@
     const sameRecordingDuplicates = sameISRCDuplicates || metadataDuplicates;
     const corroboratedMetadata = Boolean(best && best.titleScore >= 0.98 && best.artistScore >= 0.95
       && ((best.albumScore ?? 0) >= 0.92 || (best.durationScore ?? 0) >= 0.9));
-    const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && !best.isrcMetadataConflict && !best.featuredConflict && (best.exactISRC
+    const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && !best.isrcMetadataConflict && !best.featuredConflict && !best.collaboratorConflict && (best.exactISRC
       || ((corroboratedMetadata || sameRecordingDuplicates) && best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
     return {
       best: best?.candidate || null,
@@ -315,6 +349,7 @@
       automatic,
       reason: !best ? 'no_candidates' : (best.versionConflict || best.isrcConflict || best.featuredConflict) ? 'manual_review'
         : best.isrcMetadataConflict ? 'isrc_metadata_conflict'
+          : best.collaboratorConflict ? 'manual_review'
         : best.exactISRC ? 'exact_isrc'
         : sameISRCDuplicates && automatic ? 'catalog_duplicates_same_isrc'
           : metadataDuplicates && automatic ? 'catalog_duplicates_same_metadata'

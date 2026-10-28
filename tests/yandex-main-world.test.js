@@ -142,6 +142,37 @@ test('Yandex source reader follows playlist pages and preserves item order', asy
   assert.equal(page.requests.filter((request) => new URL(request.url).pathname === '/users/42/playlists/30').length, 2);
 });
 
+test('Yandex source reader rejects a playlist revision change between pages even when trackCount is stable', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') {
+      return { result: { playlists: [{ uid: 42, kind: 32, title: 'Changing', trackCount: 3 }] } };
+    }
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [32] };
+    if (parsed.pathname === '/users/42/playlists/32') {
+      const requestedPage = Number(parsed.searchParams.get('page'));
+      if (requestedPage === 1) return { result: { playlist: {
+        title: 'Changing', revision: 10, trackCount: 3, pager: { total: 3, page: 1, perPage: 2 }, tracks: [
+          { id: 'changing-1', track: song('changing-1', 'First') },
+          { id: 'changing-2', track: song('changing-2', 'Second') },
+        ],
+      } } };
+      if (requestedPage === 2) return { result: { playlist: {
+        title: 'Changing', revision: 11, trackCount: 3, pager: { total: 3, page: 2, perPage: 2 }, tracks: [
+          { id: 'changing-3', track: song('changing-3', 'Third') },
+        ],
+      } } };
+    }
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /изменился во время чтения \(revision\)/i.test(message.error)));
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
 test('Yandex source reader refuses a truncated playlist when paging metadata is missing', async () => {
   const page = makePage(async ({ url }) => {
     const parsed = new URL(url);
