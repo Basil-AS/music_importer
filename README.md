@@ -4,7 +4,7 @@
 
 ## Быстрый старт
 
-Бесплатный пробный запуск: скачайте `music-importer-chrome-extension` из **Artifacts** последнего успешного workflow **Verify Music Importer** в GitHub Actions и распакуйте архив полностью. На macOS запустите `INSTALL-MACOS.command`: он откроет страницу расширений Chrome и нужную папку. Включите режим разработчика, нажмите «Загрузить распакованное» и выберите `chrome-extension`. На других ОС выберите эту папку вручную. Артефакт собирается после успешных проверок и хранится 30 дней. Публикация в Chrome Web Store не настроена; для неё Google требует developer account с одноразовой регистрацией и отдельное прохождение review. Подробнее о вариантах распространения: [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+Бесплатный пробный запуск: скачайте `music-importer-chrome-extension` из **Artifacts** последнего успешного workflow **Verify Music Importer** в GitHub Actions и распакуйте архив полностью. На macOS запустите `INSTALL-MACOS.command`: он откроет страницу расширений Chrome и нужную папку. Включите режим разработчика, нажмите «Загрузить распакованное» и выберите `chrome-extension`. На других ОС выберите эту папку вручную. Артефакт собирается после успешных проверок и хранится 30 дней. Для Edge также собирается `music-importer-edge-addons.zip` с корневым manifest; магазин Edge не требует регистрационного сбора, но перед публикацией нужны проверка совместимости, listing и review. Публикация в Chrome Web Store не настроена; Google требует одноразовую регистрацию developer account и отдельное прохождение review. Подробнее о вариантах распространения: [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 Если вы работаете с исходниками, соберите bundle локально:
 
