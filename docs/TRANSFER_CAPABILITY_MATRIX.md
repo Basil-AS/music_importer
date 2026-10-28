@@ -20,7 +20,7 @@
 | Источник → назначение | Spotify | Apple Music | Яндекс Музыка | Звук |
 |---|---|---|---|---|
 | **Spotify** | — | Spotify read/auth частично private; Apple writer fixture-tested; live page session/transfer unverified | Spotify read/auth частично private; Yandex writer fixture-tested, target session/live write unverified | Spotify read/auth частично private; Звук write schema/auth |
-| **Apple Music** | Apple reader fixture-tested; live account scan pending; Spotify write OAuth/client constraints | — | Apple reader fixture-tested; Yandex writer fixture-tested; both live sessions/writes unverified | Apple reader fixture-tested; Zvuk destination auth/write verification |
+| **Apple Music** | Apple source read confirmed once live; Spotify write OAuth/client constraints and route unverified | — | Apple source read confirmed once live; Yandex writer/session and route unverified | Apple source read confirmed once live; Zvuk destination auth/write and route unverified |
 | **Яндекс Музыка** | Яндекс source paging/auth incomplete; Spotify write OAuth/owner constraint | Яндекс source paging/auth incomplete; Apple writer fixture-tested; both live session/transfer unverified | — | Яндекс source paging/auth incomplete; Звук destination auth/write verification |
 | **Звук** | Звук read count mismatch/auth; Spotify write OAuth/owner constraint | Звук read count mismatch/auth; Apple writer fixture-tested; both live session/transfer unverified | Звук read count mismatch/auth; Yandex writer fixture-tested, target session/live write unverified | — |
 
