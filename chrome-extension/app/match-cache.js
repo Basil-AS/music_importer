@@ -3,7 +3,7 @@
   const databaseName = 'music-importer-local';
   const databaseVersion = 4;
   const cacheFormatVersion = 3;
-  const decisionFormatVersion = 1;
+  const decisionFormatVersion = 2;
   const previousStoreName = 'automatic-matches';
   const storeName = 'catalog-search-results';
   const decisionStoreName = 'match-decisions';
@@ -41,7 +41,16 @@
   function decisionKeyFor(track, targetProvider, storefront = '', accountCatalog = false, sourceProvider = '') {
     if (!track || !targetProvider) return '';
     const catalogKey = keyFor({ ...track, manualQuery: false }, targetProvider, storefront, accountCatalog);
-    return catalogKey ? JSON.stringify([decisionFormatVersion, String(sourceProvider || track.provider || 'file'), catalogKey]) : '';
+    if (!catalogKey) return '';
+    const collectionId = String(track.sourceCollectionId || track.collectionId || '');
+    const position = Number.isInteger(track.sourcePosition) ? track.sourcePosition : Number.isInteger(track.position) ? track.position : null;
+    const providerId = String(track.sourceId || track.providerId || track.id || '');
+    const occurrence = collectionId && position !== null
+      ? ['playlist-item', collectionId, position]
+      : (track.sourceCollectionType || track.collectionType) === 'favorites' && providerId
+        ? ['favorite-item', providerId]
+        : ['recording'];
+    return JSON.stringify([decisionFormatVersion, String(sourceProvider || track.provider || 'file'), catalogKey, ...occurrence]);
   }
 
   function openDatabase() {

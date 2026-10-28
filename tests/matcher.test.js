@@ -83,3 +83,11 @@ test('matching auto-selects tied catalog editions only when they share the same 
   );
   assert.equal(distinctRecordings.automatic, false);
 });
+
+test('source recording identity groups repeated library items by ISRC or stable provider ID', () => {
+  const matcher = loadMatcher();
+  assert.equal(matcher.sourceRecordingKey({ isrc: 'US-ABC-12-34567', sourceId: 'one' }, 'spotify'), 'spotify:isrc:USABC1234567');
+  assert.equal(matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'spotify'), 'spotify:id:same-track');
+  assert.notEqual(matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'spotify'), matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'apple-music'));
+  assert.equal(matcher.sourceRecordingKey({ title: 'Song', artist: 'Artist' }, 'spotify'), '');
+});

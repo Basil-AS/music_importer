@@ -115,3 +115,19 @@ test('manual match and exclusion decisions persist locally with source and targe
   await cache.clear();
   assert.equal((await cache.getDecisions([track], 'yandex-music', '', false, sourceProvider)).size, 0);
 });
+
+test('playlist inclusion decisions are stored per occurrence while favorite identity remains per track', () => {
+  const cache = loadCache();
+  const base = { title: 'Track', artist: 'Artist', sourceId: 'source-track', sourceCollectionType: 'playlists' };
+  const first = { ...base, sourceCollectionId: 'playlist-a', sourcePosition: 0 };
+  const repeated = { ...base, sourceCollectionId: 'playlist-a', sourcePosition: 3 };
+  const otherPlaylist = { ...base, sourceCollectionId: 'playlist-b', sourcePosition: 0 };
+  const firstKey = cache.decisionKeyFor(first, 'spotify', '', false, 'zvuk');
+  assert.notEqual(firstKey, cache.decisionKeyFor(repeated, 'spotify', '', false, 'zvuk'));
+  assert.notEqual(firstKey, cache.decisionKeyFor(otherPlaylist, 'spotify', '', false, 'zvuk'));
+  assert.equal(firstKey, cache.decisionKeyFor(first, 'spotify', '', false, 'zvuk'));
+
+  const favoriteA = { ...base, sourceCollectionType: 'favorites' };
+  const favoriteB = { ...base, sourceCollectionType: 'favorites' };
+  assert.equal(cache.decisionKeyFor(favoriteA, 'spotify', '', false, 'zvuk'), cache.decisionKeyFor(favoriteB, 'spotify', '', false, 'zvuk'));
+});

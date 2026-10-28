@@ -162,9 +162,11 @@
       track.matchReason = track.match ? 'manual_review' : null;
       track.matchConfidence = track.match ? window.MusicMatcher.scoreCandidate(track, track.match).score : 0;
       persistMatchDecision(track);
+      const duplicates = propagateSourceRecording(track);
       state.report = null;
       $('#report').classList.remove('show');
       renderTracks();
+      if (duplicates.length > 1) toast(`Совпадение применено к ${duplicates.length} вхождениям этой записи; выбор можно менять отдельно`);
     }));
     $$('.track-query').forEach((input) => input.addEventListener('input', () => {
       const track = state.tracks[Number(input.dataset.index)];
@@ -175,8 +177,9 @@
       searchOne(state.tracks[Number(button.dataset.index)]);
     }));
     $$('.include').forEach((checkbox) => checkbox.addEventListener('change', () => {
-      state.tracks[Number(checkbox.dataset.index)].selected = checkbox.checked;
-      persistMatchDecision(state.tracks[Number(checkbox.dataset.index)]);
+      const track = state.tracks[Number(checkbox.dataset.index)];
+      track.selected = checkbox.checked;
+      persistMatchDecision(track);
       state.report = null;
       $('#report').classList.remove('show');
       updateCounts();
@@ -706,6 +709,30 @@
       selected: Boolean(track.selected && track.match),
       trackId: track.match?.trackId || null,
     }, context.storefront, context.accountCatalog, context.sourceProvider);
+  }
+
+  function propagateSourceRecording(track) {
+    const key = window.MusicMatcher.sourceRecordingKey(track, state.sourceProvider);
+    if (!key) return [track];
+    const duplicates = state.tracks.filter((candidate) => window.MusicMatcher.sourceRecordingKey(candidate, state.sourceProvider) === key);
+    for (const duplicate of duplicates) {
+      if (duplicate === track) continue;
+      duplicate.matches = track.matches;
+      duplicate.match = track.match;
+      duplicate.matchConfidence = track.matchConfidence;
+      duplicate.matchReason = track.matchReason;
+      duplicate.autoMatched = track.autoMatched;
+      duplicate.cachedMatch = track.cachedMatch;
+      duplicate.cachedResults = track.cachedResults;
+      duplicate.searched = track.searched;
+      duplicate.searchError = track.searchError;
+      duplicate.errorMessage = track.errorMessage;
+      duplicate.searchExpansionComplete = track.searchExpansionComplete;
+      duplicate.userExcluded = track.userExcluded;
+      duplicate.selected = track.selected;
+      persistMatchDecision(duplicate);
+    }
+    return duplicates;
   }
 
   async function updateMatchCacheStatus() {
