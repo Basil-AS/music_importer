@@ -5,7 +5,7 @@
     if (!adapter || !providerIds.has(adapter.id)) throw new Error('Adapter должен объявить один из четырёх provider ID');
     const methods = [
       'connect', 'disconnect', 'discoverCollectionPage', 'readCollectionPage', 'searchTracks',
-      'searchTracksBatch', 'readDestination', 'writeFavorites', 'createPlaylist', 'writePlaylistItems', 'readBack',
+      'searchTracksBatch', 'searchAlbums', 'writeAlbums', 'readDestination', 'writeFavorites', 'createPlaylist', 'writePlaylistItems', 'readBack',
     ];
     return Object.fromEntries(methods.map((method) => [method, typeof adapter[method] === 'function']));
   }
@@ -392,11 +392,13 @@
     if (!['favorites', 'playlists', 'library'].includes(targetType)) throw new Error('Неизвестный тип целевой коллекции');
     const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || (targetType === 'favorites' && !operation.operation));
     const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || (targetType === 'playlists' && !operation.operation));
-    if (favoriteOperations.length + playlistOperations.length !== plan.operations.length) throw new Error('План содержит неизвестный тип записи');
+    const albumOperations = plan.operations.filter((operation) => operation.operation === 'add_album');
+    if (favoriteOperations.length + playlistOperations.length + albumOperations.length !== plan.operations.length) throw new Error('План содержит неизвестный тип записи');
     const playlistMappings = targetType === 'favorites' ? [] : (plan.collectionMappings || []);
     const writeFavorites = favoriteOperations.length > 0;
     const writePlaylists = playlistOperations.length > 0 || playlistMappings.length > 0;
     if (writeFavorites && typeof adapter.writeFavorites !== 'function') throw new Error('Адаптер не умеет добавлять треки в избранное');
+    if (albumOperations.length && typeof adapter.writeAlbums !== 'function') throw new Error('Адаптер не умеет добавлять альбомы в библиотеку');
     if (writePlaylists && (typeof adapter.createPlaylist !== 'function' || typeof adapter.writePlaylistItems !== 'function')) throw new Error('Адаптер не умеет создавать и наполнять плейлисты');
     const sourceCompleteness = plan.completeness?.source || [];
     if (!sourceCompleteness.length || sourceCompleteness.some((status) => status?.confirmed !== true)) throw new Error('Перенос остановлен: полнота исходной библиотеки не подтверждена');
@@ -452,6 +454,26 @@
       report.verified = completeRead(back)
         ? favoriteOperations.filter((operation) => readIds.has(String(operation.target.providerId))).length
         : 0;
+    }
+    if (albumOperations.length) {
+      const existingAlbums = await adapter.readDestination({ collectionType: 'albums', collectionName: 'Альбомы', signal: options.signal });
+      if (!completeRead(existingAlbums)) throw new Error('Перенос остановлен: не удалось подтвердить полный список уже сохранённых альбомов');
+      const present = destinationIds(existingAlbums);
+      const pending = albumOperations.filter((operation) => !present.has(String(operation.target.providerId)));
+      report.alreadyPresent += albumOperations.length - pending.length;
+      for (let offset = 0; offset < pending.length; offset += batchSize) {
+        if (options.signal?.aborted) throw new DOMException('Перенос отменён', 'AbortError');
+        const batch = pending.slice(offset, offset + batchSize);
+        report.writesAttempted += batch.length;
+        const result = await runStep(`write_albums:${offset}`, () => adapter.writeAlbums(batch.map((operation) => operation.target), {
+          signal: options.signal, idempotencyKey: `${plan.createdAt}:albums:${offset}`,
+        }));
+        report.writesPerformed += Number.isInteger(result?.writtenCount) ? result.writtenCount : batch.length;
+        await runStep(`checkpoint_albums:${offset}`, () => checkpoint({ phase: 'albums', offset, count: batch.length }));
+      }
+      const back = await runStep('read_back_albums', () => adapter.readBack({ type: 'albums', operations: albumOperations }, { signal: options.signal }));
+      const readIds = destinationIds(back);
+      if (completeRead(back)) report.verified += albumOperations.filter((operation) => readIds.has(String(operation.target.providerId))).length;
     }
     if (writePlaylists) {
       const groups = new Map();

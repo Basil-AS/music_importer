@@ -1,7 +1,7 @@
 (() => {
   const musicProviderIds = new Set(['spotify', 'apple-music', 'yandex-music', 'zvuk']);
   const sourceIds = new Set([...musicProviderIds, 'file']);
-  const collectionTypes = new Set(['favorites', 'playlists']);
+  const collectionTypes = new Set(['favorites', 'playlists', 'albums']);
 
   function requireValue(value, label) {
     if (!value) throw new Error(`Не задано обязательное поле: ${label}`);
@@ -25,6 +25,24 @@
       collectionName: track.sourceCollectionName || track.collectionName ? String(track.sourceCollectionName || track.collectionName) : null,
       position: Number.isInteger(track.sourcePosition) ? track.sourcePosition : Number.isInteger(position) ? position : null,
       metadataComplete: track.metadataComplete !== false,
+    };
+  }
+
+  // Saved albums are separate from liked tracks: an album item is one album ref, never its tracks.
+  function normalizeAlbum(album, provider, position = null) {
+    const artists = Array.isArray(album.artists) ? album.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean) : String(album.artist || '').split(/\s*,\s*/).filter(Boolean);
+    const upc = album.upc || album.barcode || album.ean;
+    return {
+      provider,
+      providerId: album.providerId || album.id ? String(album.providerId || album.id) : null,
+      upc: upc ? String(upc).replace(/[^0-9]/g, '') || null : null,
+      title: String(album.title || album.name || '').trim(),
+      artists,
+      trackCount: Number.isInteger(album.trackCount) ? album.trackCount : null,
+      releaseDate: String(album.releaseDate || '') || null,
+      artworkUrl: String(album.artworkUrl || album.artwork?.url || '') || null,
+      collectionType: 'albums',
+      position: Number.isInteger(position) ? position : null,
     };
   }
 
@@ -53,9 +71,11 @@
         itemCount: rows.length,
         completeness: status,
         items: rows.map((row, index) => {
-          const track = row?.track || row;
+          const track = row?.track || row?.album || row;
           const position = Number.isInteger(row?.position) ? row.position : Number.isInteger(track?.position) ? track.position : index;
-          return { position, track: normalizeTrack(track, provider, position) };
+          return collection.type === 'albums'
+            ? { position, album: normalizeAlbum(track, provider, position) }
+            : { position, track: normalizeTrack(track, provider, position) };
         }),
       };
     });
@@ -141,7 +161,7 @@
     return createSnapshot({ provider, collections, completeness });
   }
 
-  function createTransferPlan({ sourceSnapshot, targetProvider, targetCollectionType, targetCollectionName = null, storefront = null, tracks }) {
+  function createTransferPlan({ sourceSnapshot, targetProvider, targetCollectionType, targetCollectionName = null, storefront = null, tracks, albums = [] }) {
     requireValue(sourceSnapshot?.provider, 'sourceSnapshot.provider');
     requireValue(targetProvider, 'targetProvider');
     requireValue(targetCollectionType, 'targetCollectionType');
@@ -186,6 +206,22 @@
     const sourceCollectionSummaries = sourceCollections.map(({ items: _items, ...summary }) => summary);
     const targetId = track => track.match.trackId ?? track.match.providerId ?? track.match.id;
 
+    const chosenAlbums = (albums || []).filter((album) => album.selected && album.match);
+    const albumTargetId = (album) => album.match.albumId ?? album.match.providerId ?? album.match.id;
+    const albumOperations = chosenAlbums.map((album) => ({
+      source: normalizeAlbum(album, sourceSnapshot.provider),
+      target: {
+        provider: targetProvider,
+        providerId: String(albumTargetId(album)),
+        title: album.match.title || album.match.name || null,
+        artists: Array.isArray(album.match.artists) ? album.match.artists : album.match.artistName ? [album.match.artistName] : [],
+        upc: album.match.upc ? String(album.match.upc) : null,
+        trackCount: Number.isInteger(album.match.trackCount) ? album.match.trackCount : null,
+      },
+      operation: 'add_album',
+      match: { method: album.matchReason || 'manual_review', confidence: album.matchConfidence || null, automatic: Boolean(album.autoMatched) },
+    }));
+
     return {
       schemaVersion: 3,
       type: 'music-transfer-plan',
@@ -197,7 +233,7 @@
       },
       target: { provider: targetProvider, collectionType: targetCollectionType, collectionName: targetCollectionName, storefront },
       collectionMappings: [...playlists.values()],
-      operations: chosen.map(({ track }) => ({
+      operations: [...chosen.map(({ track }) => ({
         source: normalizeTrack(track, sourceSnapshot.provider),
         target: {
           provider: targetProvider,
@@ -214,7 +250,7 @@
           ? (track.sourceCollectionType === 'favorites' ? 'add_to_favorites' : 'add_to_playlist')
           : targetCollectionType === 'favorites' ? 'add_to_favorites' : 'add_to_playlist',
         match: { method: track.matchReason || 'manual_review', confidence: track.matchConfidence || null, automatic: Boolean(track.autoMatched) },
-      })),
+      })), ...albumOperations],
       skipped: skipped.map(({ track }) => ({
         source: normalizeTrack(track, sourceSnapshot.provider),
         reason: track.searched && !track.matches.length ? 'no_catalog_match' : 'not_selected',
@@ -224,5 +260,5 @@
     };
   }
 
-  window.MusicTransferCore = Object.freeze({ createImportedSnapshot, createSnapshot, createTransferPlan, normalizeTrack });
+  window.MusicTransferCore = Object.freeze({ createImportedSnapshot, createSnapshot, createTransferPlan, normalizeAlbum, normalizeTrack });
 })();
