@@ -81,3 +81,9 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Code review found that cursor pagination could lose the page's original request headers when the site uses `fetch(Request)` or XHR instead of `fetch(url, init)`. This could make the first favorites page visible while the replayed next page is rejected.
 - Version `0.13.29` copies request headers only inside the page-script closure for same-origin GraphQL cursor replay. Fetch Request method/credentials and XHR method/custom headers are preserved. Header values are not posted to the extension, stored, or included in diagnostics.
 - Fixture tests exercise both Request and XHR replay with a required synthetic header, verify the next favorite page completes, and assert the header never appears in bridge messages. This is not live evidence; the Zvuk session still needs a read-only retest after extension reload.
+
+## 2026-10-28 — Spotify HTTP 401 with an authenticated page
+
+- The local importer showed `fetchLibraryTracks: HTTP 401` while the visible Spotify tab still rendered the signed-in Liked Songs page. The precise server-side rejection reason is not available from the sanitized response; no request or cookie values were inspected.
+- Reader code sent the captured bearer/client headers but omitted Fetch's `credentials` option for `api-partner.spotify.com`. Version `0.13.30` now uses `credentials: include` for Pathfinder calls so the browser may attach Spotify's own session cookies, without reading or storing cookie values. The privacy disclosure now describes this behavior.
+- A fixture asserts credentialed requests. This is a hypothesis-driven fix, not live proof; it must be checked after Reload of the unpacked extension. No target search, account write, or read-back was run.

@@ -237,6 +237,7 @@
       try {
         response = await fetchWithTimeout(endpoint, {
           method: 'POST',
+          credentials: 'include',
           headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ variables, operationName, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
         }, apiTimeoutMs);

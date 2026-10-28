@@ -20,7 +20,7 @@ Chrome MV3 connector читает персональную библиотеку 
 - Favorites проверяются на уникальность Spotify track URI. Playlist items сохраняются по порядку и с повторениями, пустые playlists сохраняются.
 - PathFinder persisted-query hashes сначала обновляются по наблюдаемым запросам Player, затем сверяются с доступными Web Player bundle; если Spotify явно вернул `PersistedQueryNotFound`, выполняется одна попытка обновить hash.
 - Перед каждым разделом и страницей показывается актуальный этап. Один сетевой запрос ограничен 45 секундами; загрузка Web Player bundle для поиска hash — 15 секундами. Во время `Retry-After` скан сообщает оставшееся ожидание, чтобы inactivity watchdog не принял активный backoff за зависание.
-- В snapshot передаются Spotify URI, title, artists, album, ISRC если есть, duration и playlist positions. OAuth tokens, cookies, session headers и raw request bodies в app не попадают.
+- Pathfinder запросы отправляются из страницы Spotify с `credentials: include`, как при браузерной авторизованной сессии. В snapshot передаются Spotify URI, title, artists, album, ISRC если есть, duration и playlist positions. OAuth tokens, cookies, session headers и raw request bodies в app не попадают.
 
 ## Ограничения
 

@@ -105,6 +105,8 @@ test('Spotify source reader imports liked tracks and every playlist with item or
   assert.ok(!emitted.includes('fixture-secret'));
   assert.ok(!emitted.includes('fixture-client-secret'));
   assert.ok(page.requests.filter((request) => request.url === endpoint).every((request) => request.init.headers.authorization === 'Bearer fixture-secret'));
+  assert.ok(page.requests.filter((request) => request.url === endpoint && request.payload?.operationName !== 'initialPageRequest')
+    .every((request) => request.init.credentials === 'include'));
   const diagnostics = page.messages.filter((message) => message.diagnostic).map((message) => message.diagnostic);
   assert.ok(diagnostics.some((diagnostic) => diagnostic.operation === 'fetchLibraryTracks'
     && diagnostic.offset === 0 && diagnostic.limit === 50
