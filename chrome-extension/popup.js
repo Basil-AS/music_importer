@@ -1,5 +1,52 @@
 const $ = (selector) => document.querySelector(selector);
 const send = (type, detail = {}) => chrome.runtime.sendMessage({ type: `zvuk:${type}`, ...detail });
+const providers = [
+  { id: 'apple-music', statusId: '#appleStatus', origin: 'https://music.apple.com' },
+  { id: 'spotify', statusId: '#spotifyStatus', origin: 'https://open.spotify.com' },
+  { id: 'yandex-music', statusId: '#yandexStatus', origin: 'https://music.yandex.ru' },
+  { id: 'zvuk', statusId: '#zvukStatus', origin: 'https://zvuk.com' },
+];
+
+async function renderConnections() {
+  const tabs = await chrome.tabs.query({});
+  for (const provider of providers) {
+    const tab = tabs.find((candidate) => {
+      try { return new URL(candidate.url || '').origin === provider.origin; } catch { return false; }
+    });
+    const card = document.querySelector(`[data-provider="${provider.id}"]`);
+    card.dataset.state = tab ? 'open' : 'closed';
+    $(provider.statusId).textContent = tab ? 'Вкладка открыта' : 'Нет открытой вкладки';
+  }
+
+  const appTabs = tabs.filter((candidate) => {
+    try {
+      const url = new URL(candidate.url || '');
+      return ['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001', 'https://basil-as.github.io'].includes(url.origin)
+        && (url.pathname === '/' || url.pathname === '/music_importer/' || url.pathname === '/music_importer/index.html');
+    } catch { return false; }
+  });
+  const appPriority = (candidate) => {
+    const url = new URL(candidate.url);
+    if (url.origin === 'http://127.0.0.1:8001' || url.origin === 'http://localhost:8001') return 4;
+    if (url.origin === 'https://basil-as.github.io') return 3;
+    return 1;
+  };
+  appTabs.sort((left, right) => appPriority(right) - appPriority(left));
+  const appTab = appTabs[0];
+  if (!appTab) {
+    $('#appConnectionStatus').textContent = 'Приложение не открыто';
+    $('#appConnectionHelp').textContent = 'Запустите локальный сервер и откройте его страницу.';
+    return;
+  }
+  try {
+    const health = await chrome.tabs.sendMessage(appTab.id, { type: 'music-importer:bridge-health' });
+    $('#appConnectionStatus').textContent = health?.ok ? `Приложение подключено · расширение ${health.version}` : 'Страница найдена, расширение не ответило';
+    $('#appConnectionHelp').textContent = health?.ok ? 'После входа в сервисы приложение начнёт собирать библиотеки.' : 'Проверьте доступ расширения к адресу этой страницы и перезагрузите вкладку.';
+  } catch {
+    $('#appConnectionStatus').textContent = 'Расширение не подключено к странице';
+    $('#appConnectionHelp').textContent = 'Разрешите расширению доступ к этому адресу, обновите его и перезагрузите страницу.';
+  }
+}
 
 function getCompleteness(state) {
   const parts = [];
@@ -26,6 +73,7 @@ function getCompleteness(state) {
 }
 
 async function render() {
+  await renderConnections();
   const state = await send('state');
   $('#trackCount').textContent = String(state.tracks.length);
   $('#playlistCount').textContent = String(state.playlists.length);
@@ -42,6 +90,18 @@ async function render() {
   $('#error').hidden = !state.error;
   $('#error').textContent = state.error || '';
 }
+
+$('#openAppBtn').addEventListener('click', async () => {
+  const tabs = await chrome.tabs.query({});
+  const appTab = tabs.find((candidate) => {
+    try {
+      const url = new URL(candidate.url || '');
+      return url.origin === 'http://127.0.0.1:8001' && url.pathname === '/';
+    } catch { return false; }
+  });
+  if (appTab?.id) await chrome.tabs.update(appTab.id, { active: true });
+  else await chrome.tabs.create({ url: 'http://127.0.0.1:8001/' });
+});
 
 $('#startBtn').addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -164,3 +224,4 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.zvukFavoriteCapture) render();
 });
 render();
+setInterval(() => void renderConnections(), 2000);

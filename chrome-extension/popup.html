@@ -9,8 +9,23 @@
 </head>
 <body>
   <main>
-    <header><span class="logo">♫</span><div><strong>Music Importer</strong><small>Коннектор Звука</small></div></header>
-    <p class="privacy">Работаем в открытой вкладке Звука. Пароль, cookies и токены не читаются и не сохраняются.</p>
+    <header><span class="logo">♫</span><div><strong>Music Importer</strong><small>Подключение аккаунтов</small></div></header>
+    <p class="privacy">Приложение читает открытые вкладки сервисов. Пароли, cookies и токены не читаются и не сохраняются.</p>
+    <section class="connections" aria-live="polite">
+      <div class="connection" data-provider="apple-music"><b>Apple Music</b><span id="appleStatus">Проверяем вкладку…</span></div>
+      <div class="connection" data-provider="spotify"><b>Spotify</b><span id="spotifyStatus">Проверяем вкладку…</span></div>
+      <div class="connection" data-provider="yandex-music"><b>Яндекс Музыка</b><span id="yandexStatus">Проверяем вкладку…</span></div>
+      <div class="connection" data-provider="zvuk"><b>Звук</b><span id="zvukStatus">Проверяем вкладку…</span></div>
+    </section>
+    <section class="app-connection" aria-live="polite">
+      <b id="appConnectionStatus">Проверяем приложение…</b>
+      <span id="appConnectionHelp">Откройте Music Importer на этом компьютере.</span>
+      <button id="openAppBtn">Открыть Music Importer</button>
+    </section>
+    <p class="hint">«Вкладка открыта» не подтверждает вход в аккаунт. После подключения приложения авторизованные страницы будут просканированы автоматически.</p>
+    <details class="zvuk-tools">
+      <summary>Экспорт библиотеки Звука в JSON</summary>
+      <p class="hint">Резервный экспорт для ручной загрузки. Основной перенос выполняется в приложении Music Importer.</p>
     <section class="status" aria-live="polite">
       <div class="metric"><b id="trackCount">0</b><span>уникальных треков</span></div>
       <div class="metric"><b id="playlistCount">0</b><span>плейлистов найдено</span></div>
@@ -25,8 +40,9 @@
       <button id="exportPlaylistsBtn" disabled>Скачать плейлисты JSON</button>
       <button class="danger" id="clearBtn" disabled>Очистить локальные данные</button>
     </div>
-    <p class="hint">Откройте любую страницу Звука, войдите в аккаунт и нажмите сбор. Расширение само пройдёт «Любимое», каталог плейлистов и каждую страницу плейлиста, используя обычную загрузку страницей Звука. Готовый JSON можно загрузить в локальный Music Importer.</p>
+    <p class="hint">Откройте страницу Звука, войдите и начните сбор. Расширение пройдёт избранное, каталог плейлистов и страницы плейлистов. Экспорт останется на этом устройстве.</p>
     <p class="error" id="error" hidden></p>
+    </details>
   </main>
 </body>
 </html>

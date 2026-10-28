@@ -10,7 +10,11 @@
 
   if (!allowedPaths.get(location.origin)?.has(location.pathname)) return;
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'music-importer:bridge-health') {
+      sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+      return false;
+    }
     if (!['music-importer:yandex-progress', 'music-importer:apple-progress', 'music-importer:zvuk-progress', 'music-importer:spotify-progress'].includes(message?.type)) return false;
     window.postMessage({
       source: marker,
