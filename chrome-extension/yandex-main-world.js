@@ -83,6 +83,23 @@
     };
   }
 
+  function normalizeLibraryTrack(value, position = null) {
+    const normalized = normalizeTrack(value, position);
+    if (normalized) return { ...normalized, metadataComplete: true };
+    const id = trackId(value);
+    if (!id) throw new Error('В библиотеке Яндекс Музыки есть трек без ID.');
+    return {
+      id,
+      title: '',
+      artists: [],
+      album: '',
+      isrc: '',
+      durationMs: 0,
+      position,
+      metadataComplete: false,
+    };
+  }
+
   async function hydrate(ids, label) {
     const hydrated = [];
     for (let offset = 0; offset < ids.length; offset += batchSize) {
@@ -112,9 +129,10 @@
     const ids = refs.map(trackId);
     if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new Error('В ответе лайков Яндекс Музыки есть пустые или повторные ID.');
     const rows = await hydrate(ids, 'Лайки');
-    const tracks = rows.map((row, index) => normalizeTrack(row, index));
-    if (tracks.some((track) => !track) || tracks.length !== refs.length) throw new Error('Карточки лайков Яндекс Музыки неполны.');
-    return { tracks, revision: Number(library.revision), count: refs.length };
+    const tracks = rows.map((row, index) => normalizeLibraryTrack(row, index));
+    if (tracks.length !== refs.length) throw new Error('Карточки лайков Яндекс Музыки неполны.');
+    const metadataIncompleteCount = tracks.filter((track) => !track.metadataComplete).length;
+    return { tracks, revision: Number(library.revision), count: refs.length, metadataIncompleteCount };
   }
 
   function playlistListFrom(result) {
@@ -136,8 +154,8 @@
     let rows;
     if (refs.every((row) => (row?.track || row)?.title && (row?.track || row)?.artists)) rows = refs.map((row) => row?.track || row);
     else rows = await hydrate(refs.map(trackId), `Плейлист ${playlist.title || playlist.name || kind}`);
-    const tracks = rows.map((row, position) => normalizeTrack(row, position));
-    if (tracks.some((track) => !track) || tracks.length !== total) throw new Error(`Полнота плейлиста «${playlist.title || playlist.name || kind}» не сошлась: ${tracks.length} из ${total}.`);
+    const tracks = rows.map((row, position) => normalizeLibraryTrack(row, position));
+    if (tracks.length !== total) throw new Error(`Полнота плейлиста «${playlist.title || playlist.name || kind}» не сошлась: ${tracks.length} из ${total}.`);
     return {
       id: `yandex:${ownerId}:${kind}`,
       title: String(playlist.title || playlist.name || detail.title || `Плейлист ${kind}`),
@@ -145,6 +163,7 @@
       revision: String(detail?.revision || ''),
       complete: true,
       tracks,
+      metadataIncompleteCount: tracks.filter((track) => !track.metadataComplete).length,
     };
   }
 
@@ -428,6 +447,8 @@
         post('scan-progress', { phase: 'playlists', message: `Плейлист ${index + 1} из ${playlistRows.length}: ${playlist.title || playlist.name || 'без названия'}.` });
         playlists.push(await readPlaylist(uid, playlist));
       }
+      const metadataIncompleteCount = favorites.metadataIncompleteCount
+        + playlists.reduce((total, playlist) => total + playlist.metadataIncompleteCount, 0);
       return {
         schemaVersion: 1,
         service: 'yandex-music',
@@ -437,6 +458,8 @@
           favoritesConfirmed: true,
           favoritesCount: favorites.count,
           favoritesRevision: favorites.revision,
+          metadataComplete: metadataIncompleteCount === 0,
+          metadataIncompleteCount,
           catalogConfirmed: true,
           playlistCatalogKindsConfirmed: true,
           playlistItemsConfirmed: playlists.every((playlist) => playlist.complete),

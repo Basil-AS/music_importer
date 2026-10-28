@@ -22,6 +22,7 @@
       collectionId: track.sourceCollectionId || track.collectionId ? String(track.sourceCollectionId || track.collectionId) : null,
       collectionName: track.sourceCollectionName || track.collectionName ? String(track.sourceCollectionName || track.collectionName) : null,
       position: Number.isInteger(track.sourcePosition) ? track.sourcePosition : Number.isInteger(position) ? position : null,
+      metadataComplete: track.metadataComplete !== false,
     };
   }
 

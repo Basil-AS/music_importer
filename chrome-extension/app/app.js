@@ -115,7 +115,8 @@
   function updateCounts() {
     const searchBusy = state.searching || state.tracks.some((track) => track.searching);
     const selected = state.tracks.filter((track) => track.selected && track.match).length;
-    const reviewed = state.tracks.filter((track) => track.searched && track.matches.length && !track.match && !track.userExcluded).length;
+    const reviewed = state.tracks.filter((track) => (track.metadataComplete === false && !track.match)
+      || (track.searched && track.matches.length && !track.match && !track.userExcluded)).length;
     const missing = state.tracks.filter((track) => track.searched && !track.matches.length).length;
     $('#readyStat').textContent = state.loaded ? selected : '—';
     $('#reviewStat').textContent = state.loaded ? reviewed : '—';
@@ -137,8 +138,8 @@
 
   function renderTracks() {
     const needsReviewOnly = $('#needsReviewOnly').checked;
-    const reviewable = state.tracks.some((track) => track.searched || track.searchError);
-    const needsReview = (track) => track.searchError || (track.searched && !track.match && !track.userExcluded);
+    const reviewable = state.tracks.some((track) => track.searched || track.searchError || track.metadataComplete === false);
+    const needsReview = (track) => track.searchError || track.metadataComplete === false || (track.searched && !track.match && !track.userExcluded);
     const indexedTracks = state.tracks.map((track, index) => ({ track, index }));
     const displayedTracks = needsReviewOnly ? indexedTracks.filter(({ track }) => needsReview(track)) : indexedTracks;
     const pageCount = Math.max(1, Math.ceil(displayedTracks.length / trackPageSize));
@@ -166,9 +167,10 @@
     }
 
     $('#trackList').innerHTML = visibleTracks.map(({ track, index }) => {
-      const title = escapeHTML(track.title);
-      const artist = escapeHTML(track.artist);
-      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.userExcluded ? 'Исключено вами' : track.searched && !track.matches.length ? (track.cachedResults ? 'Нет совпадений · кэш' : 'Не найдено') : track.match ? (track.accountLibraryMatch ? `Уже в аккаунте · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? (track.cachedResults ? 'Проверьте · кэш' : 'Проверьте') : 'Не искали';
+      const missingMetadata = track.metadataComplete === false && !track.title && !track.artist;
+      const title = escapeHTML(track.title || (missingMetadata ? 'Метаданные недоступны' : 'Без названия'));
+      const artist = escapeHTML(track.artist || (missingMetadata ? 'Введите название или исполнителя для ручного поиска' : ''));
+      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.userExcluded ? 'Исключено вами' : missingMetadata && !track.query ? 'Нужны данные' : track.searched && !track.matches.length ? (track.cachedResults ? 'Нет совпадений · кэш' : 'Не найдено') : track.match ? (track.accountLibraryMatch ? `Уже в аккаунте · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? (track.cachedResults ? 'Проверьте · кэш' : 'Проверьте') : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : !track.userExcluded && track.searched && track.matches.length ? 'review' : 'pending';
       const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
@@ -241,7 +243,8 @@
     state.report = null;
     $('#report').classList.remove('show');
     const playlistCount = state.sourceSnapshot.collections.filter((collection) => collection.type === 'playlists').length;
-    $('#reviewSub').textContent = `${label} · ${list.length} треков${playlistCount ? ` · ${playlistCount} плейлистов` : ''} готовы к поиску`;
+    const missingMetadataCount = list.filter((track) => track.metadataComplete === false && !track.title && !track.artist).length;
+    $('#reviewSub').textContent = `${label} · ${list.length} треков${playlistCount ? ` · ${playlistCount} плейлистов` : ''}${missingMetadataCount ? ` · без метаданных: ${missingMetadataCount}` : ''} готовы к поиску`;
     updateTargetLabel();
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#searchStatus').classList.remove('search-error');
@@ -427,8 +430,9 @@
         sourceCollectionItemCount: Number.isInteger(row?.__sourceCollectionItemCount) ? row.__sourceCollectionItemCount : null,
         sourceCollectionComplete: row?.__sourceCollectionComplete === true,
         sourcePosition: Number.isInteger(row?.__sourcePosition) ? row.__sourcePosition : Number(track?.position || 0),
+        metadataComplete: track?.metadataComplete !== false,
       };
-    }).filter((track) => track.title && track.artist);
+    }).filter((track) => (track.title && track.artist) || (track.metadataComplete === false && track.sourceId));
   }
 
   function exactIsrcQuery(track, provider) {
@@ -932,7 +936,8 @@
     $('#searchBtn').textContent = 'Идёт поиск…';
     $('#searchStatus').classList.remove('search-error');
     setStep(3);
-    const pending = state.tracks.filter((track) => !track.searched || track.searchError);
+    const pending = state.tracks.filter((track) => (!track.searched || track.searchError)
+      && (track.query || track.title || track.artist || track.isrc));
     let completed = state.tracks.length - pending.length;
     let cachedCount = 0;
     $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
@@ -1033,8 +1038,9 @@
       });
       const withResults = state.tracks.filter((track) => track.searched && track.matches.length).length;
       const failed = state.tracks.filter((track) => track.searchError).length;
+      const missingMetadataCount = state.tracks.filter((track) => track.metadataComplete === false && !track.title && !track.artist).length;
       const resultStatus = failed ? `Найдено: ${withResults} · ошибок: ${failed}` : `Найдено: ${withResults} из ${state.tracks.length}`;
-      $('#searchStatus').textContent = `${resultStatus}${accountLibraryCount ? ` · уже в аккаунте: ${accountLibraryCount}` : ''}${cachedCount ? ` · из локального кэша: ${cachedCount}` : ''}`;
+      $('#searchStatus').textContent = `${resultStatus}${missingMetadataCount ? ` · без метаданных: ${missingMetadataCount}` : ''}${accountLibraryCount ? ` · уже в аккаунте: ${accountLibraryCount}` : ''}${cachedCount ? ` · из локального кэша: ${cachedCount}` : ''}`;
       $('#searchStatus').classList.toggle('search-error', failed > 0);
       setStep(4);
       toast(failed ? 'Часть запросов не прошла — можно повторить' : `Совпадений в каталоге: ${withResults}`);
