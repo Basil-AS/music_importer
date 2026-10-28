@@ -23,8 +23,16 @@
     }
     if (event.data?.source !== marker) return;
     const { type, ...detail } = event.data;
-    if (!['favorite-page', 'favorites-scroll-end', 'favorites-scroll-stall', 'collection-count', 'read-error', 'playlist-list-page', 'playlist-metadata', 'playlist-track-page', 'collection-scroll-end', 'collection-scroll-stall', 'playlist-scroll-end'].includes(type)) return;
-    chrome.runtime.sendMessage({ type: `zvuk:${type}`, ...detail });
+    if (!['favorite-page', 'favorites-scroll-end', 'favorites-scroll-stall', 'scan-progress', 'collection-count', 'read-error', 'playlist-list-page', 'playlist-metadata', 'playlist-track-page', 'collection-scroll-end', 'collection-scroll-stall', 'playlist-scroll-end'].includes(type)) return;
+    chrome.runtime.sendMessage({ type: `zvuk:${type}`, ...detail }).then((response) => {
+      if (detail.captureAckId) window.postMessage({
+        source: marker, type: 'capture-ack', captureAckId: detail.captureAckId, ok: response?.ok === true,
+      }, location.origin);
+    }).catch(() => {
+      if (detail.captureAckId) window.postMessage({
+        source: marker, type: 'capture-ack', captureAckId: detail.captureAckId, ok: false,
+      }, location.origin);
+    });
   });
 
   chrome.runtime.onMessage.addListener((message) => {

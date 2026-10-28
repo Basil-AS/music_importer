@@ -509,3 +509,31 @@ test('Zvuk account scan refuses a favorites total mismatch', async () => {
   assert.equal(storage[ZVUK_KEY].captureEnabled, false);
   assert.ok(!app.updates.some((entry) => entry.update.url === 'https://zvuk.com/collection?music_importer_capture=1'));
 });
+
+test('Zvuk waits for the independent favorites count if cursor scan finishes first', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/favorites' }];
+  const storage = { [ZVUK_KEY]: makeZvukState() };
+  const app = bootWorker(storage, tabs);
+  await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  await app.pageMessage({ type: 'zvuk:favorite-page', tracks: [{ id: 'like-1', title: 'Liked' }], hasMore: false }, 1);
+  await app.pageMessage({ type: 'zvuk:favorites-scroll-end' }, 1);
+
+  assert.equal(storage[ZVUK_KEY].scan.active, true);
+  assert.equal(storage[ZVUK_KEY].scan.phase, 'favorites');
+  assert.equal(storage[ZVUK_KEY].scan.error, undefined);
+
+  await app.pageMessage({ type: 'zvuk:collection-count', uniqueTrackCount: 1, uniquePlaylistCount: 0 }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(storage[ZVUK_KEY].scan.phase, 'playlists');
+  assert.ok(app.updates.some((entry) => entry.update.url === 'https://zvuk.com/collection?music_importer_capture=1'), JSON.stringify(storage[ZVUK_KEY]));
+});
+
+test('Zvuk stops a scan with no progress after two minutes', async () => {
+  const storage = { [ZVUK_KEY]: { ...makeZvukState(), scan: { active: true, phase: 'favorites', startedAt: new Date(0).toISOString() }, updatedAt: new Date(0).toISOString() } };
+  const app = bootWorker(storage);
+  const result = await app.call({ type: 'music-importer:get-all-libraries', refresh: false });
+
+  assert.match(result.statuses.zvuk.message, /не сообщал о прогрессе 2 минуты/i);
+  assert.equal(storage[ZVUK_KEY].scan.active, false);
+  assert.equal(storage[ZVUK_KEY].captureEnabled, false);
+});

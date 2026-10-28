@@ -8,8 +8,11 @@
   let lastFavoritePageAt = 0;
   let lastFavoriteHasMore = true;
   let favoriteEndReported = false;
+  let favoriteScanStarted = false;
   let lastCollectionPageAt = 0;
   let lastCollectionHasMore = true;
+  const captureAckWaiters = new Map();
+  let captureAckSequence = 0;
 
   if (startAtLoad) {
     const cleanUrl = new URL(location.href);
@@ -19,6 +22,22 @@
 
   function post(type, detail = {}) {
     window.postMessage({ source: marker, type, ...detail }, location.origin);
+  }
+
+  function postWithAck(type, detail = {}) {
+    const captureAckId = `capture-${++captureAckSequence}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        captureAckWaiters.delete(captureAckId);
+        resolve(false);
+      }, 20000);
+      captureAckWaiters.set(captureAckId, (ok) => {
+        clearTimeout(timer);
+        captureAckWaiters.delete(captureAckId);
+        resolve(ok === true);
+      });
+      window.postMessage({ source: marker, type, ...detail, captureAckId }, location.origin);
+    });
   }
 
   function stopAutoScroll() {
@@ -120,15 +139,7 @@
     if (operationName === 'getPaginatedCollection') {
       const page = payload.data?.paginatedCollection?.tracks;
       if (!page || !Array.isArray(page.items)) return;
-      const tracks = page.items.map(sanitizeTrack).filter((track) => track.id && track.title);
-      lastFavoritePageAt = Date.now();
-      lastFavoriteHasMore = Boolean(page.page?.endCursor);
-      favoriteEndReported = false;
-      post('favorite-page', {
-        tracks,
-        hasMore: lastFavoriteHasMore,
-      });
-      return;
+      return reportFavoritePage(page);
     }
 
     if (operationName === 'getPaginatedCollectionAll' || operationName === 'getPaginatedCollectionAllSections') {
@@ -188,16 +199,105 @@
     }
   }
 
+  function reportFavoritePage(page) {
+    if (!Array.isArray(page?.items)) return false;
+    const tracks = page.items.map(sanitizeTrack).filter((track) => track.id && track.title);
+    lastFavoritePageAt = Date.now();
+    lastFavoriteHasMore = Boolean(page.page?.endCursor);
+    favoriteEndReported = false;
+    return postWithAck('favorite-page', { tracks, hasMore: lastFavoriteHasMore });
+  }
+
+  async function readFavoritesByCursor(url, init, bodyText, firstPage) {
+    if (location.pathname !== '/favorites' || !Array.isArray(firstPage?.items)) return false;
+    let cursor = firstPage.page?.endCursor;
+    if (cursor === null || cursor === undefined || cursor === '') {
+      favoriteEndReported = true;
+      return postWithAck('favorites-scroll-end');
+    }
+    let requestBody;
+    try {
+      requestBody = JSON.parse(bodyText);
+      if (!requestBody.variables || !Object.hasOwn(requestBody.variables, 'after')) return false;
+    } catch { return false; }
+
+    const seen = new Set();
+    let pagesRead = 1;
+    try {
+      while (cursor !== null && cursor !== undefined && cursor !== '') {
+        const nextCursor = String(cursor);
+        if (seen.has(nextCursor)) throw new Error('Звук повторил cursor списка лайков.');
+        seen.add(nextCursor);
+        const nextBody = {
+          ...requestBody,
+          variables: { ...requestBody.variables, after: nextCursor },
+        };
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 45000);
+        let response;
+        try {
+          response = await originalFetch.call(window, url, {
+            ...init,
+            method: init?.method || 'POST',
+            credentials: init?.credentials || 'include',
+            body: JSON.stringify(nextBody),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) throw new Error('Страница избранного Звука не ответила за 45 секунд.');
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+        if (!response.ok) throw new Error(`GraphQL ответил HTTP ${response.status}.`);
+        const payload = await response.json();
+        if (!payload?.data || payload.errors?.length) throw new Error('Звук не вернул страницу избранного.');
+        const page = payload.data?.paginatedCollection?.tracks;
+        if (!Array.isArray(page?.items) || !await reportFavoritePage(page)) throw new Error('Звук не сохранил страницу избранного.');
+        pagesRead += 1;
+        cursor = page.page?.endCursor;
+        if (cursor && !page.items.length) throw new Error('Звук вернул пустую страницу лайков с продолжением.');
+        if (!await postWithAck('scan-progress', { phase: 'favorites', message: `Избранное Звука: получено страниц ${pagesRead}.` })) {
+          throw new Error('Приложение не подтвердило сохранение прогресса избранного Звука.');
+        }
+      }
+      favoriteEndReported = true;
+      stopAutoScroll();
+      return await postWithAck('favorites-scroll-end');
+    } catch {
+      // If replaying the observed request is unsupported, fall back to the page's own infinite scroll.
+      startAutoScroll();
+      return false;
+    }
+  }
+
+  async function continueFavoriteScan(url, init, bodyText, firstPage, reported) {
+    if (location.pathname !== '/favorites' || favoriteScanStarted) return;
+    favoriteScanStarted = true;
+    try {
+      if (await reported !== true) { startAutoScroll(); return; }
+      const handled = await readFavoritesByCursor(url, init || {}, bodyText, firstPage);
+      if (!handled) startAutoScroll();
+    } finally {
+      favoriteScanStarted = false;
+    }
+  }
+
   function observeFetch(input, init, originalFetch, receiver) {
     const url = typeof input === 'string' ? input : input?.url || '';
     if (!url.includes('/api/v1/graphql')) return originalFetch.call(receiver, input, init);
     const body = typeof init?.body === 'string'
       ? Promise.resolve(init.body)
       : input instanceof Request ? input.clone().text().catch(() => '') : Promise.resolve('');
-    const operation = body.then((value) => operationFor(url, value));
+    const request = body.then((text) => ({ text, operation: operationFor(url, text) }));
     return originalFetch.call(receiver, input, init).then((response) => {
-      operation.then((parsed) => {
-        if (parsed.name) response.clone().json().then((payload) => reportOperation(parsed, payload)).catch(() => {});
+      request.then(({ text, operation }) => {
+        if (operation.name) response.clone().json().then((payload) => {
+          const reported = reportOperation(operation, payload);
+          if (operation.name === 'getPaginatedCollection') void continueFavoriteScan(
+            url, init || {}, text, payload?.data?.paginatedCollection?.tracks, reported,
+          );
+        }).catch(() => {});
       });
       return response;
     });
@@ -222,7 +322,14 @@
         this.addEventListener('load', () => {
           try {
             const payload = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
-            reportOperation(parsed, payload);
+            const reported = reportOperation(parsed, payload);
+            if (parsed.name === 'getPaginatedCollection') void continueFavoriteScan(
+              this.responseURL || url,
+              { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' } },
+              typeof body === 'string' ? body : '',
+              payload?.data?.paginatedCollection?.tracks,
+              reported,
+            );
           } catch { /* A non-JSON provider response is ignored. */ }
         }, { once: true });
       }
@@ -232,9 +339,13 @@
 
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
+    if (event.data.type === 'capture-ack') {
+      captureAckWaiters.get(String(event.data.captureAckId || ''))?.(event.data.ok === true);
+      return;
+    }
     if (event.data.type === 'start') enabled = true;
     if (event.data.type === 'stop') { enabled = false; stopAutoScroll(); }
   });
 
-  if (startAtLoad && (location.pathname === '/favorites' || location.pathname.startsWith('/collection') || /^\/playlist\/[^/]+/.test(location.pathname))) startAutoScroll();
+  if (startAtLoad && (location.pathname.startsWith('/collection') || /^\/playlist\/[^/]+/.test(location.pathname))) startAutoScroll();
 })();

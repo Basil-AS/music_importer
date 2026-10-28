@@ -199,6 +199,7 @@ async function advancePlaylistAutomation(state) {
 async function advanceAccountScan(state) {
   if (!state.scan?.active) return;
   if (state.scan.phase === 'favorites' && state.favoritesScanFinished) {
+    if (!Number.isInteger(state.expectedCount)) return;
     const favoritesConfirmed = state.hasMore === false
       && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
     if (!favoritesConfirmed) {
@@ -397,13 +398,25 @@ async function requestZvukLibrary(refresh) {
   const payload = createLibraryPayload(state);
   const lastGoodSnapshot = payload.completeness.confirmed ? payload : state.previousCompleteSnapshot;
   if (payload.completeness.confirmed && !refresh) return { payload, stale: false };
-  if (state.scan?.active) return {
-    pending: true,
-    progress: `Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
-    payload: state.previousCompleteSnapshot || null,
-    cached: Boolean(state.previousCompleteSnapshot),
-    stale: Boolean(state.previousCompleteSnapshot),
-  };
+  if (state.scan?.active) {
+    const lastActivity = Date.parse(state.updatedAt || state.scan.startedAt || '');
+    if (Number.isFinite(lastActivity) && Date.now() - lastActivity > PROVIDER_SCAN_STALE_AFTER_MS) {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; повторите сканирование.' };
+      state.captureEnabled = false;
+      state.automation = { ...state.automation, active: false };
+      state.error = state.scan.error;
+      await writeState(state);
+      if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan.error };
+      return { error: state.scan.error };
+    }
+    return {
+      pending: true,
+      progress: state.scan.message || `Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
+      payload: state.previousCompleteSnapshot || null,
+      cached: Boolean(state.previousCompleteSnapshot),
+      stale: Boolean(state.previousCompleteSnapshot),
+    };
+  }
   if (!refresh && lastGoodSnapshot?.completeness?.confirmed === true) {
     return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Звука.' };
   }
@@ -503,6 +516,7 @@ function pageKind(url) {
 function messageMatchesPage(type, kind) {
   if (type === 'zvuk:favorite-page') return kind === 'favorites';
   if (type === 'zvuk:favorites-scroll-end' || type === 'zvuk:favorites-scroll-stall') return kind === 'favorites';
+  if (type === 'zvuk:scan-progress') return kind === 'favorites';
   if (type === 'zvuk:playlist-list-page') return kind === 'collection';
   if (type === 'zvuk:playlist-metadata') return kind === 'collection' || kind === 'playlist';
   if (type === 'zvuk:playlist-track-page') return kind === 'playlist';
@@ -960,6 +974,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await writeState(state);
       sendResponse({ ok: true });
       await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:scan-progress') {
+      state.scan = { ...state.scan, message: String(message.message || 'Сканируем библиотеку Звука.').slice(0, 240) };
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
       return;
     }
 

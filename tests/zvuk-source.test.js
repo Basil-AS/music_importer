@@ -3,9 +3,10 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function makePage(path = '/favorites') {
+function makePage(path = '/favorites', respond = null) {
   const listeners = new Map();
   const messages = [];
+  const requests = [];
   const location = { origin: 'https://zvuk.com', pathname: path, href: `https://zvuk.com${path}?music_importer_capture=1` };
   const history = { state: {}, replaceState(_state, _title, url) { location.href = String(url); } };
   class XMLHttpRequest {
@@ -16,11 +17,19 @@ function makePage(path = '/favorites') {
   const window = {
     location,
     addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(message) { messages.push(message); },
+    postMessage(message) {
+      messages.push(message);
+      if (message.captureAckId) queueMicrotask(() => listeners.get('message')?.({
+        source: window, origin: location.origin,
+        data: { source: 'music-importer-zvuk', type: 'capture-ack', captureAckId: message.captureAckId, ok: true },
+      }));
+    },
     scrollTo() {},
     fetch: async (url, init = {}) => {
-      const operation = JSON.parse(init.body || '{}').operationName;
-      const payload = operation === 'getPaginatedCollection'
+      const request = { url: String(url), init, payload: JSON.parse(init.body || '{}') };
+      requests.push(request);
+      const operation = request.payload.operationName;
+      const defaultPayload = operation === 'getPaginatedCollection'
         ? { data: { paginatedCollection: { tracks: {
           items: [{ id: 'favorite-1', title: 'Favorite', artists: [{ id: 'artist-1', title: 'Artist' }], release: { id: 'release-1', title: 'Album' }, isrc: 'USABC1234567', duration: 180000, privateField: 'must-not-leak' }],
           page: { endCursor: null },
@@ -36,18 +45,20 @@ function makePage(path = '/favorites') {
               { id: 'repeat-track', title: 'Repeated', artists: [{ title: 'Artist' }] },
             ] } } }
             : { errors: [{ message: 'Unexpected fixture operation' }] };
-      return { clone: () => ({ json: async () => payload }) };
+      const payload = respond ? respond(request) : defaultPayload;
+      return { ok: true, status: 200, json: async () => payload, clone: () => ({ json: async () => payload }) };
     },
   };
   const context = {
     window, location, history, document: {}, XMLHttpRequest, URL, Request: class Request {}, Promise,
-    Map, Set, String, Number, Array, Object, Error, JSON, Date, RegExp, Math,
+    Map, Set, String, Number, Array, Object, Error, JSON, Date, RegExp, Math, AbortController,
     setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {},
     getComputedStyle: () => ({ overflowY: 'visible' }),
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/main-world.js'), 'utf8'), context);
   return {
     messages,
+    requests,
     async request(operationName, variables = {}) {
       const response = await window.fetch('https://zvuk.com/api/v1/graphql', {
         method: 'POST', body: JSON.stringify({ operationName, variables }),
@@ -86,4 +97,28 @@ test('Zvuk page connector preserves repeated playlist tracks and their requested
   assert.equal(playlistPage.offset, 20);
   assert.equal(playlistPage.limit, 2);
   assert.deepEqual(Array.from(playlistPage.tracks, (track) => track.id), ['repeat-track', 'repeat-track']);
+});
+
+test('Zvuk source reader follows observed favorite cursors without relying on scroll events', async () => {
+  const page = makePage('/favorites', ({ payload }) => {
+    const cursor = payload.variables?.after || null;
+    const pages = {
+      null: { items: [{ id: 'favorite-a', title: 'A', artists: [{ title: 'Artist' }] }], page: { endCursor: 'cursor-b' } },
+      'cursor-b': { items: [{ id: 'favorite-b', title: 'B', artists: [{ title: 'Artist' }] }], page: { endCursor: 'cursor-c' } },
+      'cursor-c': { items: [{ id: 'favorite-c', title: 'C', artists: [{ title: 'Artist' }] }], page: { endCursor: null } },
+    };
+    return { data: { paginatedCollection: { tracks: pages[String(cursor)] } } };
+  });
+
+  await page.request('getPaginatedCollection', { first: 100, after: null });
+  for (let attempt = 0; attempt < 20 && !page.messages.some((message) => message.type === 'favorites-scroll-end'); attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const favoritePages = page.messages.filter((message) => message.type === 'favorite-page');
+  assert.deepEqual(favoritePages.flatMap((message) => message.tracks.map((track) => track.id)), [
+    'favorite-a', 'favorite-b', 'favorite-c',
+  ]);
+  assert.deepEqual(page.messages.filter((message) => message.type === 'favorites-scroll-end').length, 1);
+  assert.deepEqual(page.requests.filter((request) => request.payload.operationName === 'getPaginatedCollection')
+    .map((request) => request.payload.variables.after), [null, 'cursor-b', 'cursor-c']);
 });
