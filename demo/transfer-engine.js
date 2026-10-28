@@ -389,12 +389,12 @@
     if (options.confirmed !== true) throw new Error('Перед записью пользователь должен явно подтвердить перенос');
     if (typeof adapter.readDestination !== 'function' || typeof adapter.readBack !== 'function') throw new Error('Адаптеру нужны чтение назначения и обратная сверка');
     const targetType = plan.target.collectionType;
-    if (!['favorites', 'playlists', 'library'].includes(targetType)) throw new Error('Неизвестный тип целевой коллекции');
+    if (!['favorites', 'playlists', 'library', 'albums'].includes(targetType)) throw new Error('Неизвестный тип целевой коллекции');
     const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || (targetType === 'favorites' && !operation.operation));
     const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || (targetType === 'playlists' && !operation.operation));
     const albumOperations = plan.operations.filter((operation) => operation.operation === 'add_album');
     if (favoriteOperations.length + playlistOperations.length + albumOperations.length !== plan.operations.length) throw new Error('План содержит неизвестный тип записи');
-    const playlistMappings = targetType === 'favorites' ? [] : (plan.collectionMappings || []);
+    const playlistMappings = ['favorites', 'albums'].includes(targetType) ? [] : (plan.collectionMappings || []);
     const writeFavorites = favoriteOperations.length > 0;
     const writePlaylists = playlistOperations.length > 0 || playlistMappings.length > 0;
     if (writeFavorites && typeof adapter.writeFavorites !== 'function') throw new Error('Адаптер не умеет добавлять треки в избранное');

@@ -8,6 +8,7 @@ const SERIALIZED_STATE_MESSAGE_TYPES = new Set([
   'zvuk:state', 'zvuk:start-library', 'zvuk:start', 'zvuk:stop', 'zvuk:clear', 'zvuk:run-playlists',
   'zvuk:favorite-page', 'zvuk:favorites-scroll-end', 'zvuk:favorites-scroll-stall', 'zvuk:collection-count',
   'zvuk:scan-progress', 'zvuk:playlist-list-page', 'zvuk:playlist-metadata', 'zvuk:playlist-track-page',
+  'zvuk:release-list-page', 'zvuk:release-metadata',
   'zvuk:playlist-scroll-end', 'zvuk:collection-scroll-end', 'zvuk:collection-scroll-stall', 'zvuk:read-error',
 ]);
 const APP_TAB_URLS = [
@@ -129,6 +130,10 @@ async function readState() {
     playlistPagesSeen: 0,
     expectedPlaylistCount: null,
     playlistListHasMore: null,
+    albums: [],
+    albumPagesSeen: 0,
+    expectedAlbumCount: null,
+    albumListHasMore: null,
     favoritesScanFinished: false,
     collectionScrollFinished: false,
     scan: { active: false, phase: 'idle', tabId: null, startedAt: null },
@@ -138,11 +143,24 @@ async function readState() {
     error: null,
     ...(stored[STORAGE_KEY] || {}),
     tracks: Array.isArray(stored[STORAGE_KEY]?.tracks) ? stored[STORAGE_KEY].tracks : [],
+    albums: Array.isArray(stored[STORAGE_KEY]?.albums) ? stored[STORAGE_KEY].albums : [],
     playlists: Array.isArray(stored[STORAGE_KEY]?.playlists) ? stored[STORAGE_KEY].playlists : [],
   };
 }
 
+// Saved Zvuk releases count as albums only when the unique hydrated IDs equal the independent
+// getCollectionIds total and the cursor is exhausted; anything else fails closed.
+function zvukAlbumsStatus(state) {
+  const albums = Array.isArray(state.albums) ? state.albums : [];
+  const unique = new Set(albums.map((album) => album.id)).size;
+  if (state.albumListHasMore !== false) return { confirmed: false, error: 'release_list_incomplete' };
+  if (!Number.isInteger(state.expectedAlbumCount)) return { confirmed: false, error: 'release_count_unavailable' };
+  if (unique !== albums.length || unique !== state.expectedAlbumCount) return { confirmed: false, error: 'release_count_mismatch' };
+  return { confirmed: true, error: '' };
+}
+
 function createLibraryPayload(state) {
+  const albumsStatus = zvukAlbumsStatus(state);
   const favoritesConfirmed = state.favoritesScanFinished && state.hasMore === false
     && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
   const catalogConfirmed = state.playlistListHasMore === false
@@ -159,10 +177,53 @@ function createLibraryPayload(state) {
       catalogConfirmed,
       playlistItemsConfirmed,
       playlistItemsTotal: state.playlists.length,
+      albumsConfirmed: albumsStatus.confirmed,
+      albumsCount: albumsStatus.confirmed ? state.albums.length : null,
+      ...(albumsStatus.confirmed ? {} : { albumsError: albumsStatus.error }),
     },
+    collections: albumsStatus.confirmed ? [{
+      type: 'albums',
+      name: 'Альбомы',
+      completeness: { confirmed: true, total: state.albums.length, count: state.albums.length },
+      items: state.albums.map((album) => ({
+        providerId: album.id, title: album.title, artists: album.artists, upc: '',
+        trackCount: album.trackCount, releaseDate: album.releaseDate, artworkUrl: album.artworkUrl,
+      })),
+    }] : [],
     tracks: state.tracks,
     playlists: state.playlists,
   };
+}
+
+function sanitizeZvukRelease(release) {
+  const id = String(release?.id || '');
+  const title = String(release?.title || '').trim();
+  if (!id || !title) return null;
+  return {
+    id, title,
+    artists: (Array.isArray(release.artists) ? release.artists : [])
+      .map((artist) => String(typeof artist === 'string' ? artist : artist?.title || artist?.name || '').trim()).filter(Boolean),
+    trackCount: Number.isInteger(release.trackCount) && release.trackCount >= 0 ? release.trackCount : null,
+    releaseDate: String(release.releaseDate || ''),
+    artworkUrl: String(release.artworkUrl || ''),
+  };
+}
+
+function mergeZvukReleases(state, releases) {
+  const byId = new Map(state.albums.map((album) => [album.id, album]));
+  for (const incoming of Array.isArray(releases) ? releases : []) {
+    const release = sanitizeZvukRelease(incoming);
+    if (!release) continue;
+    const prior = byId.get(release.id);
+    byId.set(release.id, prior ? {
+      ...prior, ...release,
+      artists: release.artists.length ? release.artists : prior.artists,
+      trackCount: release.trackCount ?? prior.trackCount,
+      releaseDate: release.releaseDate || prior.releaseDate,
+      artworkUrl: release.artworkUrl || prior.artworkUrl,
+    } : release);
+  }
+  state.albums = [...byId.values()];
 }
 
 async function advancePlaylistAutomation(state) {
@@ -248,11 +309,15 @@ async function startAccountScan(tabId, { forceRefresh = false } = {}) {
   if (!tab || origin !== 'https://zvuk.com') return { ok: false, error: 'Войдите в Сбер.Звук в этой вкладке и повторите запуск.' };
   const state = await readState();
   if (state.scan?.active) return { ok: false, error: 'Сбор библиотеки Сбер.Звука уже выполняется.' };
-  if ((state.tracks.length || state.playlists.length) && !forceRefresh) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
+  if ((state.tracks.length || state.playlists.length || state.albums.length) && !forceRefresh) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
   const currentSnapshot = createLibraryPayload(state);
   if (currentSnapshot.completeness.confirmed) state.previousCompleteSnapshot = currentSnapshot;
   state.tracks = [];
   state.playlists = [];
+  state.albums = [];
+  state.albumPagesSeen = 0;
+  state.expectedAlbumCount = null;
+  state.albumListHasMore = null;
   state.pagesSeen = 0;
   state.receivedCount = 0;
   state.expectedCount = null;
@@ -292,6 +357,31 @@ async function beginPlaylistScan(state, tabId) {
 
 async function writeState(state) {
   await chrome.storage.local.set({ [STORAGE_KEY]: state });
+}
+
+// Provider snapshots expose saved albums in different places: Spotify, Yandex and Zvuk put an
+// albums entry into `collections`, Apple Music adds `albumsCollection`.
+function albumsFromPayload(payload) {
+  const entry = (Array.isArray(payload?.collections) ? payload.collections.find((collection) => collection?.type === 'albums') : null)
+    || (payload?.albumsCollection?.type === 'albums' ? payload.albumsCollection : null);
+  const items = Array.isArray(entry?.items) ? entry.items : [];
+  const ids = items.map((item) => String(item?.providerId || item?.id || ''));
+  const consistent = Boolean(entry) && ids.every(Boolean) && new Set(ids).size === ids.length;
+  return { entry, items, confirmed: payload?.completeness?.albumsConfirmed === true && consistent };
+}
+
+// A provider that claims albumsConfirmed must back it with a matching, duplicate-free list;
+// otherwise the claim is withdrawn so the app never transfers a half-read album library.
+function withVerifiedAlbumsClaim(payload) {
+  if (payload?.completeness?.albumsConfirmed !== true) return payload;
+  const { entry, items, confirmed } = albumsFromPayload(payload);
+  const expected = payload.completeness.albumsCount;
+  if (confirmed && (!Number.isInteger(expected) || expected === items.length) && entry.completeness?.confirmed !== false
+    && entry.complete !== false) return payload;
+  return {
+    ...payload,
+    completeness: { ...payload.completeness, albumsConfirmed: false, albumsCount: null, albumsError: 'album_count_mismatch' },
+  };
 }
 
 async function readProviderState() {
@@ -591,6 +681,7 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
         status: result.stale ? 'stale' : 'ready',
         trackCount: result.payload.tracks.length,
         playlistCount: result.payload.playlists.length,
+        albumCount: albumsFromPayload(result.payload).confirmed ? albumsFromPayload(result.payload).items.length : null,
         cached: result.cached === true,
         message: result.message || '',
       };
@@ -654,6 +745,8 @@ function messageMatchesPage(type, kind) {
   if (type === 'zvuk:scan-progress') return kind === 'favorites';
   if (type === 'zvuk:playlist-list-page') return kind === 'collection';
   if (type === 'zvuk:playlist-metadata') return kind === 'collection' || kind === 'playlist';
+  if (type === 'zvuk:release-list-page') return kind === 'collection';
+  if (type === 'zvuk:release-metadata') return kind === 'collection';
   if (type === 'zvuk:playlist-track-page') return kind === 'playlist';
   if (type === 'zvuk:collection-scroll-end') return kind === 'collection';
   if (type === 'zvuk:collection-scroll-stall') return kind === 'collection';
@@ -724,7 +817,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
-      if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'search-album-tracks', 'search-albums', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Некорректная команда Сбер.Звука.' });
         return;
       }
@@ -783,8 +876,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const requestId = String(message.requestId || '');
-      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'write-albums', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Некорректная команда Spotify.' });
+        return;
+      }
+      if (message.action === 'write-albums'
+        && (!Array.isArray(message.targets) || !message.targets.length || message.targets.length > 500
+          || message.targets.some((target) => target?.provider !== 'spotify' || !String(target?.providerId || '')))) {
+        sendResponse({ ok: false, error: 'Список альбомов Spotify пуст или содержит другую цель.' });
         return;
       }
       if (message.action === 'execute-transfer') {
@@ -813,6 +912,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           query: String(message.query || '').slice(0, 400),
           album: String(message.album || '').slice(0, 200),
           artist: String(message.artist || '').slice(0, 200),
+          upc: String(message.upc || '').replace(/[^0-9]/g, '').slice(0, 20),
+          ids: Array.isArray(message.ids) ? message.ids.slice(0, 500).map((id) => String(id).slice(0, 80)) : undefined,
+          targets: message.action === 'write-albums' ? message.targets : undefined,
           plan: message.action === 'execute-transfer' ? message.plan : undefined,
         });
         sendResponse(response || { ok: false, error: 'Spotify не вернул результат.' });
@@ -840,7 +942,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const requestId = String(message.requestId || '');
-      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-library-albums', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Некорректная команда Apple Music.' });
         return;
       }
@@ -866,6 +968,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           query: String(message.query || '').slice(0, 400),
           album: String(message.album || '').slice(0, 200),
           artist: String(message.artist || '').slice(0, 200),
+          upc: String(message.upc || '').replace(/[^0-9]/g, '').slice(0, 20),
           storefront: String(message.storefront || '').slice(0, 2),
           plan: message.action === 'execute-transfer' ? message.plan : undefined,
         });
@@ -893,7 +996,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
-      if (!['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Неизвестная команда Яндекс.Музыки.' });
         return;
       }
@@ -1010,9 +1113,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!valid) {
             state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
           } else {
-            state.snapshots[provider] = payload;
+            const stored = withVerifiedAlbumsClaim(payload);
+            state.snapshots[provider] = stored;
             delete state.previousSnapshots[provider];
-            state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков и ${payload.playlists.length} плейлистов.`, updatedAt: new Date().toISOString() };
+            const albums = albumsFromPayload(stored);
+            state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков, ${payload.playlists.length} плейлистов${albums.confirmed ? ` и ${albums.items.length} альбомов` : ''}.`, updatedAt: new Date().toISOString() };
           }
         }
       });
@@ -1058,6 +1163,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state.expectedCount = null;
       state.hasMore = null;
       state.playlists = [];
+      state.albums = [];
+      state.albumPagesSeen = 0;
+      state.expectedAlbumCount = null;
+      state.albumListHasMore = null;
       state.playlistPagesSeen = 0;
       state.expectedPlaylistCount = null;
       state.playlistListHasMore = null;
@@ -1134,6 +1243,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'zvuk:collection-count') {
       state.expectedCount = Number.isInteger(message.uniqueTrackCount) ? message.uniqueTrackCount : null;
       state.expectedPlaylistCount = Number.isInteger(message.uniquePlaylistCount) ? message.uniquePlaylistCount : state.expectedPlaylistCount;
+      state.expectedAlbumCount = Number.isInteger(message.uniqueReleaseCount) ? message.uniqueReleaseCount : state.expectedAlbumCount;
       state.updatedAt = new Date().toISOString();
       await writeState(state);
       sendResponse({ ok: true });
@@ -1174,6 +1284,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await writeState(state);
       sendResponse({ ok: true });
       await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:release-list-page' || message?.type === 'zvuk:release-metadata') {
+      mergeZvukReleases(state, message.releases);
+      if (message.type === 'zvuk:release-list-page') {
+        state.albumPagesSeen += 1;
+        state.albumListHasMore = Boolean(message.hasMore);
+      }
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
       return;
     }
 

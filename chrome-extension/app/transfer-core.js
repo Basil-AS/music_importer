@@ -95,16 +95,25 @@
     };
   }
 
-  function createImportedSnapshot({ provider, tracks = [], playlists = [], collectionType = 'favorites', collectionName = null, completeness = {} }) {
+  // `albums` is { items, name?, completeness? }: saved albums stay a separate collection of album refs.
+  function createImportedSnapshot({ provider, tracks = [], playlists = [], albums = null, collectionType = 'favorites', collectionName = null, completeness = {} }) {
     if (!['favorites', 'playlists', 'library'].includes(collectionType)) throw new Error(`Неизвестный тип импортируемой коллекции: ${collectionType}`);
     const isLibrary = collectionType === 'library';
+    const albumCollections = albums ? [{
+      id: null,
+      type: 'albums',
+      name: albums.name || 'Альбомы',
+      itemCount: (albums.items || []).length,
+      completeness: { confirmed: false, totalCount: (albums.items || []).length, ...(albums.completeness || {}) },
+      items: albums.items || [],
+    }] : [];
     if (collectionType === 'favorites') {
       return createSnapshot({
         provider,
         collections: [{
           id: null, type: 'favorites', name: collectionName || 'Любимое', items: tracks,
           itemCount: tracks.length, completeness,
-        }],
+        }, ...albumCollections],
         completeness,
       });
     }
@@ -155,10 +164,10 @@
           totalCount: Number.isInteger(completeness.favoritesCount) ? completeness.favoritesCount : favoriteTracks.length,
         },
         items: favoriteTracks,
-      }, ...collections];
+      }, ...collections, ...albumCollections];
       return createSnapshot({ provider, collections: snapshotCollections, completeness });
     }
-    return createSnapshot({ provider, collections, completeness });
+    return createSnapshot({ provider, collections: [...collections, ...albumCollections], completeness });
   }
 
   function createTransferPlan({ sourceSnapshot, targetProvider, targetCollectionType, targetCollectionName = null, storefront = null, tracks, albums = [] }) {
