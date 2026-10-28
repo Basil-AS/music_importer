@@ -97,7 +97,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
         }
         if (options.missingReceiverOnce?.includes(tabId) && !reloadedTabs.has(tabId)) throw new Error('Receiving end does not exist');
         if (message.type === 'music-importer:bridge-health-check') {
-          return { ok: true, bridgeProtocol: options.oldBridgeTabIds?.includes(tabId) && !reloadedTabs.has(tabId) ? 1 : 2 };
+          return { ok: true, bridgeProtocol: options.oldBridgeTabIds?.includes(tabId) && !reloadedTabs.has(tabId) ? 2 : 3 };
         }
         return { ok: true };
       },
