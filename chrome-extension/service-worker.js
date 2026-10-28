@@ -337,7 +337,8 @@ async function requestProviderLibrary(provider, refresh) {
   const lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
   if (refresh && scan?.status !== 'reading') {
-    const [tab] = await chrome.tabs.query({ url: providerConfig.tabPattern });
+    const tabs = await chrome.tabs.query({ url: providerConfig.tabPattern });
+    const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
     const providerName = provider === 'spotify' ? 'Spotify Web Player' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыку';
     if (!tab?.id) {
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Откройте ${providerName}, чтобы обновить сохранённый снимок.` };
