@@ -90,14 +90,22 @@
   function artistScore(sourceArtist, candidateArtist) {
     const splitCredits = (value) => {
       const names = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '') : [String(value || '')];
-      return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with|and)\s+|,|;|\s*&\s*/i))
+      return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with)\s+|,|;|\s*&\s*/i))
         .map(normalizeText).filter(Boolean);
     };
     const source = splitCredits(sourceArtist);
     const candidate = splitCredits(candidateArtist);
     if (!source.length || !candidate.length) return 0;
-    const matches = source.map((name) => Math.max(...candidate.map((other) => similarity(name, other))));
-    return matches.reduce((sum, score) => sum + score, 0) / matches.length;
+    const matrix = source.map((name) => candidate.map((other) => similarity(name, other)));
+    if (source.length === 1 || candidate.length === 1) {
+      // Providers frequently omit featured artists in one catalog. A lone
+      // credit on either side should match the strongest corresponding name.
+      return Math.max(...matrix.flat());
+    }
+    const sourceCoverage = matrix.map((scores) => Math.max(...scores));
+    const candidateCoverage = matrix[0].map((_, candidateIndex) => Math.max(...matrix.map((scores) => scores[candidateIndex])));
+    const allCoverage = [...sourceCoverage, ...candidateCoverage];
+    return allCoverage.reduce((sum, score) => sum + score, 0) / allCoverage.length;
   }
 
   function durationScore(source, candidate) {
