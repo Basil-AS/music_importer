@@ -10,10 +10,15 @@ function loadTransferModules() {
     window: {}, Date, Map, Set, String, Number, Array, Object, Error,
     structuredClone, DOMException,
   };
-  for (const file of ['transfer-core.js', 'transfer-engine.js']) {
+  for (const file of ['matcher.js', 'account-catalog.js', 'transfer-core.js', 'transfer-engine.js']) {
     vm.runInNewContext(fs.readFileSync(require.resolve(`../demo/${file}`), 'utf8'), context, { filename: file });
   }
-  return { core: context.window.MusicTransferCore, engine: context.window.MusicTransferEngine };
+  return {
+    matcher: context.window.MusicMatcher,
+    accountCatalog: context.window.MusicAccountCatalog,
+    core: context.window.MusicTransferCore,
+    engine: context.window.MusicTransferEngine,
+  };
 }
 
 function makeCompleteSource(provider) {
@@ -37,6 +42,22 @@ function makeCompleteSource(provider) {
         items: [],
       },
     ],
+  };
+}
+
+function makeProviderTrack(provider, id, title, artist, album) {
+  if (provider === 'apple-music') return { id: `library:${id}`, catalogId: id, title, artist, album, isrc: '' };
+  if (provider === 'spotify') return { id, title, artists: [{ name: artist }], album: { name: album }, isrc: '' };
+  if (provider === 'yandex-music') return { id, title, artists: [artist], album, isrc: '' };
+  return { id, title, artists: [{ title: artist }], release: { title: album }, isrc: '' };
+}
+
+function makeTargetSnapshot(provider) {
+  return {
+    service: provider,
+    completeness: { confirmed: true },
+    tracks: [makeProviderTrack(provider, `${provider}:like`, 'Liked track', 'Artist', 'Album')],
+    playlists: [{ tracks: [makeProviderTrack(provider, `${provider}:road`, 'Road track', 'Artist', 'Road album')] }],
   };
 }
 
@@ -83,21 +104,30 @@ for (const source of providers) {
   for (const target of providers) {
     if (source === target) continue;
     test(`executes likes and playlists from ${source} to ${target}`, async () => {
-      const { core, engine } = loadTransferModules();
+      const { matcher, accountCatalog, core, engine } = loadTransferModules();
       const sourceSnapshot = makeCompleteSource(source);
+      const sourceTracks = [
+        { title: 'Liked track', artist: 'Artist', album: 'Album' },
+        { title: 'Road track', artist: 'Artist', album: 'Road album' },
+      ];
+      const targetIndex = accountCatalog.buildIndex(makeTargetSnapshot(target), target);
+      const matchResolution = accountCatalog.resolveTracks(sourceTracks, targetIndex);
+      assert.equal(matchResolution.unresolved.length, 0, `${source} -> ${target} should resolve both records from the target account snapshot`);
       const plan = core.createTransferPlan({
         sourceSnapshot,
         targetProvider: target,
         targetCollectionType: 'library',
         tracks: [
           {
-            title: 'Liked track', artist: 'Artist', sourceCollectionType: 'favorites', selected: true,
-            match: { trackId: `${target}:like` }, matchReason: 'exact_isrc', matchConfidence: 1, autoMatched: true,
+            ...sourceTracks[0], sourceCollectionType: 'favorites', selected: true,
+            match: matchResolution.matches.get(sourceTracks[0])[0], matchReason: 'high_confidence_metadata',
+            matchConfidence: matcher.scoreCandidate(sourceTracks[0], matchResolution.matches.get(sourceTracks[0])[0]).score, autoMatched: true,
           },
           {
-            title: 'Road track', artist: 'Artist', sourceCollectionType: 'playlists',
+            ...sourceTracks[1], sourceCollectionType: 'playlists',
             sourceCollectionId: 'playlist-road', sourceCollectionName: 'Road', sourcePosition: 0,
-            selected: true, match: { trackId: `${target}:road` }, matchReason: 'exact_isrc', matchConfidence: 1, autoMatched: true,
+            selected: true, match: matchResolution.matches.get(sourceTracks[1])[0], matchReason: 'high_confidence_metadata',
+            matchConfidence: matcher.scoreCandidate(sourceTracks[1], matchResolution.matches.get(sourceTracks[1])[0]).score, autoMatched: true,
           },
         ],
       });
