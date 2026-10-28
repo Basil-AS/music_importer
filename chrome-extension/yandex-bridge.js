@@ -56,7 +56,7 @@
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== 'yandex:command' || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) return false;
+    if (message?.type !== 'yandex:command' || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'execute-transfer'].includes(message.action)) return false;
     const requestId = String(message.requestId || '');
     const timeout = setTimeout(() => {
       window.removeEventListener('message', onResponse);

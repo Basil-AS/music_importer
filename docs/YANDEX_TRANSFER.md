@@ -36,3 +36,7 @@ Route families и формы сверены со статическим source a
 ## Ограничения
 
 Пока нет live browser verification для поисковых ответов, CORS, likes mutations, playlist creation, revision conflict и read-back. API route shapes из community-кода не означают, что их текущие серверные semantics подтверждены. Перед полноценным релизом нужна отдельная однотрековая live-проверка с пользователем, который просмотрит match и подтвердит операцию; после этого — испытание маленького playlist и контроль read-back. Сейчас не следует считать ни одно направление выполненным end-to-end.
+
+## Albums transfer (fixture-only, not live-verified)
+
+Операции `add_album` переносят лайкнутые альбомы как альбомы, без разворачивания в лайки треков. Идемпотентность: уже лайкнутые альбомы пропускаются (`report.albums.existing`), новые ставятся пачками по 25 через `likes/albums/add-multiple`, затем read-back должен подтвердить все ID, иначе статус `partial_failure`. Отдельных checkpoint-ов нет: безопасный повтор обеспечивает сама идемпотентность. Маршруты и форма ответов проверены только фикстурами.
