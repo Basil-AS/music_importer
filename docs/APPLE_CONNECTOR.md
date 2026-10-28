@@ -12,6 +12,10 @@ The local Chrome extension reader handles liked songs and user playlists from th
 
 The scan is read-only. If Apple Music has not yet made an authenticated API request in the open page, the reader asks the user to open the library and retry. A missing `meta.total`, repeated page, invalid pagination URL, or malformed track stops the scan rather than claiming a complete snapshot.
 
+## Library albums (fixture-only, not live-verified)
+
+The scan also reads `GET /v1/me/library/albums?limit=100&include=catalog` with the same paging, duplicate-id rejection and `meta.total` checks. The result is `payload.albumsCollection` (`type: 'albums'`, items `{providerId, libraryId, catalogId, title, artists, upc, trackCount, releaseDate, artworkUrl}`). Library album ids (`l.…`) differ from catalog ids; `include=catalog` supplies the catalog id and UPC when Apple returns them, otherwise `upc` is null. A failed or inconsistent album read marks only the albums collection unconfirmed (`completeness.albumsConfirmed: false`) and does not block songs and playlists. Albums are never expanded into tracks.
+
 ## Limits
 
 - The connector uses the logged-in web player's private runtime headers to call documented personal-library reads. It does not create a MusicKit developer token or store user credentials. Apple's public REST API normally requires a developer token; this browser-session route is specific to the first-party Apple Music web app and may change.

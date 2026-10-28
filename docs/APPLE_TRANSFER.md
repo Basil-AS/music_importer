@@ -18,6 +18,12 @@ Status: experimental implementation; fixture-tested, not live-verified against a
 - Append playlist songs: `POST /v1/me/library/playlists/{id}/tracks` with `{ "data": [{ "id": "catalog-song-id", "type": "songs" }] }`.
 - Read-back uses paginated `/v1/me/library/songs` (`attributes.inFavorites`) and `/v1/me/library/playlists/{id}/tracks`.
 
+### Library albums (fixture-only, not live-verified)
+
+- Album search (`search-albums`): `GET /v1/catalog/{storefront}/albums?filter[upc]={upc}` first, then `GET /v1/catalog/{storefront}/search?term=…&types=albums&limit=10`. Candidates carry catalog `providerId`, title, artists, `upc`, `trackCount` and `matchReason` (`upc` or `search`).
+- Write: `execute-transfer` with `add_album` operations calls `POST /v1/me/library?ids[albums]=…` in batches of 25 catalog ids. Existing library albums are read first (`GET /v1/me/library/albums?include=catalog`, matched by catalog id) so reruns are idempotent. Library ids (`l.…`) are rejected.
+- Read-back repeats the library album read and fails closed unless every requested id is present. Progress events use phase `albums`. Album operations never touch `/v1/me/favorites` or `/v1/me/library/songs` writes; likes stay `add_to_favorites`.
+
 Apple documents these endpoints and requires a Music User Token for personal-library requests. Apple Music on the Web manages its own user token automatically. Research found that the first-party page may spell the header `Media-User-Token`, while Apple's public REST documentation spells it `Music-User-Token`; the adapter recognizes either spelling and sends it back under the same name used by the active page session. It temporarily keeps session headers in a private JavaScript closure. The local UI, extension storage, and local server never receive those headers. Using Apple Music's first-party page as the transport is still an implementation dependency: Apple can change the page's request setup or block cross-context calls, and this is not a standalone third-party OAuth flow.
 
 Official references:
