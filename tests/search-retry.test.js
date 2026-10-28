@@ -7,14 +7,20 @@ function loadEngine() {
   const delays = [];
   const timers = new Set();
   let timerId = 0;
+  let virtualNow = Date.now();
+  class VirtualDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [virtualNow])); }
+    static now() { return virtualNow; }
+  }
   const context = {
-    window: {}, URL, URLSearchParams, Map, Set, Promise, Number, String, Array, Object, Error, JSON, Date, Math,
+    window: {}, URL, URLSearchParams, Map, Set, Promise, Number, String, Array, Object, Error, JSON, Date: VirtualDate, Math,
     DOMException,
     setTimeout(callback, delay) {
       delays.push(delay);
       const id = ++timerId;
       const handle = setImmediate(() => {
         timers.delete(handle);
+        virtualNow += Number(delay) || 0;
         callback();
       });
       timers.add(handle);
@@ -28,7 +34,7 @@ function loadEngine() {
     },
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../demo/transfer-engine.js'), 'utf8'), context);
-  return { engine: context.window.MusicTransferEngine, delays };
+  return { engine: context.window.MusicTransferEngine, delays, now: () => virtualNow };
 }
 
 function loadMatcher() {
@@ -139,6 +145,29 @@ test('catalog search honors Retry-After seconds and HTTP-date values on 429', as
   }, [{ title: 'Song', artist: 'Artist' }], { maxRetries: 1 });
   assert.equal(date.delays[0] >= 2500, true);
   assert.equal(date.delays[0] <= 6000, true);
+});
+
+test('one HTTP 429 pauses the remaining bulk-search queue across workers', async () => {
+  const { engine, now } = loadEngine();
+  const startedAt = now();
+  let firstTrackAttempts = 0;
+  let queuedTrackStartedAt = null;
+  const tracks = ['Throttled', 'In flight', 'Queued'].map((title) => ({ title, artist: 'Artist' }));
+  const results = await engine.searchMany({
+    id: 'spotify',
+    maxConcurrentSearches: 2,
+    async searchTracks(track) {
+      if (track.title === 'Throttled' && firstTrackAttempts++ === 0) {
+        throw Object.assign(new Error('Spotify: HTTP 429.'), { status: 429, retryAfter: '7' });
+      }
+      if (track.title === 'Queued') queuedTrackStartedAt = now();
+      return [];
+    },
+  }, tracks);
+
+  assert.equal(results.length, tracks.length);
+  assert.ok(queuedTrackStartedAt - startedAt >= 7000);
+  assert.equal(firstTrackAttempts, 2);
 });
 
 test('batch catalog search preserves order and individually retries missing ISRC results', async () => {

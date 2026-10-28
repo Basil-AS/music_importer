@@ -59,23 +59,39 @@
     });
   }
 
+  async function waitForRateLimitPause(signal, state) {
+    while (state && state.blockedUntil > Date.now()) {
+      await waitForRetry(state.blockedUntil - Date.now(), signal);
+    }
+  }
+
   async function searchWithRetry(search, options) {
     const requestedRetries = Number(options.maxRetries ?? 3);
     const maxRetries = Number.isFinite(requestedRetries) ? Math.max(0, Math.min(5, Math.floor(requestedRetries))) : 3;
     for (let attempt = 0; ; attempt += 1) {
+      if (options.signal?.aborted) throw new DOMException('Поиск отменён', 'AbortError');
+      await waitForRateLimitPause(options.signal, options.rateLimitState);
       if (options.signal?.aborted) throw new DOMException('Поиск отменён', 'AbortError');
       try {
         const result = await search();
         if (options.signal?.aborted) throw new DOMException('Поиск отменён', 'AbortError');
         return result;
       } catch (error) {
-        if (attempt >= maxRetries || !retryableSearchError(error)) throw error;
         const status = searchStatus(error);
+        const retryable = retryableSearchError(error);
         const baseDelay = status === 429 ? 2500 : 500;
         const backoffMs = Math.min(30000, baseDelay * (2 ** attempt));
         const serverDelayMs = status === 429 ? retryAfterDelay(error) : null;
         const delayMs = serverDelayMs === null ? backoffMs : Math.max(backoffMs, serverDelayMs);
-        await waitForRetry(delayMs, options.signal);
+        if (status === 429 && options.rateLimitState) {
+          options.rateLimitState.blockedUntil = Math.max(options.rateLimitState.blockedUntil, Date.now() + delayMs);
+        }
+        if (attempt >= maxRetries || !retryable) throw error;
+        if (status === 429 && options.rateLimitState) {
+          continue;
+        } else {
+          await waitForRetry(delayMs, options.signal);
+        }
       }
     }
   }
@@ -93,6 +109,7 @@
 
     const queue = [...groups.values()];
     const results = new Array(queue.length);
+    const requestOptions = { ...options, rateLimitState: { blockedUntil: 0 } };
     let completed = 0;
     const finishGroup = async (index, candidates, error = null) => {
       const group = queue[index];
@@ -120,7 +137,7 @@
           try {
             batchResults = await searchWithRetry(
               () => adapter.searchTracksBatch(batchTracks, options.context || {}),
-              options,
+              requestOptions,
             );
           } catch (error) {
             if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
@@ -150,7 +167,7 @@
         let candidates = [];
         let error = null;
         try {
-          candidates = await searchWithRetry(() => adapter.searchTracks(group.tracks[0], options.context || {}), options);
+          candidates = await searchWithRetry(() => adapter.searchTracks(group.tracks[0], options.context || {}), requestOptions);
         } catch (caught) {
           error = caught;
         }
