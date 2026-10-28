@@ -104,16 +104,15 @@ test('catalog search waits longer after rate limiting and does not retry permane
 
   const permanent = loadEngine();
   let permanentAttempts = 0;
-  const [result] = await permanent.engine.searchMany({
+  await assert.rejects(permanent.engine.searchMany({
     id: 'yandex-music',
     async searchTracks() {
       permanentAttempts += 1;
       throw new Error('Яндекс Музыка: HTTP 401');
     },
-  }, [{ title: 'Song', artist: 'Artist' }]);
+  }, [{ title: 'Song', artist: 'Artist' }, { title: 'Another song', artist: 'Artist' }], { concurrency: 1 }), /HTTP 401/);
   assert.equal(permanentAttempts, 1);
   assert.deepEqual(permanent.delays, []);
-  assert.match(result.error.message, /401/);
 });
 
 test('catalog search honors Retry-After seconds and HTTP-date values on 429', async () => {
@@ -145,6 +144,75 @@ test('catalog search honors Retry-After seconds and HTTP-date values on 429', as
   }, [{ title: 'Song', artist: 'Artist' }], { maxRetries: 1 });
   assert.equal(date.delays[0] >= 2500, true);
   assert.equal(date.delays[0] <= 6000, true);
+});
+
+test('catalog search reports request and Retry-After progress to the UI', async () => {
+  const { engine, delays } = loadEngine();
+  let attempts = 0;
+  const starts = [];
+  const retries = [];
+  const [result] = await engine.searchMany({
+    id: 'spotify',
+    async searchTracks() {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error('Spotify: HTTP 429.'), { status: 429, retryAfter: '4' });
+      return [{ trackId: 'spotify:track:ok' }];
+    },
+  }, [{ title: 'Song', artist: 'Artist' }], {
+    onRequestStart: (progress) => starts.push(progress),
+    onRetry: (progress) => retries.push(progress),
+  });
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(delays, [4000]);
+  assert.equal(JSON.stringify(starts), JSON.stringify([{ completed: 0, total: 1 }]));
+  assert.equal(JSON.stringify(retries), JSON.stringify([{ status: 429, attempt: 1, maxRetries: 3, delayMs: 4000 }]));
+  assert.equal(result.candidates[0].trackId, 'spotify:track:ok');
+});
+
+test('repeated rate limits stop the bulk queue instead of fanning a failed album batch into track requests', async () => {
+  const { engine } = loadEngine();
+  let batchCalls = 0;
+  let individualCalls = 0;
+  const tracks = [
+    { title: 'Song A', artist: 'Artist', album: 'Album' },
+    { title: 'Song B', artist: 'Artist', album: 'Album' },
+    { title: 'Song C', artist: 'Artist', album: 'Other album' },
+    { title: 'Song D', artist: 'Artist', album: 'Other album' },
+  ];
+
+  await assert.rejects(engine.searchMany({
+    id: 'spotify',
+    batchSearchRequiresGroup: true,
+    canBatchSearch(track) { return Boolean(track.album); },
+    batchSearchKey(track) { return track.album; },
+    async searchTracksBatch() {
+      batchCalls += 1;
+      throw Object.assign(new Error('Spotify: HTTP 429.'), { status: 429, retryAfter: '8' });
+    },
+    async searchTracks() { individualCalls += 1; return []; },
+  }, tracks, { maxRetries: 0, concurrency: 1 }), (error) => error.status === 429);
+
+  assert.equal(batchCalls, 1);
+  assert.equal(individualCalls, 0);
+});
+
+test('exhausted Spotify 429 stops remaining per-track queries', async () => {
+  const { engine } = loadEngine();
+  let calls = 0;
+  await assert.rejects(engine.searchMany({
+    id: 'spotify',
+    async searchTracks() {
+      calls += 1;
+      throw Object.assign(new Error('Spotify: HTTP 429.'), { status: 429, retryAfter: '10' });
+    },
+  }, [
+    { title: 'Song A', artist: 'Artist' },
+    { title: 'Song B', artist: 'Artist' },
+    { title: 'Song C', artist: 'Artist' },
+  ], { maxRetries: 0, concurrency: 1 }), (error) => error.status === 429);
+
+  assert.equal(calls, 1);
 });
 
 test('one HTTP 429 pauses the remaining bulk-search queue across workers', async () => {

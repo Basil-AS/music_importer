@@ -31,6 +31,11 @@
     return error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(error?.message || error || ''));
   }
 
+  function shouldStopSearchQueue(error) {
+    const status = searchStatus(error);
+    return status === 401 || status === 403 || retryableSearchError(error);
+  }
+
   function retryAfterDelay(error) {
     const milliseconds = Number(error?.retryAfterMs);
     if (Number.isFinite(milliseconds) && milliseconds >= 0) return milliseconds;
@@ -87,6 +92,10 @@
           options.rateLimitState.blockedUntil = Math.max(options.rateLimitState.blockedUntil, Date.now() + delayMs);
         }
         if (attempt >= maxRetries || !retryable) throw error;
+        if (typeof options.onRetry === 'function') {
+          try { await options.onRetry({ status, attempt: attempt + 1, maxRetries, delayMs }); }
+          catch { /* Status reporting must not interrupt a provider retry. */ }
+        }
         if (status === 429 && options.rateLimitState) {
           continue;
         } else {
@@ -119,6 +128,11 @@
     };
 
     const pendingIndexes = new Set(queue.map((_, index) => index));
+    const notifyRequestStart = async () => {
+      if (typeof options.onRequestStart !== 'function') return;
+      try { await options.onRequestStart({ completed, total: queue.length }); }
+      catch { /* Status reporting must not interrupt catalog search. */ }
+    };
     if (typeof adapter.searchTracksBatch === 'function' && typeof adapter.canBatchSearch === 'function') {
       const batchIndexes = queue.map((group, index) => index)
         .filter((index) => adapter.canBatchSearch(queue[index].tracks[0], options.context || {}));
@@ -147,12 +161,13 @@
           const batchTracks = indexes.map((index) => queue[index].tracks[0]);
           let batchResults;
           try {
+            await notifyRequestStart();
             batchResults = await searchWithRetry(
               () => adapter.searchTracksBatch(batchTracks, options.context || {}),
               requestOptions,
             );
           } catch (error) {
-            if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
+            if (error?.name === 'AbortError' || options.signal?.aborted || shouldStopSearchQueue(error)) throw error;
             // If the batch request fails, the ordinary per-track adapter path remains available.
             continue;
           }
@@ -179,12 +194,14 @@
         let candidates = [];
         let error = null;
         try {
+          await notifyRequestStart();
           candidates = await searchWithRetry(() => adapter.searchTracks(group.tracks[0], options.context || {}), requestOptions);
         } catch (caught) {
           error = caught;
         }
         if (error) {
           if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
+          if (shouldStopSearchQueue(error)) throw error;
         }
         await finishGroup(index, candidates, error);
       }

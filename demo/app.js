@@ -1014,6 +1014,15 @@
           return window.MusicMatcher.catalogSearchGroupKey(track, state.sourceProvider, state.targetProvider, $('#storefront').value, query);
         },
         signal: controller.signal,
+        onRequestStart: ({ completed: finishedGroups, total }) => {
+          const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыки', spotify: 'Spotify', zvuk: 'Звука' };
+          $('#searchStatus').textContent = `Ищем в каталоге ${labels[state.targetProvider] || state.targetProvider}: обработано ${completed} из ${state.tracks.length} · запросы ${finishedGroups} из ${total}`;
+        },
+        onRetry: ({ status, attempt, maxRetries, delayMs }) => {
+          const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' };
+          const seconds = Math.ceil(delayMs / 1000);
+          $('#searchStatus').textContent = `${labels[state.targetProvider] || state.targetProvider}: HTTP ${status || 'network'}; повтор ${attempt}/${maxRetries} через ${seconds} с · обработано ${completed} из ${state.tracks.length}`;
+        },
         onProgress: async (group) => {
           for (const track of group.tracks) {
             track.searching = false;
