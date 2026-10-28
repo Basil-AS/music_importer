@@ -10,7 +10,7 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
+  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, sourceCollectionScope: 'all', collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
   const extensionApp = location.protocol === 'chrome-extension:' && typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
@@ -306,7 +306,6 @@
     setStep(2);
     $('#reviewCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     toast(`Загружено треков: ${list.length}`);
-    if (state.targetProvider) void searchCatalog();
   }
 
   const sourceLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
@@ -362,11 +361,56 @@
     updateTargetLabel();
   }
 
-  function selectProviderSnapshot(provider) {
+  function renderSourceCollectionPicker(provider, selectedScope = 'all') {
     const payload = state.librarySnapshots[provider];
+    const tools = $('#sourceCollectionTools');
+    const select = $('#sourceCollectionSelect');
+    const playlists = Array.isArray(payload?.playlists) ? payload.playlists : [];
+    const canScope = Boolean(payload && (playlists.length || Array.isArray(payload.tracks)));
+    tools.hidden = !canScope;
+    if (!canScope) return;
+    const options = [new Option('Лайки и все плейлисты', 'all')];
+    if (Array.isArray(payload.tracks)) options.push(new Option(`Только лайки (${payload.tracks.length})`, 'favorites'));
+    for (const playlist of playlists) {
+      const id = String(playlist.id || playlist.title || playlist.name || '');
+      const title = String(playlist.title || playlist.name || 'Плейлист');
+      const count = Number.isInteger(playlist.trackCount) ? playlist.trackCount : (playlist.tracks || playlist.items || []).length;
+      options.push(new Option(`${title} (${count})`, `playlist:${id}`));
+    }
+    select.replaceChildren(...options);
+    select.value = options.some((option) => option.value === selectedScope) ? selectedScope : 'all';
+    const onePlaylist = select.value.startsWith('playlist:');
+    $('#targetPlaylistName').hidden = !onePlaylist;
+    $('#targetPlaylistNameLabel').hidden = !onePlaylist;
+    if (!onePlaylist) $('#targetPlaylistName').value = '';
+  }
+
+  function selectProviderSnapshot(provider, collectionScope = null) {
+    const originalPayload = state.librarySnapshots[provider];
+    const scope = collectionScope || (state.sourceProvider === provider ? state.sourceCollectionScope : 'all');
+    renderSourceCollectionPicker(provider, scope);
+    let payload = originalPayload;
     if (!payload) {
       toast(`Сначала откройте ${sourceLabels[provider] || provider} в Chrome и обновите список аккаунтов`);
       return;
+    }
+    state.sourceCollectionScope = $('#sourceCollectionSelect').value || 'all';
+    if (state.sourceCollectionScope === 'favorites') {
+      payload = { ...payload, playlists: [], completeness: { ...payload.completeness, playlists: [], playlistCount: 0 } };
+    } else if (state.sourceCollectionScope.startsWith('playlist:')) {
+      const selectedId = state.sourceCollectionScope.slice('playlist:'.length);
+      const playlist = (originalPayload.playlists || []).find((item) => String(item.id || item.title || item.name || '') === selectedId);
+      if (!playlist) {
+        state.sourceCollectionScope = 'all';
+        renderSourceCollectionPicker(provider, 'all');
+      } else {
+        payload = {
+          ...originalPayload,
+          tracks: [],
+          playlists: [playlist],
+          completeness: { ...originalPayload.completeness, favoritesCount: 0, favoritesConfirmed: true, playlistCount: 1 },
+        };
+      }
     }
     state.sourceProvider = provider;
     state.source = sourceLabels[provider] || provider;
@@ -385,8 +429,21 @@
       completeness: payload.completeness,
       playlists: payload.playlists,
     });
+    $('#targetPlaylistName').value = '';
+    $('#targetPlaylistName').hidden = !state.sourceCollectionScope.startsWith('playlist:');
+    $('#targetPlaylistNameLabel').hidden = !state.sourceCollectionScope.startsWith('playlist:');
     renderSourceAvailability();
   }
+
+  $('#sourceCollectionSelect').addEventListener('change', () => {
+    if (!state.sourceProvider) return;
+    if (state.searching || state.tracks.some((track) => track.searching)) {
+      toast('Остановите поиск перед сменой коллекции.');
+      $('#sourceCollectionSelect').value = state.sourceCollectionScope;
+      return;
+    }
+    selectProviderSnapshot(state.sourceProvider, $('#sourceCollectionSelect').value);
+  });
 
   function parseCSV(text) {
     const header = text.split(/\r?\n/, 1)[0] || '';
@@ -1166,7 +1223,7 @@
   $('#cancelSearchBtn').addEventListener('click', () => activeSearchController?.abort());
 
   function buildPlan() {
-    return window.MusicTransferCore.createTransferPlan({
+    const plan = window.MusicTransferCore.createTransferPlan({
       sourceSnapshot: state.sourceSnapshot,
       targetProvider: state.targetProvider,
       targetCollectionType: state.collectionType,
@@ -1174,6 +1231,12 @@
       storefront: state.targetProvider === 'apple-music' ? $('#storefront').value : null,
       tracks: state.tracks,
     });
+    const nameOverride = $('#targetPlaylistName').value.trim();
+    if (nameOverride && state.sourceCollectionScope.startsWith('playlist:')) {
+      if (nameOverride.length > 100) throw new Error('Название плейлиста должно быть не длиннее 100 символов.');
+      plan.collectionMappings = plan.collectionMappings.map((mapping) => ({ ...mapping, targetName: nameOverride }));
+    }
+    return plan;
   }
 
   const providerLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
@@ -1550,10 +1613,9 @@
     $('#report').classList.remove('show');
     updateTargetLabel();
     $('#searchStatus').textContent = state.targetProvider
-      ? 'Начинаю автоматический поиск в выбранном каталоге…'
+      ? 'Проверьте выбранный список и запустите поиск кнопкой выше или для отдельного трека.'
       : state.loaded ? 'Выберите сервис назначения, отличный от источника.' : 'Сначала выберите сервис назначения';
     renderTracks();
-    if (state.targetProvider && state.loaded) void searchCatalog();
   });
   $('#storefront').addEventListener('change', () => {
     if (!state.loaded || state.searching || state.tracks.some((track) => track.searching)) return;
@@ -1621,7 +1683,8 @@
         }
         const playlistCount = plan.collectionMappings.length;
         const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', zvuk: 'Сбер.Звук', spotify: 'Spotify' })[state.targetProvider] || state.targetProvider;
-        if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
+        const playlistNames = plan.collectionMappings.map((mapping) => `«${mapping.targetName}»`).join(', ');
+        if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов${playlistNames ? ` ${playlistNames}` : ''} в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
         state.transferInProgress = true;
         $('#importBtn').disabled = true;
         $('#importBtn').textContent = 'Подготавливаем журнал переноса…';

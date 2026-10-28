@@ -68,3 +68,37 @@ test('transfer plan rejects selecting the source service as its own destination'
     tracks: [],
   }), /Источник и цель должны быть разными/);
 });
+
+test('a filtered complete playlist creates only one destination playlist and selected item', () => {
+  const core = loadCore();
+  const sourceSnapshot = {
+    provider: 'apple-music',
+    completeness: { confirmed: true },
+    collections: [
+      { id: null, type: 'favorites', name: 'Любимое', itemCount: 0, completeness: { confirmed: true }, items: [] },
+      {
+        id: 'source-list', type: 'playlists', name: 'Source list', itemCount: 2,
+        completeness: { confirmed: true },
+        items: [
+          { position: 0, track: { providerId: 'source-1', title: 'Selected', artist: 'Artist' } },
+          { position: 1, track: { providerId: 'source-2', title: 'Not selected', artist: 'Artist' } },
+        ],
+      },
+    ],
+  };
+  const plan = core.createTransferPlan({
+    sourceSnapshot,
+    targetProvider: 'yandex-music',
+    targetCollectionType: 'library',
+    tracks: [
+      { title: 'Selected', artist: 'Artist', sourceCollectionType: 'playlists', sourceCollectionId: 'source-list', sourceCollectionName: 'Source list', sourcePosition: 0, selected: true, match: { trackId: 'target-1' } },
+      { title: 'Not selected', artist: 'Artist', sourceCollectionType: 'playlists', sourceCollectionId: 'source-list', sourceCollectionName: 'Source list', sourcePosition: 1, selected: false, match: { trackId: 'target-2' } },
+    ],
+  });
+
+  assert.equal(plan.operations.length, 1);
+  assert.equal(plan.operations[0].target.providerId, 'target-1');
+  assert.equal(plan.operations[0].operation, 'add_to_playlist');
+  assert.equal(plan.collectionMappings.length, 1);
+  assert.equal(plan.collectionMappings[0].sourceId, 'source-list');
+});
