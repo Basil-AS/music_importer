@@ -214,16 +214,27 @@ function yandexResponse(path, method, body, state) {
     return { result: { playlist: { kind: playlist.id, title: playlist.title } } };
   }
   if (path.startsWith('/users/42/playlists/') && path.endsWith('/change-relative') && method === 'POST') {
-    const playlist = state.playlists[0];
+    const playlistId = /^\/users\/42\/playlists\/([^/]+)\/change-relative$/.exec(path)?.[1];
+    const playlist = state.playlists.find((item) => item.id === decodeURIComponent(playlistId || ''));
+    if (!playlist) throw new Error(`Missing Yandex target playlist for ${path}`);
     const diff = JSON.parse(new URLSearchParams(body || '').get('diff'));
     playlist.trackIds.splice(diff.at, 0, ...diff.tracks.map((item) => item.id));
     playlist.revision += 1;
     return { result: true };
   }
-  const yandexPlaylist = /^\/users\/42\/playlists\/([^/]+)$/.exec(path);
+  const yandexPlaylist = /^\/users\/42\/playlists\/([^/?]+)(?:\?([^]*))?$/.exec(path);
   if (yandexPlaylist) {
     const playlist = state.playlists.find((item) => item.id === decodeURIComponent(yandexPlaylist[1]));
-    return { result: { playlist: { title: playlist.title, revision: playlist.revision || 1, trackCount: playlist.trackIds.length, tracks: playlist.trackIds.map((id) => ({ id })) } } };
+    if (!playlist) throw new Error(`Missing Yandex playlist for ${path}`);
+    const params = new URLSearchParams(yandexPlaylist[2] || '');
+    const requestedPage = Number(params.get('page') || 1);
+    const pageSize = Number(params.get('pageSize') || 100);
+    const start = (requestedPage - 1) * pageSize;
+    const tracks = playlist.trackIds.slice(start, start + pageSize).map((id) => ({ id }));
+    return { result: { playlist: {
+      title: playlist.title, revision: playlist.revision || 1, trackCount: playlist.trackIds.length,
+      pager: { total: playlist.trackIds.length, page: requestedPage, per_page: pageSize }, tracks,
+    } } };
   }
   throw new Error(`Unexpected Yandex fixture request: ${method} ${path}`);
 }
