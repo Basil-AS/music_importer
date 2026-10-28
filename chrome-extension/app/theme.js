@@ -15,6 +15,12 @@
     document.documentElement.dataset.theme = theme;
     const themeColor = document.querySelector('meta[name="theme-color"]');
     if (themeColor) themeColor.content = theme === 'light' ? '#f5f5f7' : '#101114';
+    const toggle = document.querySelector('#themeToggle');
+    if (toggle) {
+      const label = theme === 'light' ? 'Переключить на тёмную тему' : 'Переключить на светлую тему';
+      toggle.setAttribute('aria-label', label);
+      toggle.title = label;
+    }
   };
 
   applyTheme();
@@ -23,11 +29,11 @@
   });
 
   window.addEventListener('DOMContentLoaded', () => {
-    const selector = document.querySelector('#themeSelect');
-    if (!selector) return;
-    selector.value = preference;
-    selector.addEventListener('change', () => {
-      preference = ['system', 'light', 'dark'].includes(selector.value) ? selector.value : 'system';
+    const toggle = document.querySelector('#themeToggle');
+    if (!toggle) return;
+    applyTheme();
+    toggle.addEventListener('click', () => {
+      preference = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
       try {
         window.localStorage.setItem(preferenceKey, preference);
       } catch {
