@@ -222,7 +222,7 @@
     let cursor = options.checkpoint?.nextCursor ?? null;
     let pagesRead = Number(options.checkpoint?.pagesRead || 0);
     let totalCount = Number.isInteger(options.checkpoint?.totalCount) ? options.checkpoint.totalCount : null;
-    let hasMore = true;
+    let hasMore = options.checkpoint?.completed !== true;
 
     while (hasMore) {
       const page = await adapter.readCollectionPage({ collection, cursor, limit: pageSize, signal: options.signal });
@@ -256,6 +256,7 @@
       if (options.onPage) await options.onPage({ page, pagesRead, nextCursor, hasMore });
       if (options.onCheckpoint) await options.onCheckpoint({
         nextCursor,
+        completed: !hasMore,
         pagesRead,
         totalCount: Number.isInteger(totalCount) ? totalCount : null,
         seenCursors: [...seenCursors],
@@ -282,7 +283,7 @@
       provider: adapter.id,
       exportedAt: new Date().toISOString(),
       collections: [{ ...collection, itemCount: items.length, completeness, items: items.map((track, index) => ({ position: collection.type === 'playlists' ? track.position : index, track })) }],
-      checkpoint: { nextCursor: null, pagesRead, itemCount: items.length },
+      checkpoint: { nextCursor: null, completed: true, pagesRead, itemCount: items.length, items },
     };
   }
 
@@ -294,7 +295,7 @@
     let cursor = options.checkpoint?.nextCursor ?? null;
     let pagesRead = Number(options.checkpoint?.pagesRead || 0);
     let totalCount = Number.isInteger(options.checkpoint?.totalCount) ? options.checkpoint.totalCount : null;
-    let hasMore = true;
+    let hasMore = options.checkpoint?.completed !== true;
     for (const collection of options.checkpoint?.collections || []) {
       if (collection?.id && collection?.type) collectionsByKey.set(`${collection.type}:${collection.id}`, collection);
     }
@@ -321,7 +322,7 @@
       }
       cursor = nextCursor;
       if (options.onPage) await options.onPage({ page, pagesRead, nextCursor, hasMore });
-      if (options.onCheckpoint) await options.onCheckpoint({ nextCursor, pagesRead, totalCount: Number.isInteger(totalCount) ? totalCount : null, seenCursors: [...seenCursors], collections: [...collectionsByKey.values()] });
+      if (options.onCheckpoint) await options.onCheckpoint({ nextCursor, completed: !hasMore, pagesRead, totalCount: Number.isInteger(totalCount) ? totalCount : null, seenCursors: [...seenCursors], collections: [...collectionsByKey.values()] });
     }
 
     const collections = [...collectionsByKey.values()];
@@ -336,7 +337,7 @@
         pagesRead,
         reason: Number.isNaN(totalCount) ? 'provider_collection_total_changed_during_read' : totalCount === null ? 'provider_collection_total_unavailable' : totalCountConsistent ? null : 'provider_collection_total_mismatch',
       },
-      checkpoint: { nextCursor: null, pagesRead, totalCount: Number.isInteger(totalCount) ? totalCount : null, collections },
+      checkpoint: { nextCursor: null, completed: true, pagesRead, totalCount: Number.isInteger(totalCount) ? totalCount : null, collections },
     };
   }
 
