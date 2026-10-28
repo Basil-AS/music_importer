@@ -29,10 +29,15 @@ jobs:
         run: node scripts/build-extension-app.mjs --check
       - name: Run fixtures
         run: node --test tests/*.test.js
-      - name: Upload installable extension folder
+      - name: Package macOS first-run helper
+        run: |
+          mkdir -p distribution
+          cp -R chrome-extension distribution/chrome-extension
+          cp INSTALL-MACOS.command distribution/INSTALL-MACOS.command
+      - name: Upload installable extension package
         uses: actions/upload-artifact@v4
         with:
           name: music-importer-chrome-extension
-          path: chrome-extension/
+          path: distribution/
           if-no-files-found: error
           retention-days: 30
