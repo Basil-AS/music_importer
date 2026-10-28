@@ -3,6 +3,16 @@
   const accepted = new Set(['scan-progress', 'library-snapshot', 'scan-error']);
   const pendingCommands = new Map();
 
+  function sendRuntimeMessage(message) {
+    try {
+      if (!chrome?.runtime?.id) return Promise.resolve(null);
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
+    } catch {
+      // A provider tab can outlive an extension reload and retain an invalid context.
+      return Promise.resolve(null);
+    }
+  }
+
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     const { type, ...detail } = event.data;
@@ -21,19 +31,15 @@
       return;
     }
     if (type === 'transfer-progress') {
-      chrome.runtime.sendMessage({ type: 'spotify:transfer-progress', ...detail }).then((response) => {
+      sendRuntimeMessage({ type: 'spotify:transfer-progress', ...detail }).then((response) => {
         if (detail.progress?.checkpointId) window.postMessage({
           source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: response?.ok === true,
-        }, location.origin);
-      }).catch(() => {
-        if (detail.progress?.checkpointId) window.postMessage({
-          source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: false,
         }, location.origin);
       });
       return;
     }
     if (!accepted.has(type)) return;
-    chrome.runtime.sendMessage({ type: `spotify:${type}`, ...detail });
+    void sendRuntimeMessage({ type: `spotify:${type}`, ...detail });
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

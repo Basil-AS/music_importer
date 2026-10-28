@@ -2,17 +2,23 @@
   const marker = 'music-importer-yandex';
   const accepted = new Set(['scan-progress', 'library-snapshot', 'scan-error', 'command-response', 'transfer-progress']);
 
+  function sendRuntimeMessage(message) {
+    try {
+      if (!chrome?.runtime?.id) return Promise.resolve(null);
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
+    } catch {
+      // A provider tab can outlive an extension reload and retain an invalid context.
+      return Promise.resolve(null);
+    }
+  }
+
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     const { type, ...detail } = event.data;
     if (!accepted.has(type)) return;
-    chrome.runtime.sendMessage({ type: `yandex:${type}`, ...detail }).then((response) => {
+    sendRuntimeMessage({ type: `yandex:${type}`, ...detail }).then((response) => {
       if (type === 'transfer-progress' && detail.progress?.checkpointId) window.postMessage({
         source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: response?.ok === true,
-      }, location.origin);
-    }).catch(() => {
-      if (type === 'transfer-progress' && detail.progress?.checkpointId) window.postMessage({
-        source: marker, type: 'transfer-progress-ack', checkpointId: detail.progress.checkpointId, ok: false,
       }, location.origin);
     });
   });
