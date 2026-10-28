@@ -165,7 +165,35 @@
       const rows = asArray(result);
       if (!rows) throw new Error(`Неизвестный ответ Яндекс Музыки при чтении ${label}.`);
       const byId = new Map(rows.map((row) => [trackId(row), row]).filter(([id]) => id));
-      for (const id of batch) hydrated.push(byId.get(String(id)) || { id: String(id) });
+      for (const id of batch) {
+        const known = byId.get(String(id));
+        if (known) {
+          hydrated.push(known);
+          continue;
+        }
+
+        // A successful batch can still omit individual cards (e.g. stale or
+        // partially indexed IDs). Retry only those IDs before preserving them
+        // as metadata-incomplete entries in the confirmed collection.
+        post('scan-progress', {
+          phase: 'metadata',
+          message: `${label}: отдельно запрашиваем карточку трека ${hydrated.length + 1} из ${ids.length}.`,
+        });
+        let recovered = null;
+        try {
+          const singleForm = new URLSearchParams({ 'track-ids': String(id), 'with-positions': 'false' });
+          const singleResult = await libraryRequest('/tracks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: singleForm.toString(),
+          });
+          const singleRows = asArray(singleResult);
+          recovered = singleRows?.find((row) => trackId(row) === String(id)) || null;
+        } catch {
+          // Keep the source ID even when a best-effort metadata retry fails.
+        }
+        hydrated.push(recovered || { id: String(id) });
+      }
       post('scan-progress', { phase: 'metadata', message: `${label}: загружено ${hydrated.length} из ${ids.length}.` });
       if (offset + batchSize < ids.length) await new Promise((resolve) => setTimeout(resolve, 300));
     }

@@ -178,6 +178,32 @@ test('Yandex source reader preserves collection IDs omitted from track hydration
   assert.equal(snapshot.tracks[1].title, '');
 });
 
+test('Yandex source reader retries only track cards omitted by a successful batch', async () => {
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') {
+      return { result: { library: { revision: 12, tracks: [{ id: 'known-1' }, { id: 'recovered-2' }] } } };
+    }
+    if (parsed.pathname === '/tracks' && init.method === 'POST') {
+      const ids = new URLSearchParams(init.body).get('track-ids').split(',');
+      if (ids.length > 1) return { result: [song('known-1', 'Known track')] };
+      if (ids[0] === 'recovered-2') return { result: [song('recovered-2', 'Recovered track')] };
+    }
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [] };
+    throw new Error(`Unexpected Yandex request: ${init.method || 'GET'} ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.equal(snapshot.completeness.confirmed, true);
+  assert.equal(snapshot.completeness.metadataComplete, true);
+  assert.deepEqual(Array.from(snapshot.tracks, (track) => track.title), ['Known track', 'Recovered track']);
+  assert.equal(page.requests.filter((request) => new URL(request.url).pathname === '/tracks').length, 2);
+});
+
 test('Yandex library reads retry HTTP 429 using Retry-After before confirming the snapshot', async () => {
   let hydrationAttempts = 0;
   const page = makePage(async ({ url, init }) => {
