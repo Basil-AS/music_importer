@@ -216,6 +216,83 @@
     return { tracks, revision: Number(library.revision), count: refs.length, metadataIncompleteCount };
   }
 
+  function albumRefId(value) {
+    const album = value?.album || value;
+    const id = album?.id ?? value?.albumId ?? value?.id;
+    return id === null || id === undefined ? '' : String(id);
+  }
+
+  function normalizeAlbum(value) {
+    const album = value?.album || value;
+    const id = albumRefId(album);
+    if (!id) return null;
+    const artists = (Array.isArray(album?.artists) ? album.artists : [])
+      .map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean);
+    const title = String(album?.title || album?.name || '').trim();
+    const count = Number(album?.trackCount ?? album?.track_count ?? 0);
+    const cover = String(album?.coverUri || album?.cover?.uri || album?.cover?.url || '');
+    return {
+      providerId: id,
+      title,
+      artists,
+      upc: '',
+      trackCount: Number.isInteger(count) && count > 0 ? count : 0,
+      releaseDate: String(album?.releaseDate || album?.year || ''),
+      artworkUrl: cover ? (cover.startsWith('http') ? cover : `https://${cover.replace('%%', '400x400')}`) : '',
+      metadataComplete: Boolean(title && artists.length),
+    };
+  }
+
+  async function postAlbumIds(ids) {
+    const result = await libraryRequest('/albums', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: new URLSearchParams({ 'album-ids': ids.join(',') }).toString(),
+    });
+    const rows = Array.isArray(result) ? result : Array.isArray(result?.albums) ? result.albums : Array.isArray(result?.items) ? result.items : null;
+    if (!rows) throw new Error('Неизвестный ответ Яндекс Музыки при чтении карточек альбомов.');
+    return new Map(rows.map((row) => [albumRefId(row), row]).filter(([id]) => id));
+  }
+
+  async function hydrateAlbums(ids) {
+    const hydrated = [];
+    for (let offset = 0; offset < ids.length; offset += batchSize) {
+      const batch = ids.slice(offset, offset + batchSize);
+      const byId = await postAlbumIds(batch);
+      for (const id of batch) {
+        let known = byId.get(id) || null;
+        if (!known) {
+          // Retry omitted cards one by one; keep the ID as an incomplete item if still missing.
+          try { known = (await postAlbumIds([id])).get(id) || null; } catch { /* keep ID only */ }
+        }
+        hydrated.push(known ? normalizeAlbum(known) : normalizeAlbum({ id }));
+      }
+      post('scan-progress', { phase: 'albums', message: `Альбомы: загружено ${hydrated.length} из ${ids.length}.` });
+      if (offset + batchSize < ids.length) await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return hydrated;
+  }
+
+  async function readAlbumIds(uid) {
+    const result = await libraryRequest(`/users/${encodeURIComponent(uid)}/likes/albums`);
+    const refs = Array.isArray(result) ? result : Array.isArray(result?.albums) ? result.albums : Array.isArray(result?.items) ? result.items : null;
+    if (!refs) throw new Error('Не удалось подтвердить список лайкнутых альбомов Яндекс Музыки.');
+    const ids = refs.map(albumRefId);
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new Error('В лайкнутых альбомах Яндекс Музыки есть пустые или повторные ID.');
+    return ids;
+  }
+
+  async function readAlbums(uid) {
+    const ids = await readAlbumIds(uid);
+    const items = await hydrateAlbums(ids);
+    const metadataIncompleteCount = items.filter((item) => !item.metadataComplete).length;
+    if (items.length !== ids.length) throw new Error('Карточки лайкнутых альбомов Яндекс Музыки неполны.');
+    return {
+      type: 'albums', name: 'Альбомы', count: ids.length, complete: true,
+      metadataComplete: metadataIncompleteCount === 0, metadataIncompleteCount, items,
+    };
+  }
+
   function playlistListFrom(result) {
     if (Array.isArray(result)) return result;
     if (Array.isArray(result?.playlists)) return result.playlists;
@@ -369,6 +446,25 @@
     return [...candidates.values()];
   }
 
+  async function searchAlbums(query, artistName) {
+    const text = [query, artistName].map((part) => String(part || '').trim().slice(0, 200)).filter(Boolean).join(' ');
+    if (!text) throw new Error('Для поиска альбома Яндекс Музыки нужен запрос.');
+    const params = new URLSearchParams({ text, page: '0', type: 'album' });
+    const result = await request(`/search?${params.toString()}`);
+    const rows = result?.albums?.results ?? result?.albums;
+    if (!Array.isArray(rows)) throw new Error('Яндекс Музыка вернула неизвестную выдачу альбомов.');
+    return rows.map((row) => {
+      const album = normalizeAlbum(row);
+      if (!album || !album.title) return null;
+      const year = Number(row?.year) || Number(String(album.releaseDate).slice(0, 4)) || 0;
+      return {
+        providerId: album.providerId, title: album.title, artists: album.artists, trackCount: album.trackCount,
+        year, releaseDate: album.releaseDate, artworkUrl: album.artworkUrl, upc: '',
+        albumViewUrl: `https://music.yandex.ru/album/${encodeURIComponent(album.providerId)}`,
+      };
+    }).filter(Boolean).slice(0, 20);
+  }
+
   async function readPlaylistDetail(uid, kind) {
     const result = await request(`/users/${encodeURIComponent(uid)}/playlists/${encodeURIComponent(kind)}`);
     const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
@@ -393,7 +489,7 @@
   }
 
   async function addFavorites(uid, plan, progress, onWriteStarted) {
-    const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || plan.target.collectionType === 'favorites');
+    const favoriteOperations = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || (plan.target.collectionType === 'favorites' && operation.operation !== 'add_album'));
     if (!favoriteOperations.length) return { added: 0, existing: 0, verified: 0 };
     const existingResult = await request(`/users/${encodeURIComponent(uid)}/likes/tracks?if-modified-since-revision=0`);
     const library = existingResult?.library || existingResult;
@@ -417,6 +513,27 @@
     const afterIds = new Set(afterRefs.map(trackId).filter(Boolean));
     const verified = wanted.filter((id) => afterIds.has(id)).length;
     if (verified !== wanted.length) throw new Error(`Обратная сверка лайков неполная: подтверждено ${verified} из ${wanted.length}.`);
+    return { added, existing: wanted.length - missing.length, verified };
+  }
+
+  async function addAlbums(uid, plan, progress, onWriteStarted) {
+    const albumOperations = plan.operations.filter((operation) => operation.operation === 'add_album');
+    if (!albumOperations.length) return { added: 0, existing: 0, verified: 0 };
+    const wanted = [...new Set(albumOperations.map((operation) => String(operation.target?.providerId || '')))];
+    if (wanted.some((id) => !id)) throw new Error('В плане есть альбом без ID альбома назначения.');
+    const existingIds = new Set(await readAlbumIds(uid));
+    const missing = wanted.filter((id) => !existingIds.has(id));
+    let added = 0;
+    for (let offset = 0; offset < missing.length; offset += batchSize) {
+      const batch = missing.slice(offset, offset + batchSize);
+      onWriteStarted?.();
+      await postForm(`/users/${encodeURIComponent(uid)}/likes/albums/add-multiple`, { 'album-ids': batch.join(',') });
+      added += batch.length;
+      progress?.({ phase: 'albums', completed: Math.min(offset + batch.length, missing.length), total: missing.length });
+    }
+    const afterIds = new Set(await readAlbumIds(uid));
+    const verified = wanted.filter((id) => afterIds.has(id)).length;
+    if (verified !== wanted.length) throw new Error(`Обратная сверка лайкнутых альбомов неполная: подтверждено ${verified} из ${wanted.length}.`);
     return { added, existing: wanted.length - missing.length, verified };
   }
 
@@ -463,7 +580,7 @@
   async function executeTransfer(plan, requestId) {
     if (!plan || plan.type !== 'music-transfer-plan' || plan.target?.provider !== 'yandex-music') throw new Error('Нужен план переноса с целью «Яндекс Музыка».');
     if (!Array.isArray(plan.operations) || (!plan.operations.length && !plan.collectionMappings?.length)) throw new Error('В плане нет выбранных совпадений или плейлистов.');
-    if (!['favorites', 'playlists', 'library'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
+    if (!['favorites', 'playlists', 'library', 'albums'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
     if (!Array.isArray(plan.completeness?.source) || !plan.completeness.source.length || plan.completeness.source.some((status) => status?.confirmed !== true)) {
       throw new Error('Запись остановлена: полнота исходной библиотеки не подтверждена.');
     }
@@ -476,7 +593,7 @@
     const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
     const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
     const completedPlaylistCount = recoveryProgress.phase === 'playlists' ? Math.max(0, Number(recoveryProgress.completed) || 0) : 0;
-    const report = { status: 'writing', targetProvider: 'yandex-music', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
+    const report = { status: 'writing', targetProvider: 'yandex-music', startedAt: new Date().toISOString(), favorites: null, albums: null, playlists: [], failures: [] };
     let writesStarted = false;
     const update = (progress) => post('transfer-progress', {
       requestId,
@@ -484,13 +601,16 @@
         ...progress,
         message: progress.message || (progress.phase === 'favorites'
           ? `Добавляем лайки: ${progress.completed} из ${progress.total}`
-          : `Добавляем треки в плейлист: ${progress.completed} из ${progress.total}`),
+          : progress.phase === 'albums'
+            ? `Добавляем альбомы: ${progress.completed} из ${progress.total}`
+            : `Добавляем треки в плейлист: ${progress.completed} из ${progress.total}`),
       },
     });
     try {
       report.favorites = await addFavorites(uid, plan, update, () => { writesStarted = true; });
-      const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
-      const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+      report.albums = await addAlbums(uid, plan, update, () => { writesStarted = true; });
+      const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || (plan.target.collectionType === 'playlists' && operation.operation !== 'add_album'));
+      const mappings = ['favorites', 'albums'].includes(plan.target.collectionType) ? [] : (plan.collectionMappings || []);
       for (const [index, mapping] of mappings.entries()) {
         const key = String(mapping.sourceId || mapping.sourceName || '');
         const matching = playlistOperations.filter((operation) => sourcePlaylistKey(operation) === key)
@@ -548,7 +668,7 @@
       report.finishedAt = new Date().toISOString();
       return report;
     } catch (error) {
-      report.status = writesStarted || report.favorites?.verified || report.playlists.length ? 'partial_failure' : 'failed';
+      report.status = writesStarted || report.favorites?.verified || report.albums?.verified || report.playlists.length ? 'partial_failure' : 'failed';
       report.error = error instanceof Error ? error.message : 'Яндекс Музыка не завершила перенос.';
       report.finishedAt = new Date().toISOString();
       throw Object.assign(new Error(report.error), { transferReport: report });
@@ -589,6 +709,17 @@
         post('scan-progress', { phase: 'playlists', message: `Плейлист ${index + 1} из ${playlistRows.length}: ${playlist.title || playlist.name || 'без названия'}.` });
         playlists.push(await readPlaylist(uid, playlist));
       }
+      post('scan-progress', { phase: 'albums', message: 'Читаем лайкнутые альбомы Яндекс Музыки…' });
+      let albums;
+      try {
+        albums = await readAlbums(uid);
+      } catch (error) {
+        // Never drop albums silently: surface an unconfirmed collection instead of failing the whole scan.
+        albums = {
+          type: 'albums', name: 'Альбомы', count: 0, complete: false, metadataComplete: false, metadataIncompleteCount: 0,
+          items: [], error: error instanceof Error ? error.message.slice(0, 300) : 'Лайкнутые альбомы не прочитаны.',
+        };
+      }
       const metadataIncompleteCount = favorites.metadataIncompleteCount
         + playlists.reduce((total, playlist) => total + playlist.metadataIncompleteCount, 0);
       return {
@@ -606,7 +737,12 @@
           playlistCatalogKindsConfirmed: true,
           playlistItemsConfirmed: playlists.every((playlist) => playlist.complete),
           playlistItemsTotal: playlists.length,
+          albumsConfirmed: albums.complete,
+          albumsCount: albums.count,
+          albumsMetadataComplete: albums.metadataComplete,
+          albumsMetadataIncompleteCount: albums.metadataIncompleteCount,
         },
+        collections: [albums],
         tracks: favorites.tracks.map((track) => ({ ...track, collectionType: 'favorites' })),
         playlists,
       };
@@ -625,6 +761,29 @@
         post('command-response', {
           requestId, ok: false,
           error: error instanceof Error ? error.message : 'Поиск альбома Яндекс Музыки не выполнен.',
+          status: Number(error?.status) || null,
+          retryAfter: error?.retryAfter || null,
+        });
+      }
+      return;
+    }
+    if (event.data.type === 'search-albums' || event.data.type === 'read-albums') {
+      const requestId = String(event.data.requestId || '');
+      try {
+        if (event.data.type === 'search-albums') {
+          const results = await searchAlbums(event.data.query || event.data.album, event.data.artist);
+          post('command-response', { requestId, ok: true, results });
+        } else {
+          const account = await libraryRequest('/account/status');
+          const uidValue = account?.account?.uid ?? account?.uid;
+          if (uidValue === null || uidValue === undefined) throw new Error('Войдите в Яндекс Музыку в этой вкладке и повторите.');
+          const collection = await readAlbums(String(uidValue));
+          post('command-response', { requestId, ok: true, collection, items: collection.items });
+        }
+      } catch (error) {
+        post('command-response', {
+          requestId, ok: false,
+          error: error instanceof Error ? error.message : 'Операция с альбомами Яндекс Музыки не выполнена.',
           status: Number(error?.status) || null,
           retryAfter: error?.retryAfter || null,
         });
