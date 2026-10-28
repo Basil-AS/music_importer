@@ -1014,6 +1014,7 @@
       && (track.query || track.title || track.artist || track.isrc));
     let completed = state.tracks.length - pending.length;
     let cachedCount = 0;
+    let searchResultWriter = null;
     $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
     updateCounts();
 
@@ -1078,6 +1079,11 @@
       updateCounts();
       renderTracks();
       if (controller.signal.aborted) throw new DOMException('Поиск отменён', 'AbortError');
+      searchResultWriter = window.MusicMatchCache?.createBatchWriter(
+        (tracks) => window.MusicMatchCache.putSearchResults(tracks, state.targetProvider, $('#storefront').value,
+          state.sourceSnapshot?.completeness?.confirmed === true),
+        100,
+      ) || null;
       await window.MusicTransferEngine.searchMany(targetAdapter(), pendingSearch, {
         context: {
           storefront: $('#storefront').value,
@@ -1112,7 +1118,7 @@
             }
             else { track.match = null; track.selected = false; }
           }
-          try { await window.MusicMatchCache?.putSearchResults(group.tracks, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true); }
+          try { await searchResultWriter?.enqueue(group.tracks); }
           catch { /* Keep catalog matching usable if browser storage is unavailable. */ }
           completed += group.tracks.length;
           $('#searchStatus').textContent = `${completed} из ${state.tracks.length}`;
@@ -1145,6 +1151,8 @@
       $('#searchStatus').classList.toggle('search-error', !aborted);
       if (aborted) toast('Поиск остановлен; готовые совпадения сохранены');
     } finally {
+      try { await searchResultWriter?.flush(); }
+      catch { /* Completed catalog results remain usable when local caching fails. */ }
       state.searching = false;
       if (activeSearchController === controller) activeSearchController = null;
       const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыке', spotify: 'Spotify', zvuk: 'Сбер.Звуке' };

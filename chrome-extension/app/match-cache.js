@@ -243,6 +243,29 @@
     }
   }
 
+  function createBatchWriter(writeBatch, batchSize = 100) {
+    if (typeof writeBatch !== 'function') throw new TypeError('writeBatch must be a function');
+    const size = Math.max(1, Math.min(500, Math.floor(Number(batchSize) || 100)));
+    let pending = [];
+    let queue = Promise.resolve();
+    const schedule = (batch) => {
+      queue = queue.then(() => writeBatch(batch)).catch(() => undefined);
+      return queue;
+    };
+    return {
+      enqueue(items) {
+        if (!Array.isArray(items) || !items.length) return queue;
+        pending.push(...items);
+        while (pending.length >= size) schedule(pending.splice(0, size));
+        return queue;
+      },
+      flush() {
+        if (pending.length) schedule(pending.splice(0));
+        return queue;
+      },
+    };
+  }
+
   async function getDecisions(tracks, targetProvider, storefront = '', accountCatalog = false, sourceProvider = '') {
     const keys = [...new Set(tracks.map((track) => decisionKeyFor(track, targetProvider, storefront, accountCatalog, sourceProvider)).filter(Boolean))];
     const result = new Map();
@@ -361,5 +384,5 @@
     });
   }
 
-  window.MusicMatchCache = { keyFor, decisionKeyFor, getMany, putSearchResults, getDecisions, putDecision, putDecisions, clear, count };
+  window.MusicMatchCache = { keyFor, decisionKeyFor, getMany, putSearchResults, createBatchWriter, getDecisions, putDecision, putDecisions, clear, count };
 })();

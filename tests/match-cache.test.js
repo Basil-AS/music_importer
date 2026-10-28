@@ -10,6 +10,30 @@ function loadCache() {
   return context.window.MusicMatchCache;
 }
 
+test('bulk search cache writer batches 10,025 tracks and flushes the partial tail', async () => {
+  const cache = loadCache();
+  const batchSizes = [];
+  const writer = cache.createBatchWriter(async (batch) => { batchSizes.push(batch.length); }, 100);
+  for (let index = 0; index < 10025; index += 1) await writer.enqueue([{ id: `track-${index}` }]);
+  await writer.flush();
+  assert.equal(batchSizes.length, 101);
+  assert.ok(batchSizes.slice(0, 100).every((size) => size === 100));
+  assert.equal(batchSizes.at(-1), 25);
+});
+
+test('bulk search cache writer continues and flushes after a failed batch', async () => {
+  const cache = loadCache();
+  const batches = [];
+  const writer = cache.createBatchWriter(async (batch) => {
+    batches.push(batch.map((entry) => entry.id));
+    if (batches.length === 1) throw new Error('storage unavailable');
+  }, 2);
+  await writer.enqueue([{ id: 'a' }, { id: 'b' }]);
+  await writer.enqueue([{ id: 'c' }]);
+  await writer.flush();
+  assert.equal(JSON.stringify(batches), JSON.stringify([['a', 'b'], ['c']]));
+});
+
 test('local match cache keys include target and Apple storefront', () => {
   const cache = loadCache();
   const track = { title: 'ВРЕМЯ!', artist: 'Моя Мишель', album: 'Кино', durationMs: 210000, isrc: '' };

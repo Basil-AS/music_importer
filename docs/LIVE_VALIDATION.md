@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-28 — batch catalog cache writes
+
+- Version `0.13.40` batches completed catalog-search results into local cache writes of up to 100 tracks, reducing serialized IndexedDB transaction count for large libraries. Any partial batch is flushed after normal completion, cancellation, or search failure; a cache-write error does not interrupt catalog matching.
+- A 10,025-track fixture verifies 100 full batches plus a 25-track tail. A second fixture verifies later batches still flush after one rejected cache write. The extension app bundle was regenerated and matches `demo/` sources.
+- Full suite: **233/233 tests**. This is fixture evidence; no live 10k-track account search, Chrome IndexedDB timing, catalog mutation, or source-to-target read-back has been run in this validation.
+
 ## 2026-10-28 — repair existing service tabs on install
 
 - Version `0.13.39` runs the bridge health check on both first install and update. It reloads only already-open supported provider tabs that do not answer with the current bridge protocol. This covers tabs opened before the extension was installed; previously that repair ran only on update or browser startup.
