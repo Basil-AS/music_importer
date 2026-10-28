@@ -1252,6 +1252,7 @@
           targetProvider: state.targetProvider,
           operationCount: plan.operations.length,
           playlistCount,
+          recoveryPlan: plan,
         });
         if (!jobStarted) throw new Error('Не удалось надёжно сохранить начало переноса на этом устройстве. Запись в музыкальный аккаунт не запускалась.');
         $('#importBtn').textContent = 'Записываем и сверяем…';

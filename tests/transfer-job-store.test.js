@@ -74,16 +74,23 @@ test('does not claim interruption protection when persistent storage is unavaila
 
 test('persists progress, leaves failed jobs unresolved, and clears them only after acknowledgement', async () => {
   const store = loadStore(createIndexedDB());
-  assert.equal(await store.start({ id: 'job-2', sourceProvider: 'zvuk', targetProvider: 'apple-music', operationCount: 840, playlistCount: 13 }), true);
-  assert.equal(await store.updateProgress('job-2', { phase: 'favorites', completed: 40, total: 80, message: 'Лайки Basil playlist: 40 из 80' }), true);
+  const recoveryPlan = { type: 'music-transfer-plan', operations: [{ target: { providerId: 'target-1' } }], collectionMappings: [{ sourceId: 'playlist-1' }] };
+  assert.equal(await store.start({ id: 'job-2', sourceProvider: 'zvuk', targetProvider: 'apple-music', operationCount: 840, playlistCount: 13, recoveryPlan }), true);
+  assert.equal(await store.updateProgress('job-2', { phase: 'playlist', completed: 4, total: 13, sourceKey: 'playlist-1', targetPlaylistId: 'apple-playlist-9', message: 'Private playlist title' }), true);
   assert.equal(await store.finish('job-2', 'partial_failure', 'Read-back не совпал.'), true);
   const unresolved = await store.latestUnresolved();
   assert.equal(unresolved.status, 'partial_failure');
   assert.equal(unresolved.operationCount, 840);
-  assert.equal(unresolved.progress.phase, 'favorites');
-  assert.equal(unresolved.progress.completed, 40);
+  assert.equal(unresolved.progress.phase, 'playlist');
+  assert.equal(unresolved.progress.completed, 4);
   assert.equal('message' in unresolved.progress, false);
-  assert.equal('plan' in unresolved, false);
+  assert.deepEqual(unresolved.recoveryPlan, recoveryPlan);
+  assert.equal(unresolved.playlistTargets['playlist-1'], 'apple-playlist-9');
   assert.equal(await store.acknowledge('job-2'), true);
   assert.equal(await store.latestUnresolved(), null);
+});
+
+test('refuses to start a durable transfer record without a recoverable plan', async () => {
+  const store = loadStore(createIndexedDB());
+  assert.equal(await store.start({ id: 'job-3', sourceProvider: 'spotify', targetProvider: 'apple-music' }), false);
 });

@@ -1,9 +1,10 @@
-/* Local interruption ledger; never stores provider credentials or full plans. */
+/* Local interruption ledger. Recovery plans may contain private track metadata, never credentials. */
 (() => {
   const databaseName = 'music-importer-transfer-jobs';
   const databaseVersion = 1;
   const storeName = 'jobs';
   const maxJobs = 50;
+  const maxRecoveryPlanBytes = 20 * 1024 * 1024;
   const terminalSafeStatuses = new Set(['complete', 'acknowledged']);
   let databasePromise;
 
@@ -31,6 +32,24 @@
 
   function normalizeJob(job) {
     if (!job?.id || !job?.sourceProvider || !job?.targetProvider) return null;
+    let recoveryPlan = null;
+    if (job.recoveryPlan?.type === 'music-transfer-plan'
+      && Array.isArray(job.recoveryPlan.operations)
+      && Array.isArray(job.recoveryPlan.collectionMappings)) {
+      try {
+        const serialized = JSON.stringify(job.recoveryPlan);
+        const bytes = window.TextEncoder ? new window.TextEncoder().encode(serialized).length : serialized.length * 3;
+        if (bytes <= maxRecoveryPlanBytes) recoveryPlan = JSON.parse(serialized);
+      } catch { /* Invalid or oversized plans cannot be resumed safely. */ }
+    }
+    const playlistTargets = {};
+    if (job.playlistTargets && typeof job.playlistTargets === 'object') {
+      for (const [sourceKey, targetId] of Object.entries(job.playlistTargets).slice(0, 500)) {
+        const key = String(sourceKey).slice(0, 500);
+        const id = String(targetId || '').slice(0, 300);
+        if (key && id) playlistTargets[key] = id;
+      }
+    }
     return {
       id: String(job.id),
       sourceProvider: String(job.sourceProvider),
@@ -44,7 +63,11 @@
         phase: String(job.progress.phase || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 40),
         completed: job.progress.completed != null && Number.isFinite(Number(job.progress.completed)) ? Number(job.progress.completed) : null,
         total: job.progress.total != null && Number.isFinite(Number(job.progress.total)) ? Number(job.progress.total) : null,
+        sourceKey: job.progress.sourceKey ? String(job.progress.sourceKey).slice(0, 500) : null,
+        targetPlaylistId: job.progress.targetPlaylistId ? String(job.progress.targetPlaylistId).slice(0, 300) : null,
       } : null,
+      recoveryPlan,
+      playlistTargets,
       outcome: String(job.outcome || '').slice(0, 300),
     };
   }
@@ -92,7 +115,8 @@
   }
 
   async function start(job) {
-    const record = normalizeJob({ ...job, status: 'in-progress', progress: null, outcome: '' });
+    const record = normalizeJob({ ...job, status: 'in-progress', progress: null, playlistTargets: {}, outcome: '' });
+    if (!record?.recoveryPlan) return false;
     return record ? put(record) : false;
   }
 
@@ -100,7 +124,11 @@
     const key = String(id || '');
     const current = await get(key);
     if (!current || current.status !== 'in-progress') return false;
-    const updated = normalizeJob({ ...current, progress });
+    const playlistTargets = { ...current.playlistTargets };
+    if (progress?.sourceKey && progress?.targetPlaylistId) {
+      playlistTargets[String(progress.sourceKey).slice(0, 500)] = String(progress.targetPlaylistId).slice(0, 300);
+    }
+    const updated = normalizeJob({ ...current, progress, playlistTargets });
     return updated ? put(updated) : false;
   }
 
@@ -108,7 +136,15 @@
     const key = String(id || '');
     const current = await get(key);
     if (!current) return false;
-    const updated = normalizeJob({ ...current, status: String(status || 'unknown'), outcome, progress: current.progress });
+    const nextStatus = String(status || 'unknown');
+    const updated = normalizeJob({
+      ...current,
+      status: nextStatus,
+      outcome,
+      progress: current.progress,
+      recoveryPlan: nextStatus === 'complete' || nextStatus === 'acknowledged' ? null : current.recoveryPlan,
+      playlistTargets: nextStatus === 'complete' || nextStatus === 'acknowledged' ? {} : current.playlistTargets,
+    });
     return updated ? put(updated) : false;
   }
 
