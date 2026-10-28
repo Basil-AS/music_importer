@@ -341,6 +341,31 @@ async function reloadTabForReader(tabId, timeoutMs = 30000) {
   });
 }
 
+async function waitForProviderTabReady(tabId, timeoutMs = 30000) {
+  const current = await chrome.tabs.get(tabId).catch(() => null);
+  if (!current || current.status !== 'loading') return;
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') finish();
+    };
+    const timeout = setTimeout(() => finish(new Error('Страница музыкального сервиса не загрузилась вовремя.')), timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    // Close the small race between the first status check and listener registration.
+    void chrome.tabs.get(tabId).then((latest) => {
+      if (!latest || latest.status !== 'loading') finish();
+    }).catch(finish);
+  });
+}
+
 function repairStaleProviderTabs() {
   if (providerBridgeRepairTask) return providerBridgeRepairTask;
   providerBridgeRepairTask = (async () => {
@@ -378,6 +403,7 @@ function repairStaleProviderTabs() {
 }
 
 async function ensureCurrentProviderBridge(tabId) {
+  await waitForProviderTabReady(tabId);
   let health = null;
   try {
     health = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });

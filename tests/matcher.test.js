@@ -138,6 +138,36 @@ test('a safe exact-ISRC result outranks conflicting catalog duplicates', () => {
   assert.equal(suggestion.automatic, true);
 });
 
+test('exact ISRC with strongly conflicting title, artist, or duration stays in manual review', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Our Song', artist: 'Our Artist', album: 'Our Album', durationMs: 180000, isrc: 'USABC1234567' },
+    [{
+      trackId: 'reused-isrc', trackName: 'Completely Different', artistName: 'Another Artist',
+      collectionName: 'Another Album', trackTimeMillis: 230000, isrc: 'USABC1234567',
+    }],
+  );
+  assert.equal(result.best.trackId, 'reused-isrc', 'keep the exact-code candidate available for deliberate review');
+  assert.equal(result.ranked[0].exactISRC, true);
+  assert.equal(result.ranked[0].isrcMetadataConflict, true);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'isrc_metadata_conflict');
+});
+
+test('exact ISRC tolerates harmless title credit and album differences', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist', album: 'Original Album', durationMs: 180000, isrc: 'USABC1234567' },
+    [{
+      trackId: 'same-recording', trackName: 'Song (feat. Guest Artist)', artistName: 'Artist, Guest Artist',
+      collectionName: 'Compilation', trackTimeMillis: 180400, isrc: 'USABC1234567',
+    }],
+  );
+  assert.equal(result.ranked[0].isrcMetadataConflict, false);
+  assert.equal(result.automatic, true);
+  assert.equal(result.reason, 'exact_isrc');
+});
+
 test('matching never auto-selects an exact metadata candidate with a conflicting ISRC', () => {
   const matcher = loadMatcher();
   const result = matcher.suggestBestMatch(

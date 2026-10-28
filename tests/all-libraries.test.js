@@ -116,6 +116,12 @@ function bootWorker(storageState, tabs = [], options = {}) {
     clickAction(tab) { return actionListener(tab); },
     install(reason = 'install') { return installedListener({ reason }); },
     startup() { return startupListener(); },
+    completeTab(tabId) {
+      const tab = tabs.find((candidate) => candidate.id === tabId);
+      assert.ok(tab, `Expected fixture tab ${tabId}`);
+      tab.status = 'complete';
+      for (const listener of tabUpdatedListeners) listener(tabId, { status: 'complete' }, tab);
+    },
     call(message) {
       return this.callFrom(message, 'http://127.0.0.1:8001/');
     },
@@ -211,6 +217,22 @@ test('opening the importer app repairs stale provider bridges before scanning', 
   );
   assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: true, checked: 2, repaired: 1, failed: 0 });
   assert.deepEqual(worker.reloads, [53]);
+});
+
+test('library scan waits for a newly opened provider tab to finish loading before bridge health checks', async () => {
+  const worker = bootWorker({}, [
+    { id: 55, url: 'https://music.apple.com/us/home', status: 'loading' },
+  ]);
+  const pending = worker.callFrom(
+    { type: 'music-importer:get-all-libraries', requestId: 'loading-tab-scan-123456', refresh: true, refreshProviders: ['apple-music'] },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(worker.messages.some(({ tabId, message }) => tabId === 55 && message.type === 'music-importer:bridge-health-check'), false);
+  worker.completeTab(55);
+  await pending;
+  assert.equal(worker.messages.some(({ tabId, message }) => tabId === 55 && message.type === 'music-importer:bridge-health-check'), true);
+  assert.deepEqual(worker.reloads, []);
 });
 
 test('extension update focuses the existing importer app without creating another tab', async () => {
