@@ -61,3 +61,25 @@ test('matching ignores featured-title decoration but keeps recording-version che
   );
   assert.equal(differentVersion.automatic, false);
 });
+
+test('matching auto-selects tied catalog editions only when they share the same ISRC', () => {
+  const matcher = loadMatcher();
+  const sameRecording = matcher.suggestBestMatch(
+    { title: 'Blinding Lights', artist: 'The Weeknd' },
+    [
+      { trackId: 'standard', trackName: 'Blinding Lights', artistName: 'The Weeknd', collectionName: 'After Hours', isrc: 'USUG11904206' },
+      { trackId: 'deluxe', trackName: 'Blinding Lights', artistName: 'The Weeknd', collectionName: 'After Hours (Deluxe)', isrc: 'USUG11904206' },
+    ],
+  );
+  assert.equal(sameRecording.automatic, true);
+  assert.equal(sameRecording.reason, 'catalog_duplicates_same_isrc');
+
+  const distinctRecordings = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist' },
+    [
+      { trackId: 'recording-a', trackName: 'Song', artistName: 'Artist', isrc: 'USAAA0000001' },
+      { trackId: 'recording-b', trackName: 'Song', artistName: 'Artist', isrc: 'USAAA0000002' },
+    ],
+  );
+  assert.equal(distinctRecordings.automatic, false);
+});

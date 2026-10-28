@@ -179,18 +179,27 @@
     return { score, exactISRC: false, versionConflict, titleScore: title, artistScore: artist, durationScore: duration };
   }
 
+  function candidateISRC(candidate) {
+    return normalizeISRC(candidate?.isrc || candidate?.ISRC || candidate?.externalIds?.isrc);
+  }
+
   function suggestBestMatch(source, candidates) {
     const ranked = candidates.map((candidate) => ({ candidate, ...scoreCandidate(source, candidate) }))
       .sort((left, right) => right.score - left.score);
     const best = ranked[0] || null;
     const runnerUp = ranked[1] || null;
     const margin = best ? best.score - (runnerUp?.score ?? 0) : 0;
-    const automatic = Boolean(best && !best.versionConflict && (best.exactISRC || (best.score >= 0.96 && margin >= 0.035)));
+    const bestISRC = candidateISRC(best?.candidate);
+    const closeRivals = best ? ranked.filter((candidate) => best.score - candidate.score < 0.035) : [];
+    const sameRecordingDuplicates = Boolean(bestISRC && closeRivals.length > 1
+      && closeRivals.every((candidate) => candidateISRC(candidate.candidate) === bestISRC && !candidate.versionConflict));
+    const automatic = Boolean(best && !best.versionConflict && (best.exactISRC
+      || (best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
     return {
       best: best?.candidate || null,
       confidence: best?.score || 0,
       automatic,
-      reason: !best ? 'no_candidates' : best.exactISRC ? 'exact_isrc' : automatic ? 'high_confidence_metadata' : 'manual_review',
+      reason: !best ? 'no_candidates' : best.exactISRC ? 'exact_isrc' : sameRecordingDuplicates && automatic ? 'catalog_duplicates_same_isrc' : automatic ? 'high_confidence_metadata' : 'manual_review',
       ranked,
       margin,
     };
