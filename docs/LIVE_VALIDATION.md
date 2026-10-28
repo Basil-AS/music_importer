@@ -125,3 +125,11 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Reloaded the open Apple Music page to replace its injected content scripts. The page's current console error list was empty after reload. The visible Apple Music page now requires sign-in, so no library scan was started; no account data or credentials were inspected.
 - A stale-context error cannot be forwarded to the extension after Chrome has invalidated the content-script context. Recovery therefore belongs to the service worker: it checks the bridge health and reloads stale provider tabs, while the bridge safely ignores delivery failures. Historical errors may remain listed by Chrome after recovery.
 - Current source behavior: a fresh library read uses an open signed-in provider tab. The page-context reader fetches that service's likes and playlist metadata; the extension stores normalized snapshots locally. These tabs may remain in the background. A genuinely tabless auth path is not implemented.
+
+## 2026-10-28 — live read-only refresh from the local app
+
+- Confirmed the page at `http://127.0.0.1:8001/` is the static demo frontend. Its local-app bridge connected to the unpacked extension; the extension opened/used provider tabs in the background and started a read-only refresh. No backend server or account write was involved.
+- The refresh returned complete, selectable library snapshots from Apple Music and Yandex Music. Snapshot and track metadata remain in local Chrome extension storage; this note omits account-specific counts and track/playlist names.
+- Spotify failed during its live source read with sanitized `fetchLibraryTracks: HTTP 401`, although the provider page title indicated the Liked Songs view. The authentication/API rejection remains unresolved; no headers, tokens, or cookies were inspected.
+- Zvuk advanced through favorites and playlist collection, but the final provider status reported that the playlist catalog did not load. Partial crawl progress was not treated as a complete snapshot. The account/session or API cause is not established.
+- The local UI showed two of four libraries available. No target was selected, no catalog search was run, and no likes or playlists were written. Therefore this proves two live source reads only; all twelve live source-to-target write/read-back routes remain unverified.
