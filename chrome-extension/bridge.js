@@ -1,5 +1,18 @@
 (() => {
   const marker = 'music-importer-zvuk';
+  let reloadScheduled = false;
+
+  function scheduleReloadAfterInvalidation() {
+    if (reloadScheduled) return;
+    reloadScheduled = true;
+    setTimeout(() => {
+      try { location.reload(); } catch { reloadScheduled = false; }
+    }, 0);
+  }
+
+  function isInvalidatedContext(error) {
+    return String(error?.message || error || '').toLowerCase().includes('extension context invalidated');
+  }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== 'music-importer:bridge-health-check') return false;
@@ -9,10 +22,17 @@
 
   function sendRuntimeMessage(message) {
     try {
-      if (!chrome?.runtime?.id) return Promise.resolve(null);
-      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
-    } catch {
+      if (!chrome?.runtime?.id) {
+        scheduleReloadAfterInvalidation();
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch((error) => {
+        if (isInvalidatedContext(error)) scheduleReloadAfterInvalidation();
+        return null;
+      });
+    } catch (error) {
       // The tab can outlive an extension reload; its old content script then has no runtime.
+      if (isInvalidatedContext(error)) scheduleReloadAfterInvalidation();
       return Promise.resolve(null);
     }
   }

@@ -14,6 +14,7 @@ function createBridge({ file, origin, sendMessage }) {
   const listeners = new Map();
   const runtimeListeners = [];
   const posted = [];
+  let reloads = 0;
   const window = {
     addEventListener(type, listener) { listeners.set(type, listener); },
     removeEventListener(type, listener) {
@@ -29,10 +30,11 @@ function createBridge({ file, origin, sendMessage }) {
     },
   };
   vm.runInNewContext(fs.readFileSync(require.resolve(`../chrome-extension/${file}`), 'utf8'), {
-    window, location: { origin }, chrome,
+    window, location: { origin, reload() { reloads += 1; } }, chrome, setTimeout,
   }, { filename: file });
   return {
     posted,
+    get reloads() { return reloads; },
     healthCheck() {
       const responses = [];
       for (const listener of runtimeListeners) listener({ type: 'music-importer:bridge-health-check' }, {}, (value) => responses.push(value));
@@ -61,6 +63,8 @@ for (const bridgeCase of cases) {
     }));
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(bridge.posted.some((message) => message.type === 'transfer-progress-ack' && message.ok === false));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(bridge.reloads, 1, 'an invalidated bridge reloads its provider tab once');
   });
 
   test(`${bridgeCase.file} consumes a rejected runtime message and rejects its checkpoint`, async () => {
@@ -78,6 +82,8 @@ for (const bridgeCase of cases) {
     }));
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(bridge.posted.some((message) => message.type === 'transfer-progress-ack' && message.ok === false));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(bridge.reloads, 1, 'a rejected invalidated bridge reloads its provider tab once');
   });
 
   test(`${bridgeCase.file} answers extension bridge health checks`, () => {

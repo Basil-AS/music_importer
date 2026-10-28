@@ -143,6 +143,36 @@ test('Apple source reader refuses an incomplete library page', async () => {
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
+test('Apple reader rejects overlapping library-song pages that repeat a resource ID', async () => {
+  const row = { id: 'duplicate-song', attributes: { name: 'Song', artistName: 'Artist', inFavorites: true } };
+  const page = makePage({
+    '/v1/me/library/songs?limit=100': { meta: { total: 2 }, next: '/v1/me/library/songs?limit=100&offset=1', data: [row] },
+    '/v1/me/library/songs?limit=100&offset=1': { meta: { total: 2 }, next: null, data: [row] },
+    '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
+  });
+  await page.scan();
+
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.match(error?.error || '', /повторяющиеся или пустые ID.*песен/);
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Apple reader rejects a playlist catalog with duplicate resource IDs', async () => {
+  const playlist = { id: 'duplicate-playlist', attributes: { name: 'Playlist' } };
+  const page = makePage({
+    '/v1/me/library/songs?limit=100': { meta: { total: 0 }, next: null, data: [] },
+    '/v1/me/library/playlists?limit=100': {
+      meta: { total: 2 }, next: '/v1/me/library/playlists?limit=100&offset=1', data: [playlist],
+    },
+    '/v1/me/library/playlists?limit=100&offset=1': { meta: { total: 2 }, next: null, data: [playlist] },
+  });
+  await page.scan();
+
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.match(error?.error || '', /повторяющиеся или пустые ID.*плейлистов/);
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
 test('Apple source reader refuses to confirm favorites when membership is missing on a library song', async () => {
   const page = makePage({
     '/v1/me/library/songs?limit=100': {

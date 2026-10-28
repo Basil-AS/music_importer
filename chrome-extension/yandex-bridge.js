@@ -1,6 +1,19 @@
 (() => {
   const marker = 'music-importer-yandex';
   const accepted = new Set(['scan-progress', 'library-snapshot', 'scan-error', 'command-response', 'transfer-progress']);
+  let reloadScheduled = false;
+
+  function scheduleReloadAfterInvalidation() {
+    if (reloadScheduled) return;
+    reloadScheduled = true;
+    setTimeout(() => {
+      try { location.reload(); } catch { reloadScheduled = false; }
+    }, 0);
+  }
+
+  function isInvalidatedContext(error) {
+    return String(error?.message || error || '').toLowerCase().includes('extension context invalidated');
+  }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== 'music-importer:bridge-health-check') return false;
@@ -10,10 +23,17 @@
 
   function sendRuntimeMessage(message) {
     try {
-      if (!chrome?.runtime?.id) return Promise.resolve(null);
-      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
-    } catch {
+      if (!chrome?.runtime?.id) {
+        scheduleReloadAfterInvalidation();
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch((error) => {
+        if (isInvalidatedContext(error)) scheduleReloadAfterInvalidation();
+        return null;
+      });
+    } catch (error) {
       // A provider tab can outlive an extension reload and retain an invalid context.
+      if (isInvalidatedContext(error)) scheduleReloadAfterInvalidation();
       return Promise.resolve(null);
     }
   }

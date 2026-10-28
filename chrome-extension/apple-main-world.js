@@ -184,6 +184,13 @@
     return { rows, total: expectedTotal };
   }
 
+  function requireUniqueResourceIds(rows, label) {
+    const ids = rows.map((row) => String(row?.id || '').trim());
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+      throw new Error(`Apple Music вернул повторяющиеся или пустые ID в списке: ${label}.`);
+    }
+  }
+
   function normalizeTrack(row, position = null) {
     const attributes = row?.attributes || {};
     const title = String(attributes.name || '').trim();
@@ -225,6 +232,8 @@
         readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Песни Apple Music'),
         readPages(`/v1/me/library/playlists?limit=${pageSize}`, 'Каталог плейлистов Apple Music'),
       ]);
+      requireUniqueResourceIds(librarySongs.rows, 'песен');
+      requireUniqueResourceIds(playlistCatalog.rows, 'плейлистов');
       const unclassifiedFavorites = librarySongs.rows.filter((row) => typeof row?.attributes?.inFavorites !== 'boolean').length;
       if (unclassifiedFavorites) {
         throw new Error(`Apple Music не сообщил статус избранного для ${unclassifiedFavorites} песен; полный снимок не сохранён.`);
