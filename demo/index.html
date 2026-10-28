@@ -66,7 +66,7 @@
 
         <section class="card" id="reviewCard" aria-labelledby="review-heading">
           <div class="card-head"><div><h2 id="review-heading">Сверка с каталогом</h2><p class="card-sub" id="reviewSub">Загрузите список и найдите версии песен</p></div><span class="count" id="matchCount">ожидает список</span></div>
-          <div class="catalog-tools"><label for="storefront">Регион Apple</label><select id="storefront" aria-label="Страна каталога Apple"><option value="AE">ОАЭ</option><option value="US">США</option><option value="GB">Великобритания</option><option value="CA">Канада</option><option value="AU">Австралия</option></select><button class="secondary" type="button" id="searchBtn" disabled>Найти совпадения</button><span class="quiet" id="searchStatus" aria-live="polite">Поиск не запускался</span></div>
+          <div class="catalog-tools"><label for="storefront">Регион Apple</label><select id="storefront" aria-label="Страна каталога Apple"><option value="AE">ОАЭ</option><option value="US">США</option><option value="GB">Великобритания</option><option value="CA">Канада</option><option value="AU">Австралия</option></select><button class="secondary" type="button" id="searchBtn" disabled>Найти совпадения</button><button class="secondary" type="button" id="cancelSearchBtn" hidden>Остановить поиск</button><span class="quiet" id="searchStatus" aria-live="polite">Поиск не запускался</span></div>
           <p class="quiet match-hint">Если выдача неточная, поправьте поисковый запрос у трека и нажмите «Искать».</p>
           <div class="track-tools" id="trackTools" hidden>
             <label><input type="checkbox" id="needsReviewOnly">Только без уверенного совпадения</label>

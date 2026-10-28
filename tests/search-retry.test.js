@@ -113,3 +113,29 @@ test('batch catalog search preserves order and individually retries missing ISRC
   assert.deepEqual(Array.from(results, (result) => result.candidates[0].trackId), ['apple:a', 'apple:b']);
   assert.deepEqual(progress, [1, 2]);
 });
+
+test('bulk catalog search aborts queued requests without reporting cancelled tracks as complete', async () => {
+  const { engine } = loadEngine();
+  const controller = new AbortController();
+  let calls = 0;
+  const progress = [];
+  await assert.rejects(engine.searchMany({
+    id: 'spotify',
+    async searchTracks() {
+      calls += 1;
+      controller.abort();
+      return [{ trackId: 'spotify:track:cancelled' }];
+    },
+  }, [
+    { title: 'Song A', artist: 'Artist' },
+    { title: 'Song B', artist: 'Artist' },
+    { title: 'Song C', artist: 'Artist' },
+  ], {
+    concurrency: 1,
+    signal: controller.signal,
+    onProgress: (_group, completed) => progress.push(completed),
+  }), (error) => error.name === 'AbortError');
+
+  assert.equal(calls, 1);
+  assert.deepEqual(progress, []);
+});

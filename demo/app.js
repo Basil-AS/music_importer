@@ -13,6 +13,7 @@
   const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
   let trackPage = 0;
   let extensionCheckInProgress = false;
+  let activeSearchController = null;
   window.MusicTransferSafety.installBeforeUnloadGuard(() => state.transferInProgress);
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -78,6 +79,7 @@
   }
 
   function updateCounts() {
+    const searchBusy = state.searching || state.tracks.some((track) => track.searching);
     const selected = state.tracks.filter((track) => track.selected && track.match).length;
     const reviewed = state.tracks.filter((track) => track.searched && track.matches.length && !track.match && !track.userExcluded).length;
     const missing = state.tracks.filter((track) => track.searched && !track.matches.length).length;
@@ -87,8 +89,14 @@
     $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков` : 'ожидает список';
     $('#selectedCount').textContent = `${selected} выбрано`;
     const hasPlaylistMappings = ['playlists', 'library'].includes(state.collectionType) && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
-    $('#importBtn').disabled = !state.targetProvider || (selected === 0 && !hasPlaylistMappings) || state.searching || Boolean(state.unresolvedTransferJob);
-    $('#searchBtn').disabled = !state.loaded || !state.targetProvider || state.searching;
+    $('#importBtn').disabled = !state.targetProvider || (selected === 0 && !hasPlaylistMappings) || searchBusy || Boolean(state.unresolvedTransferJob);
+    $('#searchBtn').disabled = !state.loaded || !state.targetProvider || searchBusy;
+    $('#targetProvider').disabled = searchBusy;
+    $('#storefront').disabled = searchBusy;
+    $('#loadBtn').disabled = searchBusy;
+    $('#fileInput').disabled = searchBusy;
+    $('#clearMatchCache').disabled = searchBusy;
+    $('#cancelSearchBtn').hidden = !state.searching;
     $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
   }
 
@@ -709,7 +717,9 @@
   }
 
   async function searchCatalog() {
-    if (!state.loaded || !state.targetProvider || state.searching) return;
+    if (!state.loaded || !state.targetProvider || state.searching || state.tracks.some((track) => track.searching)) return;
+    const controller = new AbortController();
+    activeSearchController = controller;
     state.searching = true;
     state.report = null;
     $('#report').classList.remove('show');
@@ -741,6 +751,7 @@
         const context = matchCacheContext();
         savedDecisions = await window.MusicMatchCache?.getDecisions(pending, context.targetProvider, context.storefront, context.accountCatalog, context.sourceProvider) || savedDecisions;
       } catch { /* Saved review choices are optional; fresh matching remains available. */ }
+      if (controller.signal.aborted) throw new DOMException('Поиск отменён', 'AbortError');
       const pendingSearch = [];
       for (const track of pending) {
         const key = window.MusicMatchCache?.keyFor(track, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true);
@@ -771,12 +782,14 @@
       }
       updateCounts();
       renderTracks();
+      if (controller.signal.aborted) throw new DOMException('Поиск отменён', 'AbortError');
       await window.MusicTransferEngine.searchMany(targetAdapter(), pendingSearch, {
         context: {
           storefront: $('#storefront').value,
           accountWrite: state.sourceSnapshot?.completeness?.confirmed === true,
         },
         keyFor: (track) => `${state.targetProvider}:${state.targetProvider === 'apple-music' ? $('#storefront').value : ''}:${exactIsrcQuery(track, state.targetProvider) || window.MusicMatcher.buildSearchQueries(track).primary.toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        signal: controller.signal,
         onProgress: async (group) => {
           for (const track of group.tracks) {
             track.searching = false;
@@ -807,13 +820,32 @@
       setStep(4);
       toast(failed ? 'Часть запросов не прошла — можно повторить' : `Совпадений в каталоге: ${withResults}`);
       void updateMatchCacheStatus();
+    } catch (error) {
+      const aborted = controller.signal.aborted || error?.name === 'AbortError';
+      const message = aborted
+        ? 'Поиск остановлен. Завершённые результаты сохранены; следующий запуск продолжит с оставшихся треков.'
+        : error?.message || 'Массовый поиск прервался. Повторите поиск для оставшихся треков.';
+      for (const track of state.tracks) {
+        if (!track.searching) continue;
+        track.searching = false;
+        if (!aborted) {
+          track.searchError = true;
+          track.errorMessage = message;
+        }
+      }
+      $('#searchStatus').textContent = message;
+      $('#searchStatus').classList.toggle('search-error', !aborted);
+      if (aborted) toast('Поиск остановлен; готовые совпадения сохранены');
     } finally {
       state.searching = false;
+      if (activeSearchController === controller) activeSearchController = null;
       const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыке', spotify: 'Spotify', zvuk: 'Звуке' };
       $('#searchBtn').textContent = `Найти в ${labels[state.targetProvider] || state.targetProvider}`;
       renderTracks();
     }
   }
+
+  $('#cancelSearchBtn').addEventListener('click', () => activeSearchController?.abort());
 
   function buildPlan() {
     return window.MusicTransferCore.createTransferPlan({
@@ -864,6 +896,10 @@
   });
 
   $$('.source .connect').forEach((button) => button.addEventListener('click', () => {
+    if (state.searching || state.tracks.some((track) => track.searching)) {
+      toast('Остановите поиск перед сменой источника.');
+      return;
+    }
     const card = button.closest('.source');
     const provider = card.dataset.provider;
     if (provider && state.librarySnapshots[provider]) {
@@ -993,7 +1029,13 @@
     }
   }
 
-  $('#extensionImportBtn').addEventListener('click', () => scanOpenAccounts(false));
+  $('#extensionImportBtn').addEventListener('click', () => {
+    if (state.searching || state.tracks.some((track) => track.searching)) {
+      toast('Дождитесь окончания поиска или остановите его перед обновлением библиотек.');
+      return;
+    }
+    scanOpenAccounts(false);
+  });
 
   $('#templateBtn').addEventListener('click', () => {
     const blob = new Blob(['title,artist,album,isrc,duration_ms,id\n"Снег","Моя Мишель","Кино",,,\n'], { type: 'text/csv;charset=utf-8' });
@@ -1007,6 +1049,7 @@
 
   $('#searchBtn').addEventListener('click', searchCatalog);
   $('#targetProvider').addEventListener('change', () => {
+    if (state.searching || state.tracks.some((track) => track.searching)) return;
     state.targetProvider = $('#targetProvider').value;
     trackPage = 0;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
@@ -1020,7 +1063,7 @@
     if (state.targetProvider && state.loaded) void searchCatalog();
   });
   $('#storefront').addEventListener('change', () => {
-    if (!state.loaded) return;
+    if (!state.loaded || state.searching || state.tracks.some((track) => track.searching)) return;
     trackPage = 0;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
     state.report = null;
