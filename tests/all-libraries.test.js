@@ -200,6 +200,19 @@ test('browser startup reloads only provider tabs with a stale bridge protocol', 
   assert.ok(worker.messages.some(({ tabId, message }) => tabId === 52 && message.type === 'music-importer:bridge-health-check'));
 });
 
+test('opening the importer app repairs stale provider bridges before scanning', async () => {
+  const worker = bootWorker({}, [
+    { id: 53, url: 'https://music.apple.com/us/home', status: 'complete' },
+    { id: 54, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
+  ], { oldBridgeTabIds: [53] });
+  const response = await worker.callFrom(
+    { type: 'music-importer:repair-provider-bridges' },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: true, checked: 2, repaired: 1, failed: 0 });
+  assert.deepEqual(worker.reloads, [53]);
+});
+
 test('extension update focuses the existing importer app without creating another tab', async () => {
   const existingApp = { id: 18, url: 'chrome-extension://fixture-extension/app/index.html' };
   const worker = bootWorker({}, [existingApp]);

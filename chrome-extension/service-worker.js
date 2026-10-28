@@ -23,6 +23,7 @@ const APP_ORIGINS = new Set([
 const extensionAppUrl = chrome.runtime.getURL?.('app/index.html') || '';
 const extensionAppPorts = new Set();
 const pendingProgressAcks = new Map();
+let providerBridgeRepairTask = null;
 
 function acknowledgeTransferCheckpoint(id, ok) {
   const settle = pendingProgressAcks.get(String(id || ''));
@@ -340,25 +341,40 @@ async function reloadTabForReader(tabId, timeoutMs = 30000) {
   });
 }
 
-async function repairStaleProviderTabs() {
-  const patterns = [
-    'https://open.spotify.com/*',
-    'https://music.apple.com/*',
-    'https://music.yandex.ru/*',
-    'https://zvuk.com/favorites*',
-    'https://zvuk.com/collection*',
-    'https://zvuk.com/playlist/*',
-  ];
-  const tabs = await chrome.tabs.query({ url: patterns }).catch(() => []);
-  await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
-    try {
-      const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
-      if (health?.ok === true && health.bridgeProtocol === 3) return;
-    } catch {
-      // A stale content script loses its extension context after the worker update.
-    }
-    await reloadTabForReader(tab.id).catch(() => {});
-  }));
+function repairStaleProviderTabs() {
+  if (providerBridgeRepairTask) return providerBridgeRepairTask;
+  providerBridgeRepairTask = (async () => {
+    const patterns = [
+      'https://open.spotify.com/*',
+      'https://music.apple.com/*',
+      'https://music.yandex.ru/*',
+      'https://zvuk.com/favorites*',
+      'https://zvuk.com/collection*',
+      'https://zvuk.com/playlist/*',
+    ];
+    const tabs = await chrome.tabs.query({ url: patterns }).catch(() => []);
+    const results = await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
+      try {
+        const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
+        if (health?.ok === true && health.bridgeProtocol === 3) return { repaired: false, ok: true };
+      } catch {
+        // A stale content script loses its extension context after the worker update.
+      }
+      try {
+        await reloadTabForReader(tab.id);
+        const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
+        return { repaired: true, ok: health?.ok === true && health.bridgeProtocol === 3 };
+      } catch {
+        return { repaired: true, ok: false };
+      }
+    }));
+    return {
+      checked: results.length,
+      repaired: results.filter((result) => result.repaired && result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+    };
+  })().finally(() => { providerBridgeRepairTask = null; });
+  return providerBridgeRepairTask;
 }
 
 async function ensureCurrentProviderBridge(tabId) {
@@ -648,6 +664,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(await openMissingProviderTabs(message.providerIds ?? null, { focusProviderId }));
       } catch {
         sendResponse({ ok: false, error: 'Не удалось открыть вкладки музыкальных сервисов.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'music-importer:repair-provider-bridges') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
+        return;
+      }
+      try {
+        sendResponse({ ok: true, ...(await repairStaleProviderTabs()) });
+      } catch {
+        sendResponse({ ok: false, error: 'Не удалось восстановить соединение с открытыми сервисами.' });
       }
       return;
     }

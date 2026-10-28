@@ -88,10 +88,12 @@
       state.extensionAvailable = true;
       updateSourceCount();
       $('#openServicesBtn').disabled = false;
-      status.textContent = 'Music Importer запущен в Chrome. Проверяю открытые аккаунты…';
+      status.textContent = 'Проверяю подключение к открытым сервисам и аккаунтам…';
       button.textContent = 'Подключаем аккаунты…';
       button.disabled = false;
-      void scanOpenAccounts(true);
+      void chrome.runtime.sendMessage({ type: 'music-importer:repair-provider-bridges' })
+        .catch(() => null)
+        .finally(() => scanOpenAccounts(true));
       return;
     }
     if (extensionCheckInProgress || state.extensionAvailable) return;
