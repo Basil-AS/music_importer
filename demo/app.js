@@ -396,8 +396,11 @@
       ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(' ')
       : String(track.artist || '');
     const romanized = track.manualQuery ? '' : [track.title, artists].map((value) => window.MusicMatcher.romanize(value)).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const cyrillicVariant = !track.manualQuery && ['yandex-music', 'zvuk'].includes(state.targetProvider)
+      ? window.MusicMatcher.detransliterate(`${track.title || ''} ${artists}`).replace(/\s+/g, ' ').trim()
+      : '';
     const normalizeQuery = (value) => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
-    const expandedQueries = [...new Set([queries.fallback, romanized]
+    const expandedQueries = [...new Set([queries.fallback, romanized, cyrillicVariant]
       .map((query) => String(query || '').trim())
       .filter((query) => query && normalizeQuery(query) !== normalizeQuery(queries.primary)))];
 

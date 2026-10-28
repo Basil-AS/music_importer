@@ -24,6 +24,23 @@
     )).join('');
   }
 
+  function detransliterate(value) {
+    const source = String(value || '').normalize('NFKC').toLowerCase();
+    if (!source || /[\u0400-\u04ff]/u.test(source) || !/[a-z]/i.test(source)) return '';
+    if (!/(?:shch|zh|kh|ts|ch|sh|yo|yu|ya|ye|yi)/i.test(source)) return '';
+    const replacements = {
+      shch: 'щ', zh: 'ж', kh: 'х', ts: 'ц', ch: 'ч', sh: 'ш',
+      yo: 'ё', yu: 'ю', ya: 'я', ye: 'є', yi: 'ї',
+      a: 'а', b: 'б', v: 'в', g: 'г', d: 'д', e: 'е', z: 'з', i: 'и', y: 'й',
+      k: 'к', l: 'л', m: 'м', n: 'н', o: 'о', p: 'п', r: 'р', s: 'с', t: 'т',
+      u: 'у', f: 'ф',
+    };
+    const converted = source.replace(/shch|zh|kh|ts|ch|sh|yo|yu|ya|ye|yi|[a-z]/gi, (part) => replacements[part.toLowerCase()] || part);
+    if (/[a-z]/i.test(converted)) return '';
+    const comparable = (text) => String(text).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+    return comparable(romanize(converted)) === comparable(source) ? converted : '';
+  }
+
   const normalizeISRC = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
   function buildSearchQueries(track) {
@@ -166,5 +183,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, romanize, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();
