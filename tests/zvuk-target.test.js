@@ -145,6 +145,39 @@ test('Zvuk playlist write chunks items and verifies exact order, including repea
   assert.deepEqual(playlistTracks, tracks);
 });
 
+test('Zvuk resume verifies the stored playlist ID and writes only the missing suffix', async () => {
+  const playlistTracks = ['track-first'];
+  let created = false;
+  const page = makePage((request) => {
+    const { operationName, variables } = graphRequest(request);
+    if (operationName === 'getPlaylistTracks') {
+      return { payload: { data: { playlistTracks: playlistTracks.slice(variables.offset, variables.offset + variables.limit).map((id) => ({ id })) } } };
+    }
+    if (operationName === 'addItems') {
+      playlistTracks.push(...variables.items.map((item) => item.item_id));
+      return { payload: { data: { playlist: { addItemsV1: { id: 'stored-playlist' } } } } };
+    }
+    if (operationName === 'createPlaylist') { created = true; throw new Error('Resume must use the stored playlist ID.'); }
+    throw new Error(`Unexpected operation: ${operationName}`);
+  });
+  const response = await page.command('execute-transfer', { plan: {
+    type: 'music-transfer-plan', target: { provider: 'zvuk', collectionType: 'playlists' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-list', sourceName: 'Road', targetName: 'Road' }],
+    operations: ['track-first', 'track-second'].map((providerId, position) => ({
+      operation: 'add_to_playlist', source: { collectionId: 'source-list', position }, target: { provider: 'zvuk', providerId },
+    })),
+    recovery: {
+      playlistTargets: { 'source-list': 'stored-playlist' },
+      progress: { phase: 'playlist-items', sourceKey: 'source-list', targetPlaylistId: 'stored-playlist', playlistIndex: 0 },
+    },
+  } });
+
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(playlistTracks, ['track-first', 'track-second']);
+  assert.equal(created, false);
+});
+
 test('Zvuk writer rejects incomplete source snapshots before making a request', async () => {
   const page = makePage(() => { throw new Error('A request must not be made.'); });
   const response = await page.command('execute-transfer', { plan: {

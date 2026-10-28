@@ -347,6 +347,10 @@
     const favorites = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || plan.target.collectionType === 'favorites');
     const playlistItems = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
     const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+    const recovery = plan.recovery && typeof plan.recovery === 'object' ? plan.recovery : {};
+    const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
+    const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
+    const completedPlaylistCount = recoveryProgress.phase === 'playlists' ? Math.max(0, Number(recoveryProgress.completed) || 0) : 0;
     const report = { status: 'writing', targetProvider: 'apple-music', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
     let writesStarted = false;
     const progress = (value) => post('transfer-progress', {
@@ -371,14 +375,41 @@
         const items = playlistItems.filter((operation) => sourcePlaylistKey(operation) === key)
           .sort((left, right) => Number(left.source?.position || 0) - Number(right.source?.position || 0));
         writesStarted = true;
-        const playlist = await createApplePlaylist(mapping.targetName || mapping.sourceName);
-        const written = await appendApplePlaylistItems(playlist.id, items, progress);
-        const verified = await verifyPlaylist(playlist.id, items);
         const expectedIds = items.map((operation) => String(operation.target.providerId));
+        const targetId = String(playlistTargets[key] || '');
+        if (!targetId && recoveryProgress.sourceKey === key
+          && ['playlist-creating', 'playlist-items'].includes(recoveryProgress.phase)) {
+          throw new Error(`Нельзя безопасно продолжить «${mapping.sourceName}»: сервис мог создать плейлист, но его ID не сохранился. Сверьте цель вручную.`);
+        }
+        let playlist;
+        let written = 0;
+        if (targetId) {
+          playlist = { id: targetId, name: mapping.targetName || mapping.sourceName };
+          const existing = await verifyPlaylist(targetId, items);
+          const isPrefix = existing.complete && existing.items.length <= expectedIds.length
+            && existing.items.every((item, position) => item.providerIds.includes(expectedIds[position]));
+          if (!isPrefix) throw new Error(`Содержимое «${playlist.name}» не является префиксом плана. Остановил продолжение без записи.`);
+          if (index < completedPlaylistCount && existing.items.length !== expectedIds.length) {
+            throw new Error(`Плейлист «${playlist.name}» отмечен как завершённый, но read-back неполный.`);
+          }
+          const remainder = items.slice(existing.items.length);
+          written = await appendApplePlaylistItems(playlist.id, remainder, (value) => progress({
+            ...value, sourceKey: key, targetPlaylistId: playlist.id, playlistIndex: index,
+          }));
+        } else {
+          if (index < completedPlaylistCount) throw new Error(`Не найден сохранённый ID завершённого плейлиста «${mapping.sourceName}».`);
+          progress({ phase: 'playlist-creating', completed: index, total: mappings.length, sourceKey: key, playlistIndex: index });
+          playlist = await createApplePlaylist(mapping.targetName || mapping.sourceName);
+          progress({ phase: 'playlist-items', completed: 0, total: items.length, sourceKey: key, targetPlaylistId: playlist.id, playlistIndex: index });
+          written = await appendApplePlaylistItems(playlist.id, items, (value) => progress({
+            ...value, sourceKey: key, targetPlaylistId: playlist.id, playlistIndex: index,
+          }));
+        }
+        const verified = await verifyPlaylist(playlist.id, items);
         const verifiedOrder = verified.items.length === expectedIds.length
           && verified.items.every((item, position) => item.providerIds.includes(expectedIds[position]));
         report.playlists.push({ id: playlist.id, name: playlist.name, written, verified: verified.verifiedCount, expected: items.length });
-        progress({ phase: 'playlists', completed: index + 1, total: mappings.length, message: `Плейлисты Apple Music: ${index + 1} из ${mappings.length}` });
+        progress({ phase: 'playlists', completed: index + 1, total: mappings.length, sourceKey: key, targetPlaylistId: playlist.id, playlistIndex: index, message: `Плейлисты Apple Music: ${index + 1} из ${mappings.length}` });
         if (!verified.complete || verified.verifiedCount !== items.length || !verifiedOrder) {
           throw new Error(`Плейлист «${playlist.name}» записан, но не прошёл проверку состава и порядка.`);
         }

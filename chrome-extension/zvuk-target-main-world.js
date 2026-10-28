@@ -182,26 +182,57 @@
       report.favorites = await writeFavorites(favorites, progress, () => { writesStarted = true; });
       const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist');
       const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+      const recovery = plan.recovery && typeof plan.recovery === 'object' ? plan.recovery : {};
+      const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
+      const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
+      const completedPlaylistCount = recoveryProgress.phase === 'playlists' ? Math.max(0, Number(recoveryProgress.completed) || 0) : 0;
       for (const [index, mapping] of mappings.entries()) {
         const key = String(mapping.sourceId || mapping.sourceName || '');
         const matching = playlistOperations.filter((operation) => String(operation.source.collectionId || operation.source.collectionName || '') === key)
           .sort((left, right) => Number(left.source.position || 0) - Number(right.source.position || 0));
         const expectedIds = matching.map((operation) => String(operation.target.providerId));
-        const playlistId = await createPlaylist(mapping.targetName || mapping.sourceName, matching.map((operation) => operation.target.providerId));
         writesStarted = true;
-        for (let offset = batchSize; offset < matching.length; offset += batchSize) {
+        let playlistId = String(playlistTargets[key] || '');
+        if (!playlistId && recoveryProgress.sourceKey === key
+          && ['playlist-creating', 'playlist-items'].includes(recoveryProgress.phase)) {
+          throw new Error(`Нельзя безопасно продолжить «${mapping.sourceName}»: сервис мог создать плейлист, но его ID не сохранился. Сверьте цель вручную.`);
+        }
+        let written = 0;
+        let currentIds;
+        if (playlistId) {
+          currentIds = await readPlaylistIds(playlistId);
+          const isPrefix = currentIds.length <= expectedIds.length
+            && currentIds.every((id, position) => id === expectedIds[position]);
+          if (!isPrefix) throw new Error(`Содержимое «${mapping.targetName || mapping.sourceName}» не является префиксом плана. Остановил продолжение без записи.`);
+          if (index < completedPlaylistCount && currentIds.length !== expectedIds.length) {
+            throw new Error(`Плейлист «${mapping.targetName || mapping.sourceName}» отмечен завершённым, но read-back неполный.`);
+          }
+        } else {
+          if (index < completedPlaylistCount) throw new Error(`Не найден сохранённый ID завершённого плейлиста «${mapping.sourceName}».`);
+          progress({ phase: 'playlist-creating', completed: index, total: mappings.length, sourceKey: key, playlistIndex: index });
+          playlistId = await createPlaylist(mapping.targetName || mapping.sourceName, matching.map((operation) => operation.target.providerId));
+          progress({ phase: 'playlist-items', completed: 0, total: expectedIds.length, sourceKey: key, targetPlaylistId: playlistId, playlistIndex: index });
+          currentIds = await readPlaylistIds(playlistId);
+          const seededPrefix = currentIds.length <= expectedIds.length
+            && currentIds.every((id, position) => id === expectedIds[position]);
+          if (!seededPrefix) throw new Error(`Созданный плейлист «${mapping.targetName || mapping.sourceName}» не совпал с началом плана.`);
+          written = currentIds.length;
+        }
+        for (let offset = currentIds.length; offset < matching.length; offset += batchSize) {
           const batch = matching.slice(offset, offset + batchSize);
           const data = await graphql('addItems', addPlaylistItemsMutation, {
             id: playlistId,
             items: batch.map((operation) => playlistItem(operation.target.providerId)),
           });
           if (!data?.playlist || !Object.hasOwn(data.playlist, 'addItemsV1')) throw new Error(`Звук не подтвердил добавление треков в «${mapping.targetName || mapping.sourceName}».`);
+          written += batch.length;
+          progress({ phase: 'playlist-items', completed: offset + batch.length, total: matching.length, sourceKey: key, targetPlaylistId: playlistId, playlistIndex: index });
         }
         const actualIds = await readPlaylistIds(playlistId);
         const verified = expectedIds.length === actualIds.length && expectedIds.every((id, position) => id === actualIds[position]);
-        report.playlists.push({ title: mapping.targetName || mapping.sourceName, targetId: playlistId, written: expectedIds.length, verified: verified ? expectedIds.length : 0 });
+        report.playlists.push({ title: mapping.targetName || mapping.sourceName, targetId: playlistId, written, verified: verified ? expectedIds.length : 0 });
         if (!verified) throw new Error(`Обратная сверка плейлиста «${mapping.targetName || mapping.sourceName}» обнаружила несовпадение треков или порядка.`);
-        progress({ phase: 'playlists', completed: index + 1, total: mappings.length, message: `Плейлисты Звука: ${index + 1} из ${mappings.length}.` });
+        progress({ phase: 'playlists', completed: index + 1, total: mappings.length, sourceKey: key, targetPlaylistId: playlistId, playlistIndex: index, message: `Плейлисты Звука: ${index + 1} из ${mappings.length}.` });
       }
       report.status = 'complete';
       report.finishedAt = new Date().toISOString();

@@ -982,6 +982,11 @@
     const warning = $('#transferJobWarning');
     if (!warning) return;
     warning.classList.toggle('show', Boolean(job));
+    const resumeButton = $('#resumeTransferJob');
+    if (resumeButton) {
+      resumeButton.hidden = !job?.recoveryPlan;
+      resumeButton.disabled = state.transferInProgress || !job?.recoveryPlan;
+    }
     if (!job) return;
     const source = providerLabels[job.sourceProvider] || job.sourceProvider;
     const target = providerLabels[job.targetProvider] || job.targetProvider;
@@ -997,6 +1002,42 @@
   }
 
   void refreshUnresolvedTransferJob();
+
+  $('#resumeTransferJob')?.addEventListener('click', async () => {
+    const job = state.unresolvedTransferJob;
+    if (!job?.recoveryPlan || state.transferInProgress) return;
+    const providerName = providerLabels[job.targetProvider] || job.targetProvider;
+    if (!window.confirm(`Продолжить прежний план в ${providerName}? Сначала приложение сверит уже записанные лайки и порядок треков. Новые записи возможны только для подтверждённого остатка.`)) return;
+    state.transferInProgress = true;
+    updateCounts();
+    renderUnresolvedTransferJob();
+    try {
+      const resumed = await window.MusicTransferJobStore?.resume(job.id);
+      if (!resumed) throw new Error('Не удалось безопасно открыть сохранённую операцию для продолжения.');
+      const plan = {
+        ...job.recoveryPlan,
+        recovery: { playlistTargets: job.playlistTargets || {}, progress: job.progress || null },
+      };
+      const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk', spotify: 'spotify' })[job.targetProvider];
+      if (!commandProvider) throw new Error('Сервис назначения сохранённой операции неизвестен.');
+      const response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider, (progress) => window.MusicTransferJobStore.updateProgress(job.id, progress));
+      if (!response?.ok) {
+        const status = response?.report?.status === 'partial_failure' ? 'partial_failure' : 'failed';
+        await window.MusicTransferJobStore.finish(job.id, status, response?.error || 'Продолжение не прошло проверку целевого аккаунта.');
+        toast(response?.error || 'Продолжение остановлено: проверьте целевой аккаунт.');
+      } else {
+        await window.MusicTransferJobStore.finish(job.id, 'complete', 'Продолжение завершено и подтверждено read-back.');
+        toast('Перенос продолжен и сверен с целевым аккаунтом.');
+      }
+    } catch (error) {
+      await window.MusicTransferJobStore?.finish(job.id, 'unknown', 'Связь прервалась во время продолжения; проверьте целевой аккаунт.');
+      toast(error instanceof Error ? error.message : 'Не удалось продолжить перенос.');
+    } finally {
+      state.transferInProgress = false;
+      await refreshUnresolvedTransferJob();
+      updateCounts();
+    }
+  });
 
   $('#acknowledgeTransferJob')?.addEventListener('click', async () => {
     const job = state.unresolvedTransferJob;

@@ -223,6 +223,67 @@ test('Apple target writer adds favorites and ordered playlist items, then verifi
   assert.ok(!JSON.stringify(page.messages).includes(page.token));
 });
 
+test('Apple resume validates the existing playlist prefix and writes only the missing suffix', async () => {
+  let playlistIds = ['catalog-song-a'];
+  const page = makePage({
+    'POST /v1/me/library/playlists/playlist-resume/tracks': ({ init }) => {
+      playlistIds.push(...JSON.parse(init.body).data.map((item) => item.id));
+      return { status: 204, payload: {} };
+    },
+    'GET /v1/me/library/playlists/playlist-resume/tracks?limit=100': () => ({
+      meta: { total: playlistIds.length }, next: null,
+      data: playlistIds.map((id, index) => ({ id: `library-${index}`, attributes: { playParams: { id } } })),
+    }),
+  });
+  const result = await page.command('execute-transfer', {
+    plan: {
+      type: 'music-transfer-plan',
+      target: { provider: 'apple-music', collectionType: 'playlists' },
+      completeness: { source: [{ confirmed: true }] },
+      collectionMappings: [{ sourceId: 'source-playlist', sourceName: 'Road', targetName: 'Road' }],
+      operations: ['catalog-song-a', 'catalog-song-b'].map((providerId, position) => ({
+        operation: 'add_to_playlist', source: { collectionId: 'source-playlist', position }, target: { providerId },
+      })),
+      recovery: {
+        playlistTargets: { 'source-playlist': 'playlist-resume' },
+        progress: { phase: 'playlist-items', sourceKey: 'source-playlist', targetPlaylistId: 'playlist-resume', playlistIndex: 0 },
+      },
+    },
+  });
+
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(playlistIds, ['catalog-song-a', 'catalog-song-b']);
+  assert.equal(page.requests.filter((request) => request.method === 'POST' && request.url.endsWith('/library/playlists')).length, 0);
+  const append = page.requests.find((request) => request.method === 'POST' && request.url.endsWith('/tracks'));
+  assert.deepEqual(JSON.parse(append.body).data.map((item) => item.id), ['catalog-song-b']);
+});
+
+test('Apple resume stops without writing when the saved playlist does not match the plan prefix', async () => {
+  const page = makePage({
+    'GET /v1/me/library/playlists/playlist-resume/tracks?limit=100': {
+      meta: { total: 1 }, next: null,
+      data: [{ id: 'library-existing', attributes: { playParams: { id: 'different-track' } } }],
+    },
+  });
+  const result = await page.command('execute-transfer', {
+    plan: {
+      type: 'music-transfer-plan',
+      target: { provider: 'apple-music', collectionType: 'playlists' },
+      completeness: { source: [{ confirmed: true }] },
+      collectionMappings: [{ sourceId: 'source-playlist', sourceName: 'Road', targetName: 'Road' }],
+      operations: [{ operation: 'add_to_playlist', source: { collectionId: 'source-playlist', position: 0 }, target: { providerId: 'expected-track' } }],
+      recovery: {
+        playlistTargets: { 'source-playlist': 'playlist-resume' },
+        progress: { phase: 'playlist-items', sourceKey: 'source-playlist', targetPlaylistId: 'playlist-resume', playlistIndex: 0 },
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /не является префиксом плана/i);
+  assert.equal(page.requests.filter((request) => request.method === 'POST').length, 0);
+});
+
 test('Apple target writer refuses an incomplete source before mutating the account', async () => {
   const page = makePage({});
   const result = await page.command('execute-transfer', {

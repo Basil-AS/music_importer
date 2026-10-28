@@ -183,3 +183,45 @@ test('Yandex target writer adds and verifies favorites and ordered playlist trac
   assert.equal(playlistCreated, true);
   assert.ok(page.requests.every((request) => request.init.credentials === 'include'));
 });
+
+test('Yandex resume checks the existing playlist prefix and appends only missing tracks', async () => {
+  const playlistItems = ['target-first'];
+  let revision = 7;
+  let created = false;
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/playlists/99') {
+      return { result: { playlist: { kind: 99, title: 'Road', revision, trackCount: playlistItems.length, tracks: playlistItems.map((id) => ({ id })) } } };
+    }
+    if (parsed.pathname === '/users/42/playlists/99/change-relative') {
+      const body = new URLSearchParams(init.body);
+      const diff = JSON.parse(body.get('diff'));
+      assert.equal(diff.at, playlistItems.length);
+      playlistItems.push(...diff.tracks.map((track) => track.id));
+      revision += 1;
+      return { result: { revision } };
+    }
+    if (parsed.pathname === '/users/42/playlists/create') { created = true; throw new Error('Resume must reuse the saved target ID.'); }
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+  await page.dispatch('execute-transfer', { plan: {
+    type: 'music-transfer-plan',
+    target: { provider: 'yandex-music', collectionType: 'playlists' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-road', sourceName: 'Road', targetName: 'Road' }],
+    operations: ['target-first', 'target-second'].map((providerId, position) => ({
+      operation: 'add_to_playlist', source: { collectionId: 'source-road', position },
+      target: { providerId, albumId: `album-${providerId}` },
+    })),
+    recovery: {
+      playlistTargets: { 'source-road': '99' },
+      progress: { phase: 'playlist-items', sourceKey: 'source-road', targetPlaylistId: '99', playlistIndex: 0 },
+    },
+  } });
+
+  const response = page.messages.find((message) => message.type === 'command-response');
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(playlistItems, ['target-first', 'target-second']);
+  assert.equal(created, false);
+});

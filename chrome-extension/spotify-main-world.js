@@ -338,7 +338,7 @@
     if (!response.ok) throw new Error(`Spotify: созданный плейлист не добавлен в библиотеку (HTTP ${response.status}).`);
   }
 
-  async function addSpotifyPlaylistItems(playlistUri, uris, onWritten = () => {}) {
+  async function addSpotifyPlaylistItems(playlistUri, uris, onWritten = () => {}, onProgress = () => {}) {
     for (let offset = 0; offset < uris.length; offset += 100) {
       await query('addToPlaylist', {
         playlistUri,
@@ -347,7 +347,7 @@
         interactionId: null,
       });
       onWritten(Math.min(offset + 100, uris.length));
-      transferProgress(`Добавляем треки в плейлист Spotify: ${Math.min(offset + 100, uris.length)} из ${uris.length}.`);
+      onProgress(Math.min(offset + 100, uris.length), uris.length);
     }
   }
 
@@ -391,6 +391,12 @@
       operationsByCollection.get(key).push(operation);
     }
     const mappings = new Map((plan.collectionMappings || []).map((mapping) => [String(mapping.sourceId || mapping.sourceName), mapping]));
+    const recovery = plan.recovery && typeof plan.recovery === 'object' ? plan.recovery : {};
+    const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
+    const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
+    const completedPlaylistCount = recoveryProgress.phase === 'playlists' ? Math.max(0, Number(recoveryProgress.completed) || 0) : 0;
+    const reportProgress = (progress) => post('transfer-progress', { requestId: activeCommandId, progress });
+    let playlistIndex = 0;
     for (const [sourceKey, mapping] of mappings) {
       const operations = operationsByCollection.get(sourceKey) || [];
       const isConfirmedEmptyPlaylist = mapping.completeness?.confirmed === true && mapping.sourceItemCount === 0;
@@ -398,22 +404,47 @@
       const name = String(mapping.targetName || mapping.sourceName || operations[0]?.source?.collectionName || 'Music Import');
       const ordered = operations.slice().sort((a, b) => Number(a.source?.position || 0) - Number(b.source?.position || 0));
       const uris = ordered.map((operation) => String(operation.target.providerId));
-      let playlistUri = '';
+      let playlistUri = String(playlistTargets[sourceKey] || '');
       let written = 0;
       try {
-        playlistUri = await createSpotifyPlaylist(name);
-        if (uris.length) await addSpotifyPlaylistItems(playlistUri, uris, (count) => { written = count; });
+        if (!playlistUri && recoveryProgress.sourceKey === sourceKey
+          && ['playlist-creating', 'playlist-items'].includes(recoveryProgress.phase)) {
+          throw new Error(`Нельзя безопасно продолжить «${name}»: сервис мог создать плейлист, но его ID не сохранился. Сверьте цель вручную.`);
+        }
+        if (playlistUri) {
+          const current = await readPlaylist({ id: playlistUri, title: name, trackCount: null });
+          const actual = current.tracks.map((track) => track.id);
+          const prefix = actual.length <= uris.length && actual.every((uri, position) => uri === uris[position]);
+          if (!prefix) throw new Error(`Содержимое «${name}» не является префиксом плана. Остановил продолжение без записи.`);
+          if (playlistIndex < completedPlaylistCount && actual.length !== uris.length) {
+            throw new Error(`Плейлист «${name}» отмечен завершённым, но read-back неполный.`);
+          }
+          const remainder = uris.slice(actual.length);
+          if (remainder.length) await addSpotifyPlaylistItems(playlistUri, remainder, (count) => { written = count; }, (completed, total) => reportProgress({
+            phase: 'playlist-items', completed, total, sourceKey, targetPlaylistId: playlistUri, playlistIndex,
+          }));
+        } else {
+          if (playlistIndex < completedPlaylistCount) throw new Error(`Не найден сохранённый ID завершённого плейлиста «${name}».`);
+          reportProgress({ phase: 'playlist-creating', completed: playlistIndex, total: mappings.size, sourceKey, playlistIndex });
+          playlistUri = await createSpotifyPlaylist(name);
+          reportProgress({ phase: 'playlist-items', completed: 0, total: uris.length, sourceKey, targetPlaylistId: playlistUri, playlistIndex });
+          if (uris.length) await addSpotifyPlaylistItems(playlistUri, uris, (count) => { written = count; }, (completed, total) => reportProgress({
+            phase: 'playlist-items', completed, total, sourceKey, targetPlaylistId: playlistUri, playlistIndex,
+          }));
+        }
         const verified = await readPlaylist({ id: playlistUri, title: name, trackCount: null });
         const actual = verified.tracks.map((track) => track.id);
         const exact = actual.length === uris.length && actual.every((uri, index) => uri === uris[index]);
         report.playlists.push({ name, uri: playlistUri, requested: uris.length, written, verified: exact ? actual.length : 0, exactOrder: exact });
         if (!exact) throw new Error(`Spotify не подтвердил порядок или состав плейлиста «${name}».`);
+        reportProgress({ phase: 'playlists', completed: playlistIndex + 1, total: mappings.size, sourceKey, targetPlaylistId: playlistUri, playlistIndex });
       } catch (error) {
         const failure = { name, uri: playlistUri || error?.partialPlaylistUri || null, requested: uris.length, written, verified: 0, exactOrder: false, error: error instanceof Error ? error.message : 'Ошибка записи плейлиста.' };
         throw Object.assign(error instanceof Error ? error : new Error(failure.error), {
           transferReport: { ...report, status: 'partial_failure', playlists: [...report.playlists, failure] },
         });
       }
+      playlistIndex += 1;
     }
     if (unverifiedFavorites.length) throw Object.assign(new Error('Spotify не подтвердил часть добавленных лайков.'), { transferReport: { ...report, status: 'partial_failure' } });
     return report;

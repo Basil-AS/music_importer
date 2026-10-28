@@ -183,6 +183,47 @@ test('Spotify writer creates playlists, appends batches, and checks repeated ite
   assert.equal(response.result.playlists[0].exactOrder, true);
 });
 
+test('Spotify resume validates playlist order and adds only its missing suffix', async () => {
+  const playlistUris = ['spotify:track:first'];
+  const page = makePage((request) => {
+    if (request.url.startsWith('https://api-partner.spotify.com/')) {
+      const { operationName, variables } = request.payload;
+      if (operationName === 'fetchLibraryTracks') return libraryTracks([]);
+      if (operationName === 'fetchPlaylistContents') {
+        const rows = playlistUris.slice(variables.offset, variables.offset + variables.limit)
+          .map((uri) => ({ itemV2: { data: { uri, name: uri, artists: [{ name: 'Artist' }], duration: { totalMilliseconds: 180000 } } } }));
+        return { payload: { data: { playlistV2: { content: { items: rows, totalCount: playlistUris.length, pagingInfo: { offset: variables.offset } } } } } };
+      }
+      if (operationName === 'addToPlaylist') {
+        playlistUris.push(...variables.playlistItemUris);
+        return { payload: { data: { addToPlaylist: true } } };
+      }
+    }
+    throw new Error(`Resume must not create another playlist: ${request.url}`);
+  });
+  await page.captureSession();
+  const plan = {
+    type: 'music-transfer-plan', target: { provider: 'spotify', collectionType: 'playlists' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-list', sourceName: 'Road', targetName: 'Road' }],
+    operations: ['spotify:track:first', 'spotify:track:second'].map((providerId, position) => ({
+      operation: 'add_to_playlist', source: { collectionId: 'source-list', collectionName: 'Road', position },
+      target: { provider: 'spotify', providerId },
+    })),
+    recovery: {
+      playlistTargets: { 'source-list': 'spotify:playlist:resume1234567890123456' },
+      progress: { phase: 'playlist-items', sourceKey: 'source-list', targetPlaylistId: 'spotify:playlist:resume1234567890123456', playlistIndex: 0 },
+    },
+  };
+  const response = await page.command('execute-transfer', { plan });
+
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(playlistUris, ['spotify:track:first', 'spotify:track:second']);
+  const append = page.requests.find((request) => request.payload?.operationName === 'addToPlaylist');
+  assert.deepEqual(append.payload.variables.playlistItemUris, ['spotify:track:second']);
+  assert.equal(page.requests.some((request) => request.url === 'https://spclient.wg.spotify.com/playlist/v2/playlist'), false);
+});
+
 test('Spotify writer refuses an incomplete source plan before writing', async () => {
   const page = makePage((request) => {
     if (request.url.startsWith('https://api-partner.spotify.com/')) return { payload: { data: {} } };

@@ -259,6 +259,10 @@
     const uidValue = account?.account?.uid ?? account?.uid;
     if (uidValue === null || uidValue === undefined) throw new Error('Войдите в Яндекс Музыку в этой вкладке и повторите запись.');
     const uid = String(uidValue);
+    const recovery = plan.recovery && typeof plan.recovery === 'object' ? plan.recovery : {};
+    const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
+    const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
+    const completedPlaylistCount = recoveryProgress.phase === 'playlists' ? Math.max(0, Number(recoveryProgress.completed) || 0) : 0;
     const report = { status: 'writing', targetProvider: 'yandex-music', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
     let writesStarted = false;
     const update = (progress) => post('transfer-progress', {
@@ -275,13 +279,51 @@
       const playlistOperations = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
       const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
       for (const [index, mapping] of mappings.entries()) {
-        const matching = playlistOperations.filter((operation) => sourcePlaylistKey(operation) === String(mapping.sourceId || mapping.sourceName || ''))
+        const key = String(mapping.sourceId || mapping.sourceName || '');
+        const matching = playlistOperations.filter((operation) => sourcePlaylistKey(operation) === key)
           .sort((left, right) => Number(left.source.position || 0) - Number(right.source.position || 0));
         writesStarted = true;
-        const created = await createPlaylist(uid, String(mapping.targetName || mapping.sourceName || 'Перенесённый плейлист').slice(0, 100));
-        const result = await appendPlaylistItems(uid, created.kind, matching, update);
-        report.playlists.push({ title: created.title, written: result.written, verified: result.verified });
-        update({ phase: 'playlists', completed: index + 1, total: mappings.length, message: `Плейлисты: ${index + 1} из ${mappings.length}` });
+        const expectedIds = matching.map((operation) => String(operation.target.providerId));
+        let targetId = String(playlistTargets[key] || '');
+        if (!targetId && recoveryProgress.sourceKey === key
+          && ['playlist-creating', 'playlist-items'].includes(recoveryProgress.phase)) {
+          throw new Error(`Нельзя безопасно продолжить «${mapping.sourceName}»: сервис мог создать плейлист, но его ID не сохранился. Сверьте цель вручную.`);
+        }
+        let playlist;
+        let written = 0;
+        if (targetId) {
+          playlist = await readPlaylistDetail(uid, targetId);
+          const currentIds = playlist.refs.map(trackId);
+          const isPrefix = playlist.total === currentIds.length && currentIds.length <= expectedIds.length
+            && currentIds.every((id, position) => id === expectedIds[position]);
+          if (!isPrefix) throw new Error(`Содержимое «${mapping.targetName || mapping.sourceName}» не является префиксом плана. Остановил продолжение без записи.`);
+          if (index < completedPlaylistCount && currentIds.length !== expectedIds.length) {
+            throw new Error(`Плейлист «${mapping.targetName || mapping.sourceName}» отмечен завершённым, но read-back неполный.`);
+          }
+          const remainder = matching.slice(currentIds.length);
+          const result = await appendPlaylistItems(uid, targetId, remainder, (value) => update({
+            ...value, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index,
+          }));
+          written = result.written;
+          playlist = await readPlaylistDetail(uid, targetId);
+        } else {
+          if (index < completedPlaylistCount) throw new Error(`Не найден сохранённый ID завершённого плейлиста «${mapping.sourceName}».`);
+          update({ phase: 'playlist-creating', completed: index, total: mappings.length, sourceKey: key, playlistIndex: index });
+          playlist = await createPlaylist(uid, String(mapping.targetName || mapping.sourceName || 'Перенесённый плейлист').slice(0, 100));
+          targetId = playlist.kind;
+          update({ phase: 'playlist-items', completed: 0, total: expectedIds.length, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index });
+          const result = await appendPlaylistItems(uid, targetId, matching, (value) => update({
+            ...value, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index,
+          }));
+          written = result.written;
+          playlist = await readPlaylistDetail(uid, targetId);
+        }
+        const actualIds = playlist.refs.map(trackId);
+        const exact = playlist.total === expectedIds.length && actualIds.length === expectedIds.length
+          && actualIds.every((id, position) => id === expectedIds[position]);
+        if (!exact) throw new Error(`Обратная сверка плейлиста «${mapping.targetName || mapping.sourceName}» обнаружила несовпадение треков или порядка.`);
+        report.playlists.push({ title: mapping.targetName || mapping.sourceName, targetId, written, verified: actualIds.length });
+        update({ phase: 'playlists', completed: index + 1, total: mappings.length, sourceKey: key, targetPlaylistId: targetId, playlistIndex: index, message: `Плейлисты: ${index + 1} из ${mappings.length}` });
       }
       report.status = 'complete';
       report.finishedAt = new Date().toISOString();

@@ -65,6 +65,7 @@
         total: job.progress.total != null && Number.isFinite(Number(job.progress.total)) ? Number(job.progress.total) : null,
         sourceKey: job.progress.sourceKey ? String(job.progress.sourceKey).slice(0, 500) : null,
         targetPlaylistId: job.progress.targetPlaylistId ? String(job.progress.targetPlaylistId).slice(0, 300) : null,
+        playlistIndex: job.progress.playlistIndex != null && Number.isInteger(Number(job.progress.playlistIndex)) ? Number(job.progress.playlistIndex) : null,
       } : null,
       recoveryPlan,
       playlistTargets,
@@ -148,6 +149,39 @@
     return updated ? put(updated) : false;
   }
 
+  async function mutateExisting(id, predicate, update) {
+    const db = await openDatabase();
+    if (!db) return false;
+    const key = String(id || '');
+    return new Promise((resolve) => {
+      let transaction;
+      let changed = false;
+      try { transaction = db.transaction(storeName, 'readwrite'); }
+      catch { return resolve(false); }
+      const store = transaction.objectStore(storeName);
+      transaction.oncomplete = () => resolve(changed);
+      transaction.onerror = () => resolve(false);
+      transaction.onabort = () => resolve(false);
+      const request = store.get(key);
+      request.onsuccess = () => {
+        const current = request.result;
+        if (!current || !predicate(current)) return resolve(false);
+        const updated = normalizeJob(update(current));
+        if (!updated) return resolve(false);
+        store.put(updated);
+        changed = true;
+      };
+      request.onerror = () => resolve(false);
+    });
+  }
+
+  async function resume(id) {
+    return mutateExisting(id, (current) => Boolean(current.recoveryPlan)
+      && !terminalSafeStatuses.has(current.status)
+      && (current.status !== 'in-progress' || Date.now() - Date.parse(current.updatedAt) >= 5 * 60 * 1000),
+    (current) => ({ ...current, status: 'in-progress', outcome: '' }));
+  }
+
   async function get(id) {
     const key = String(id || '');
     const db = await openDatabase();
@@ -179,8 +213,17 @@
   }
 
   async function acknowledge(id) {
-    return finish(id, 'acknowledged', 'Пользователь подтвердил сверку целевого аккаунта.');
+    return mutateExisting(id, (current) => current.status !== 'complete'
+      && current.status !== 'acknowledged'
+      && (current.status !== 'in-progress' || Date.now() - Date.parse(current.updatedAt) >= 5 * 60 * 1000),
+    (current) => ({
+      ...current,
+      status: 'acknowledged',
+      outcome: 'Пользователь подтвердил сверку целевого аккаунта.',
+      recoveryPlan: null,
+      playlistTargets: {},
+    }));
   }
 
-  window.MusicTransferJobStore = Object.freeze({ start, updateProgress, finish, latestUnresolved, acknowledge });
+  window.MusicTransferJobStore = Object.freeze({ start, updateProgress, finish, resume, latestUnresolved, acknowledge });
 })();
