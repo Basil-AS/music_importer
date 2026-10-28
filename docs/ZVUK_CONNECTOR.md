@@ -57,3 +57,15 @@ Upstream [`API_DOCUMENTATION.md`](https://github.com/Basil-AS/ZvukDownloader/blo
 ## Последняя live-проверка
 
 2026-10-28: текущий extension refresh отправил Звук в crawl избранного и плейлистов, но итоговый статус сообщил, что каталог плейлистов не загрузился. В видимой странице присутствовали разделы избранного и плейлистов, однако этого недостаточно, чтобы подтвердить API-сессию или полный каталог. Частичный progress не сохранён как полный snapshot. GraphQL bodies, заголовки и session values не читались; причина отказа неизвестна. Текущая реализация остаётся не подтверждённой live как reader.
+
+## Saved albums (releases), fixture-only
+
+Status: implemented against fixtures in `tests/zvuk-albums.test.js`; not live-verified.
+
+- Reader: `main-world.js` forwards the `releases` section of `getPaginatedCollectionAll` / `getPaginatedCollectionAllSections` as `release-list-page` (`releases[{id,title,artists[{id,title}],trackCount,releaseDate,artworkUrl}]`, `hasMore`), `getReleases` hydration as `release-metadata`, and the independent ID count from `getCollectionIds` as `uniqueReleaseCount` inside `collection-count`. A page with `hasMore` but no cursor is dropped and reported as `read-error`. The consumer must treat the album list as complete only when the unique hydrated release IDs equal `uniqueReleaseCount`; a mismatch fails closed, like tracks and playlists.
+- Search: `search-albums` command runs `search { releases(limit) { items { id title date artists tracks } } }`. Candidates carry `providerId`, `title`, `artists[]`, `trackCount` (from `tracks.length`), `releaseDate`; Zvuk exposes no UPC (`upc` is empty).
+- Unverified: the `releases` search field names (`date`, `tracks`) and the `getReleases` response key are inferred from community clients and the observed `getCollectionIds` shape.
+
+## Album write
+
+Albums are written with `execute-transfer` (see `ZVUK_TRANSFER.md`). The item type sent is the single constant `RELEASE_ITEM_TYPE = 'release'` in `zvuk-target-main-world.js`, chosen by analogy with the observed lowercase `'track'`; the enum value is not confirmed live. If the first live write is rejected, change only that constant (community clients use an upper-case `CollectionItemType`).
