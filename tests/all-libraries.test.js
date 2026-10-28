@@ -95,7 +95,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
     reloads,
     createdTabs,
     storageState,
-    clickAction() { return actionListener(); },
+    clickAction(tab) { return actionListener(tab); },
     install(reason = 'install') { return installedListener({ reason }); },
     call(message) {
       return this.callFrom(message, 'http://127.0.0.1:8001/');
@@ -148,6 +148,22 @@ test('extension updates do not open an extra importer tab', async () => {
   const worker = bootWorker({});
   await worker.install('update');
   assert.deepEqual(worker.createdTabs, []);
+});
+
+test('extension icon opens the local-page connection panel when the localhost app is active', async () => {
+  const worker = bootWorker({}, [{ id: 7, url: 'http://127.0.0.1:8001/', active: true }]);
+  await worker.clickAction({ id: 7, url: 'http://127.0.0.1:8001/' });
+  assert.deepEqual(JSON.parse(JSON.stringify(worker.createdTabs)), [
+    { url: 'chrome-extension://fixture-extension/popup.html' },
+  ]);
+});
+
+test('extension icon opens the importer app when a provider page is active', async () => {
+  const worker = bootWorker({}, [{ id: 7, url: 'https://music.apple.com/us/library' }]);
+  await worker.clickAction({ id: 7, url: 'https://music.apple.com/us/library' });
+  assert.deepEqual(JSON.parse(JSON.stringify(worker.createdTabs)), [
+    { url: 'chrome-extension://fixture-extension/app/index.html' },
+  ]);
 });
 
 test('onboarding opens only missing provider tabs from the extension app', async () => {
