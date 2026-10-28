@@ -4,10 +4,11 @@ The experimental local Chrome extension reader is implemented for liked songs an
 
 ## Read flow
 
-1. Open the Apple Music library in Chrome and choose Apple Music as the source in the local app.
-2. Click **Подтянуть из расширения**. The extension asks the Apple Music page to scan the account.
+1. Open Apple Music in Chrome and sign in normally. You can keep Spotify, Yandex Music, and Zvuk tabs open too.
+2. Click the **Music Importer** extension button. Its extension-hosted app starts a scan of all supported music tabs; do not start a separate Apple-only scan.
 3. The reader follows `next` pages for `/v1/me/library/songs`, `/v1/me/library/playlists`, and each playlist's `/tracks` relationship.
 4. It classifies songs with the documented `inFavorites` library attribute into favorites, preserves playlist order and repeated items, and confirms each total before returning the snapshot.
+5. Wait for the Apple Music library status to report a complete snapshot, then choose Apple Music as the source and any of the other three services as the destination.
 
 The scan is read-only. If Apple Music has not yet made an authenticated API request in the open page, the reader asks the user to open the library and retry. A missing `meta.total`, repeated page, invalid pagination URL, or malformed track stops the scan rather than claiming a complete snapshot.
 
@@ -15,7 +16,7 @@ The scan is read-only. If Apple Music has not yet made an authenticated API requ
 
 - The connector uses the logged-in web player's private runtime headers to call documented personal-library reads. It does not create a MusicKit developer token or store user credentials. Apple's public REST API normally requires a developer token; this browser-session route is specific to the first-party Apple Music web app and may change.
 - Apple is both a source connector and an experimental target writer. The target writer's documented REST operations pass fixtures; live use through the first-party page session is still unverified. See [`APPLE_TRANSFER.md`](APPLE_TRANSFER.md).
-- Before using the updated unpacked extension, reload it in `chrome://extensions` and refresh both Apple Music and the local app tabs.
+- If the Apple library is not listed in the extension-hosted app, reload the unpacked extension in `chrome://extensions`, then reload the Apple Music tab and reopen Music Importer. The localhost page is only a fallback and cannot use the extension until its optional localhost permission is granted.
 
 ## References
 

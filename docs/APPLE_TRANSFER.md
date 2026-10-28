@@ -29,7 +29,7 @@ Official references:
 
 ## Limits before calling it usable
 
-- On 2026-10-28, the local app on `127.0.0.1:8001` returned no `extension-ready` response in Chrome. Reloading the unpacked extension, allowing it on the local app origin, and reloading Apple Music are required before a live check. This is separate from Apple account sign-in: an authenticated Apple tab cannot bridge to the local app until the Music Importer extension responds.
+- On 2026-10-28, the fallback page on `127.0.0.1:8001` returned no `extension-ready` response in Chrome. This does not show an Apple account failure: the connected browser had only the local page, and the page showed demo tracks plus Apple catalog results from local cache. For the primary flow, open Music Importer from the Chrome extension button; that extension-hosted app does not need localhost permission. No Apple library read or account write has been verified yet.
 - Fixture tests cannot establish Apple account eligibility, actual favorite propagation delay, browser CORS behavior, or whether all catalog IDs resolve identically in the user's storefront.
 - Apple returns `202 Accepted` for favorite writes. The adapter polls library read-back and fails closed if it cannot see every requested favorite.
 - Playlist creation followed by a later failure can leave a partial playlist. A retry can create another playlist; persistent idempotency/recovery is not implemented yet.

@@ -29,7 +29,7 @@ Cookie значения и access tokens не читаются JavaScript-код
 - Из открытой авторизованной вкладки напрямую проверены HTTP 200 и response shapes для `/account/status`, liked tracks, playlist list, playlist kinds, playlist detail, catalog search и `POST /tracks` hydration. Это подтверждает CORS для этих запросов, но не весь extension bridge, массовую гидратацию пользовательского каталога или все edge cases.
 - Likes endpoint не описывает pagination. Пока source service возвращает весь список одним response, код сверяет все уникальные refs с гидратированными карточками и сохраняет revision; этот контракт остаётся private.
 - Этот документ описывает только reader: он выполняет GET и metadata POST. Yandex target writer реализован отдельно; см. [`YANDEX_TRANSFER.md`](YANDEX_TRANSFER.md). Live mutation всё ещё не проверялась.
-- Для проверки connector откройте Яндекс Музыку в Chrome, выберите её как источник и нажмите «Подтянуть из расширения». Extension bridge и full-library scan должны быть отдельно проверены после перезагрузки unpacked extension; до этого runtime connector остаётся experimental.
+- Для общего сценария откройте Яндекс Музыку и нужные остальные сервисы в Chrome, войдите обычным способом и нажмите кнопку Music Importer в панели Chrome. Extension-hosted app запускает чтение всех открытых библиотек; Яндекс выбирается уже после сканирования как источник или цель. Если аккаунт не появился, перезагрузите unpacked extension и вкладку Яндекс Музыки. Live full-library scan и transfer пока требуют проверки.
 
 Исследовательские детали и ранее подтверждённые request shapes: [`providers/yandex-music.md` в API research](https://github.com/Basil-AS/music_importer/blob/feature/music-service-api-research/docs/providers/yandex-music.md).
 
