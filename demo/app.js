@@ -94,6 +94,13 @@
     });
   }
 
+  function updatePrivacyControls() {
+    const button = $('#clearLibrarySnapshots');
+    if (!button) return;
+    button.disabled = !extensionApp || !state.extensionAvailable || accountScanInProgress
+      || state.transferInProgress || Boolean(state.unresolvedTransferJob);
+  }
+
   function updateCounts() {
     const searchBusy = state.searching || state.tracks.some((track) => track.searching);
     const selected = state.tracks.filter((track) => track.selected && track.match).length;
@@ -114,6 +121,7 @@
     $('#clearMatchCache').disabled = searchBusy;
     $('#cancelSearchBtn').hidden = !state.searching;
     $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
+    updatePrivacyControls();
   }
 
   function renderTracks() {
@@ -1216,6 +1224,7 @@
       return;
     }
     accountScanInProgress = true;
+    updatePrivacyControls();
     button.disabled = true;
     button.textContent = 'Сканируем аккаунты…';
     $('#extensionStatus').textContent = automatic
@@ -1259,6 +1268,7 @@
       accountScanInProgress = false;
       button.disabled = false;
       button.textContent = 'Обновить открытые аккаунты';
+      updatePrivacyControls();
       if (focusScanQueued) {
         focusScanQueued = false;
         scheduleFocusRefresh();
@@ -1501,6 +1511,51 @@
     await window.MusicMatchCache?.clear();
     await updateMatchCacheStatus();
     toast('Локальные результаты и решения очищены');
+  });
+
+  $('#clearLibrarySnapshots')?.addEventListener('click', async () => {
+    if (!extensionApp || !state.extensionAvailable) {
+      toast('Откройте Music Importer значком расширения, чтобы удалить сохранённые снимки.');
+      return;
+    }
+    if (accountScanInProgress || state.transferInProgress) {
+      toast('Дождитесь завершения текущей операции.');
+      return;
+    }
+    const unresolved = await window.MusicTransferJobStore?.latestUnresolved() || state.unresolvedTransferJob;
+    if (unresolved) {
+      toast('Сначала завершите перенос или подтвердите сверку незавершённого задания.');
+      return;
+    }
+    if (!window.confirm('Удалить сохранённые снимки лайков и плейлистов из профиля Chrome? Аккаунты музыкальных сервисов не изменятся. Для нового переноса запустите «Обновить открытые аккаунты».')) return;
+    const button = $('#clearLibrarySnapshots');
+    button.disabled = true;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'music-importer:clear-library-snapshots' });
+      if (!response?.ok) throw new Error(response?.error || 'Не удалось удалить снимки библиотек.');
+      state.librarySnapshots = {};
+      state.libraryStatuses = {};
+      state.sourceSnapshot = null;
+      state.sourceProvider = '';
+      state.source = '';
+      state.tracks = [];
+      state.loaded = false;
+      state.report = null;
+      $$('.source').forEach((card) => card.classList.remove('selected'));
+      $('[aria-labelledby="source-heading"] .count').textContent = `0 из ${$$('.source').length}`;
+      $('#report').classList.remove('show');
+      renderSourceAvailability({});
+      renderTracks();
+      updateCounts();
+      $('#extensionStatus').textContent = 'Локальные снимки удалены. Можно заново просканировать открытые аккаунты.';
+      $('#extensionImportBtn').disabled = false;
+      $('#extensionImportBtn').textContent = 'Обновить открытые аккаунты';
+      toast('Локальные снимки библиотек удалены; музыкальные аккаунты не менялись.');
+    } catch (error) {
+      toast(error.message || 'Не удалось удалить снимки библиотек.');
+    } finally {
+      updatePrivacyControls();
+    }
   });
 
   updateCounts();

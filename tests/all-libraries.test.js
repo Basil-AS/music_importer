@@ -47,6 +47,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
       setAccessLevel: async () => {},
       async get(key) { return { [key]: storageState[key] }; },
       async set(value) { Object.assign(storageState, value); },
+      async remove(keys) { for (const key of keys) delete storageState[key]; },
     } },
     tabs: {
       async query(query) {
@@ -93,6 +94,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
     updates,
     reloads,
     createdTabs,
+    storageState,
     clickAction() { return actionListener(); },
     install(reason = 'install') { return installedListener({ reason }); },
     call(message) {
@@ -206,6 +208,30 @@ test('one-click library scan starts readers in every open provider tab', async (
     'apple:start-library-scan', 'spotify:start-library-scan', 'yandex:start-library-scan',
   ]);
   assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url.includes('/favorites?music_importer_capture=1')));
+});
+
+test('extension app can clear saved account snapshots without touching music accounts', async () => {
+  const storageState = {
+    [PROVIDER_KEY]: { snapshots: { spotify: makeProviderPayload('spotify') }, scans: { spotify: { status: 'complete' } }, previousSnapshots: {} },
+    [ZVUK_KEY]: makeZvukState(),
+  };
+  const app = bootWorker(storageState);
+  const response = await app.callFrom({ type: 'music-importer:clear-library-snapshots' }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.ok, true);
+  assert.equal(app.storageState[PROVIDER_KEY], undefined);
+  assert.equal(app.storageState[ZVUK_KEY], undefined);
+});
+
+test('snapshot clear is restricted to the app and refused during active scans', async () => {
+  const unauthorized = bootWorker({ [PROVIDER_KEY]: { snapshots: {}, scans: {}, previousSnapshots: {} } });
+  const rejected = await unauthorized.callFrom({ type: 'music-importer:clear-library-snapshots' }, 'https://example.com/');
+  assert.equal(rejected.ok, false);
+  assert.ok(unauthorized.storageState[PROVIDER_KEY]);
+
+  const scanning = bootWorker({ [PROVIDER_KEY]: { snapshots: {}, scans: { spotify: { status: 'reading' } }, previousSnapshots: {} } });
+  const blocked = await scanning.callFrom({ type: 'music-importer:clear-library-snapshots' }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.match(blocked.error, /сбор/i);
+  assert.ok(scanning.storageState[PROVIDER_KEY]);
 });
 
 test('selective library refresh rescans only the requested provider', async () => {

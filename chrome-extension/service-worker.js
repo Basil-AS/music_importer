@@ -748,6 +748,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === 'music-importer:clear-library-snapshots') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
+        return;
+      }
+      const [providerState, zvukState] = await Promise.all([readProviderState(), readState()]);
+      const scanRunning = Object.values(providerState.scans).some((scan) => ['reading', 'scanning'].includes(scan?.status))
+        || zvukState.scan?.active === true || zvukState.automation?.active === true;
+      if (scanRunning) {
+        sendResponse({ ok: false, error: 'Сначала дождитесь завершения или остановите сбор библиотек.' });
+        return;
+      }
+      try {
+        await chrome.storage.local.remove([STORAGE_KEY, PROVIDER_STORAGE_KEY]);
+        sendResponse({ ok: true });
+      } catch {
+        sendResponse({ ok: false, error: 'Chrome не смог удалить локальные снимки. Повторите попытку.' });
+      }
+      return;
+    }
+
     const providerMessage = /^(spotify|yandex|apple):(?:scan-progress|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
     if (providerMessage) {
       const provider = providerMessage[1] === 'yandex' ? 'yandex-music' : providerMessage[1] === 'apple' ? 'apple-music' : 'spotify';
