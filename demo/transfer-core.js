@@ -143,6 +143,7 @@
     requireValue(targetProvider, 'targetProvider');
     requireValue(targetCollectionType, 'targetCollectionType');
     if (!sourceIds.has(sourceSnapshot.provider) || !musicProviderIds.has(targetProvider)) throw new Error('Неизвестный сервис в плане переноса');
+    if (sourceSnapshot.provider === targetProvider) throw new Error('Источник и цель должны быть разными музыкальными сервисами');
     if (!collectionTypes.has(targetCollectionType) && targetCollectionType !== 'library') throw new Error(`Неизвестный тип назначения: ${targetCollectionType}`);
 
     const prepared = (tracks || []).map((track, index) => ({ track, index }));

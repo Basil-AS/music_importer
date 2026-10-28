@@ -58,3 +58,13 @@ for (const source of providers) {
     });
   }
 }
+
+test('transfer plan rejects selecting the source service as its own destination', () => {
+  const core = loadCore();
+  assert.throws(() => core.createTransferPlan({
+    sourceSnapshot: { provider: 'zvuk' },
+    targetProvider: 'zvuk',
+    targetCollectionType: 'favorites',
+    tracks: [],
+  }), /Источник и цель должны быть разными/);
+});

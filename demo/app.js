@@ -10,7 +10,7 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
   let trackPage = 0;
   let extensionCheckInProgress = false;
   window.MusicTransferSafety.installBeforeUnloadGuard(() => state.transferInProgress);
@@ -87,8 +87,8 @@
     $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков` : 'ожидает список';
     $('#selectedCount').textContent = `${selected} выбрано`;
     const hasPlaylistMappings = ['playlists', 'library'].includes(state.collectionType) && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
-    $('#importBtn').disabled = (selected === 0 && !hasPlaylistMappings) || state.searching || Boolean(state.unresolvedTransferJob);
-    $('#searchBtn').disabled = !state.loaded || state.searching;
+    $('#importBtn').disabled = !state.targetProvider || (selected === 0 && !hasPlaylistMappings) || state.searching || Boolean(state.unresolvedTransferJob);
+    $('#searchBtn').disabled = !state.loaded || !state.targetProvider || state.searching;
     $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
   }
 
@@ -203,6 +203,7 @@
     setStep(2);
     $('#reviewCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     toast(`Загружено треков: ${list.length}`);
+    if (state.targetProvider) void searchCatalog();
   }
 
   const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
@@ -564,10 +565,19 @@
 
   function updateTargetLabel() {
     const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' };
-    const label = labels[state.targetProvider] || state.targetProvider;
+    const sourceProvider = state.sourceSnapshot?.provider || (state.loaded ? state.sourceProvider : '');
+    const targetSelect = $('#targetProvider');
+    for (const option of targetSelect.options) {
+      option.disabled = Boolean(option.value && sourceProvider && option.value === sourceProvider);
+    }
+    if (targetSelect.selectedOptions[0]?.disabled) {
+      targetSelect.value = '';
+      state.targetProvider = '';
+    }
+    const label = labels[state.targetProvider] || '';
     $('#targetProviderName').textContent = label;
-    $('#review-heading').textContent = `Сверка с каталогом ${label}`;
-    $('#searchBtn').textContent = `Найти в ${label}`;
+    $('#review-heading').textContent = label ? `Сверка с каталогом ${label}` : 'Сверка с каталогом назначения';
+    $('#searchBtn').textContent = label ? `Найти в ${label}` : 'Выберите сервис назначения';
     $('#storefront').hidden = state.targetProvider !== 'apple-music';
     $('#storefront').previousElementSibling.hidden = state.targetProvider !== 'apple-music';
     $('#importBtn').innerHTML = ({
@@ -575,7 +585,7 @@
       'apple-music': 'Перенести в Apple Music <span aria-hidden="true">→</span>',
       zvuk: 'Перенести в Звук <span aria-hidden="true">→</span>',
       spotify: 'Перенести в Spotify <span aria-hidden="true">→</span>',
-    })[state.targetProvider] || 'Сформировать план <span aria-hidden="true">→</span>';
+    })[state.targetProvider] || 'Выберите сервис назначения';
     $('#targetCollection').textContent = state.collectionType === 'library'
       ? 'Лайки и плейлисты'
       : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
@@ -699,7 +709,7 @@
   }
 
   async function searchCatalog() {
-    if (!state.loaded || state.searching) return;
+    if (!state.loaded || !state.targetProvider || state.searching) return;
     state.searching = true;
     state.report = null;
     $('#report').classList.remove('show');
@@ -1002,9 +1012,12 @@
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
     state.report = null;
     $('#report').classList.remove('show');
-    $('#searchStatus').textContent = 'Цель изменена; выполните новый поиск';
     updateTargetLabel();
+    $('#searchStatus').textContent = state.targetProvider
+      ? 'Начинаю автоматический поиск в выбранном каталоге…'
+      : state.loaded ? 'Выберите сервис назначения, отличный от источника.' : 'Сначала выберите сервис назначения';
     renderTracks();
+    if (state.targetProvider && state.loaded) void searchCatalog();
   });
   $('#storefront').addEventListener('change', () => {
     if (!state.loaded) return;
@@ -1012,8 +1025,9 @@
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
     state.report = null;
     $('#report').classList.remove('show');
-    $('#searchStatus').textContent = 'Страна каталога изменена';
+    $('#searchStatus').textContent = 'Страна каталога изменена; обновляю совпадения…';
     renderTracks();
+    if (state.targetProvider) void searchCatalog();
   });
 
   $('#toggleAll').addEventListener('click', () => {
