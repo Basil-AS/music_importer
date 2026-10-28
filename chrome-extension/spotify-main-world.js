@@ -586,6 +586,200 @@
     }
   }
 
+  async function restRequest(method, url, label, body = null) {
+    const startedAt = Date.now();
+    let headers = await waitForSession();
+    let headerGeneration = sessionHeaderGeneration;
+    let retries = 0;
+    let sessionRefreshes = 0;
+    while (true) {
+      await reserveQueryStart();
+      let response;
+      try {
+        response = await fetchWithTimeout(url, {
+          method, credentials: 'include',
+          headers: { ...headers, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        }, apiTimeoutMs);
+      } catch (error) {
+        const code = /не ответил за/i.test(error?.message || '') ? 'request_timeout' : 'network_error';
+        emitScanDiagnostic(label, null, startedAt, { code });
+        if (code === 'request_timeout') throw error;
+        throw new Error('Не удалось выполнить запрос Spotify. Повторите операцию.');
+      }
+      if (response.status === 429 && retries < 4) {
+        const retryAfter = retryAfterDelay(response.headers?.get?.('retry-after'));
+        const waitMs = retryAfter === null ? 1000 * (2 ** retries) : retryAfter;
+        retries += 1;
+        await waitForRateLimit(waitMs, label);
+        continue;
+      }
+      if (response.status === 401 && sessionRefreshes < 1) {
+        sessionRefreshes += 1;
+        const message = 'Spotify отклонил запрос. Проверяем, обновилась ли сессия страницы…';
+        if (activeCommandId) transferProgress(message);
+        else post('scan-progress', { phase: 'auth-refresh', message });
+        for (let attempt = 0; attempt < 32 && sessionHeaderGeneration <= headerGeneration; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (sessionHeaderGeneration > headerGeneration && sessionHeaders) {
+          headers = sessionHeaders;
+          headerGeneration = sessionHeaderGeneration;
+          continue;
+        }
+      }
+      if (!response.ok) {
+        emitScanDiagnostic(label, null, startedAt, { status: response.status });
+        throw Object.assign(new Error(`${label}: HTTP ${response.status}`), {
+          status: response.status,
+          retryAfter: response.headers?.get?.('retry-after') || null,
+        });
+      }
+      emitScanDiagnostic(label, null, startedAt, { status: response.status });
+      if (response.status === 204) return null;
+      try { return await response.json(); }
+      catch { return null; }
+    }
+  }
+
+  function albumIdFrom(value) {
+    const text = String(value || '').trim();
+    const id = text.startsWith('spotify:album:') ? text.slice('spotify:album:'.length) : text;
+    return /^[A-Za-z0-9]{22}$/.test(id) ? id : '';
+  }
+
+  function albumFrom(data) {
+    const id = albumIdFrom(data?.uri || data?.id);
+    if (!id) return null;
+    const images = Array.isArray(data?.images) ? data.images : [];
+    return {
+      providerId: `spotify:album:${id}`,
+      title: String(data?.name || ''),
+      artists: (Array.isArray(data?.artists) ? data.artists : []).map((artist) => String(artist?.name || '')).filter(Boolean),
+      upc: String(data?.external_ids?.upc || data?.external_ids?.ean || ''),
+      trackCount: Number.isInteger(data?.total_tracks) ? data.total_tracks : null,
+      releaseDate: String(data?.release_date || ''),
+      artworkUrl: String(images.slice().sort((left, right) => (Number(right?.width) || 0) - (Number(left?.width) || 0))[0]?.url || ''),
+    };
+  }
+
+  async function readSavedAlbums() {
+    const albums = [];
+    let total = null;
+    for (let offset = 0; total === null || offset < total;) {
+      post('scan-progress', { phase: 'albums', message: `Читаем сохранённые альбомы Spotify: страница с ${offset + 1}…` });
+      const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset), market: 'from_token' });
+      const page = await restRequest('GET', `https://api.spotify.com/v1/me/albums?${params}`, 'savedAlbums');
+      if (!Array.isArray(page?.items) || !Number.isInteger(page.total)) throw Object.assign(new Error('Неожиданный ответ Spotify с сохранёнными альбомами.'), { code: 'invalid_page_shape' });
+      if (total !== null && total !== page.total) throw Object.assign(new Error('Spotify изменил число сохранённых альбомов во время чтения.'), { code: 'total_changed' });
+      if (Number.isInteger(page.offset) && page.offset !== offset) throw Object.assign(new Error('Spotify вернул неверное смещение страницы альбомов.'), { code: 'unexpected_offset' });
+      total = page.total;
+      for (const row of page.items) {
+        const album = albumFrom(row?.album);
+        if (!album) throw Object.assign(new Error('Spotify вернул альбом без ID.'), { code: 'invalid_item_shape' });
+        albums.push(album);
+      }
+      post('scan-progress', { phase: 'albums', message: `Собираем сохранённые альбомы Spotify: ${Math.min(albums.length, total)} из ${total}.` });
+      if (page.items.length === 0 && offset < total) throw Object.assign(new Error('Spotify вернул пустую страницу альбомов до конца библиотеки.'), { code: 'empty_page' });
+      offset += page.items.length;
+    }
+    if (albums.length !== total || new Set(albums.map((album) => album.providerId)).size !== albums.length) {
+      throw Object.assign(new Error('Число или уникальность сохранённых альбомов Spotify не сошлись с total.'), { code: 'album_count_mismatch' });
+    }
+    return { albums, total };
+  }
+
+  function normalizedUpc(value) {
+    return String(value || '').replace(/[^0-9]/g, '').replace(/^0+/, '');
+  }
+
+  async function hydrateAlbums(ids) {
+    const byId = new Map();
+    for (let offset = 0; offset < ids.length; offset += 20) {
+      const params = new URLSearchParams({ ids: ids.slice(offset, offset + 20).join(','), market: 'from_token' });
+      const payload = await restRequest('GET', `https://api.spotify.com/v1/albums?${params}`, 'albumDetails');
+      if (!Array.isArray(payload?.albums)) throw new Error('Spotify вернул неизвестный ответ с данными альбомов.');
+      for (const data of payload.albums) {
+        const album = albumFrom(data);
+        if (album) byId.set(album.providerId, album);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  async function searchAlbumIds(q) {
+    const params = new URLSearchParams({ q, type: 'album', limit: '5', market: 'from_token' });
+    const payload = await restRequest('GET', `https://api.spotify.com/v1/search?${params}`, 'albumSearch');
+    if (!Array.isArray(payload?.albums?.items)) throw new Error('Spotify вернул неизвестную выдачу альбомов.');
+    return [...new Set(payload.albums.items.map((item) => albumIdFrom(item?.uri || item?.id)).filter(Boolean))];
+  }
+
+  async function searchAlbums(title, artist, upc) {
+    const name = String(title || '').trim().slice(0, 200);
+    const artistName = String(artist || '').trim().slice(0, 200);
+    const code = String(upc || '').replace(/[^0-9]/g, '').slice(0, 20);
+    if (!code && (!name || !artistName)) throw new Error('Для поиска альбома Spotify нужен UPC либо название и артист.');
+    if (code) {
+      const hydrated = await hydrateAlbums(await searchAlbumIds(`upc:${code}`));
+      const exact = hydrated.filter((album) => normalizedUpc(album.upc) === normalizedUpc(code));
+      if (exact.length) return exact.map((album) => ({ ...album, matchedBy: 'upc' }));
+    }
+    if (!name || !artistName) return [];
+    const hydrated = await hydrateAlbums(await searchAlbumIds(`album:${name} artist:${artistName}`));
+    return hydrated.map((album) => ({ ...album, matchedBy: 'title_artist' }));
+  }
+
+  async function savedAlbumFlags(ids) {
+    const flags = new Map();
+    for (let offset = 0; offset < ids.length; offset += 20) {
+      const batch = ids.slice(offset, offset + 20);
+      const result = await restRequest('GET', `https://api.spotify.com/v1/me/albums/contains?${new URLSearchParams({ ids: batch.join(',') })}`, 'savedAlbumsContains');
+      if (!Array.isArray(result) || result.length !== batch.length || result.some((value) => typeof value !== 'boolean')) {
+        throw new Error('Spotify вернул неизвестный ответ проверки сохранённых альбомов.');
+      }
+      batch.forEach((id, index) => flags.set(id, result[index]));
+    }
+    return flags;
+  }
+
+  async function readAlbums(providerIds) {
+    if (Array.isArray(providerIds) && providerIds.length) {
+      const ids = [...new Set(providerIds.map(albumIdFrom).filter(Boolean))];
+      if (ids.length !== new Set(providerIds.map(String)).size) throw new Error('Некорректный ID альбома Spotify.');
+      const flags = await savedAlbumFlags(ids);
+      return { complete: true, items: ids.filter((id) => flags.get(id) === true).map((id) => ({ providerId: `spotify:album:${id}` })) };
+    }
+    const { albums, total } = await readSavedAlbums();
+    return { complete: true, total, items: albums };
+  }
+
+  async function writeAlbums(targets) {
+    const ids = [];
+    for (const target of Array.isArray(targets) ? targets : []) {
+      if (target?.provider !== 'spotify') throw new Error('Цель альбома не относится к Spotify.');
+      const id = albumIdFrom(target.providerId);
+      if (!id) throw new Error('Некорректный ID альбома Spotify в плане.');
+      if (!ids.includes(id)) ids.push(id);
+    }
+    if (!ids.length) throw new Error('В плане нет альбомов Spotify для записи.');
+    const flags = await savedAlbumFlags(ids);
+    const missing = ids.filter((id) => flags.get(id) !== true);
+    for (let offset = 0; offset < missing.length; offset += 20) {
+      const batch = missing.slice(offset, offset + 20);
+      const checkpointSaved = await awaitCheckpoint(activeCommandId, {
+        phase: 'albums', completed: offset, total: missing.length,
+      });
+      if (!checkpointSaved) throw new Error('Не удалось локально сохранить контрольную точку перед записью альбомов. Запись остановлена без изменения аккаунта.');
+      await restRequest('PUT', 'https://api.spotify.com/v1/me/albums', 'saveAlbums', { ids: batch });
+      transferProgress(`Сохраняем альбомы в Spotify: ${Math.min(offset + 20, missing.length)} из ${missing.length}.`);
+    }
+    const verifiedFlags = missing.length ? await savedAlbumFlags(ids) : flags;
+    const verified = ids.filter((id) => verifiedFlags.get(id) === true).length;
+    const report = { requested: ids.length, written: missing.length, writtenCount: missing.length, alreadyPresent: ids.length - missing.length, verified };
+    if (verified !== ids.length) throw Object.assign(new Error('Spotify не подтвердил часть сохранённых альбомов.'), { transferReport: { status: 'partial_failure', albums: report } });
+    return report;
+  }
+
   function assertCompletePlan(plan) {
     const hasConfirmedEmptyPlaylist = Array.isArray(plan?.collectionMappings)
       && plan.collectionMappings.some((mapping) => mapping?.completeness?.confirmed === true && mapping.sourceItemCount === 0);
@@ -699,7 +893,13 @@
         ? await searchCatalog(event.data.query)
         : event.data.action === 'search-album-tracks'
           ? await searchAlbumTracks(event.data.album, event.data.artist)
-          : await executeTransfer(event.data.plan);
+          : event.data.action === 'search-albums'
+            ? await searchAlbums(event.data.album, event.data.artist, event.data.upc)
+            : event.data.action === 'read-albums'
+              ? await readAlbums(event.data.ids)
+              : event.data.action === 'write-albums'
+                ? await writeAlbums(event.data.targets)
+                : await executeTransfer(event.data.plan);
       post('command-result', { requestId, ok: true, result });
     } catch (error) {
       post('command-result', {
@@ -727,6 +927,10 @@
         post('scan-progress', { phase: 'playlist-items', message: `Плейлист ${index + 1} из ${playlistCatalog.length}: ${playlist.title}.` });
         playlists.push(await readPlaylist(playlist));
       }
+      let albums = null;
+      let albumsError = '';
+      try { albums = await readSavedAlbums(); }
+      catch (error) { albumsError = String(error?.code || error?.status || 'albums_unavailable'); }
       return {
         schemaVersion: 1,
         service: 'spotify',
@@ -738,7 +942,16 @@
           catalogConfirmed: true,
           playlistItemsConfirmed: playlists.every((playlist) => playlist.complete),
           playlistItemsTotal: playlists.length,
+          albumsConfirmed: albums !== null,
+          albumsCount: albums ? albums.total : null,
+          ...(albumsError ? { albumsError } : {}),
         },
+        collections: albums ? [{
+          type: 'albums',
+          name: 'Альбомы',
+          completeness: { confirmed: true, total: albums.total, count: albums.albums.length },
+          items: albums.albums,
+        }] : [],
         tracks: favorites.tracks.map((track) => ({ ...track, collectionType: 'favorites' })),
         playlists,
       };
@@ -749,7 +962,7 @@
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     if (event.data.type === 'command') {
-      if (!/^[a-z0-9-]{16,80}$/i.test(String(event.data.requestId || '')) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(event.data.action)) return;
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(event.data.requestId || '')) || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'write-albums', 'execute-transfer'].includes(event.data.action)) return;
       void handleCommand(event);
       return;
     }
