@@ -7,3 +7,4 @@ node_modules/
 distribution/
 edge-store-package/
 .claude/settings.local.json
+.claude/worktrees/
