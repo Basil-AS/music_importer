@@ -142,12 +142,10 @@
     const seen = new Set();
     let path = initialPath;
     let expectedTotal = null;
-    let pageNumber = 0;
     while (path) {
       if (seen.has(path)) throw new Error(`Apple Music повторил страницу при чтении: ${label}.`);
       seen.add(path);
       const payload = await request(path);
-      pageNumber += 1;
       const total = payload.meta?.total;
       if (Number.isInteger(total)) {
         if (expectedTotal !== null && expectedTotal !== total) throw new Error(`Apple Music изменил число элементов во время чтения: ${label}.`);
@@ -156,7 +154,6 @@
       rows.push(...payload.data);
       post('scan-progress', { message: `${label}: ${rows.length}${expectedTotal === null ? '' : ` из ${expectedTotal}`}.` });
       path = safeNext(payload.next);
-      if (pageNumber > 10000) throw new Error(`Слишком много страниц при чтении: ${label}.`);
     }
     if (expectedTotal === null || rows.length !== expectedTotal) throw new Error(`Apple Music не подтвердил полноту списка: ${label}.`);
     return { rows, total: expectedTotal };

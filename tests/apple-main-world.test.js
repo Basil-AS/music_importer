@@ -27,7 +27,9 @@ function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck 
     fetch: async (url, init = {}) => {
       requests.push({ url: String(url), method: init.method || 'GET', body: init.body || null, headers: new Headers(init.headers || {}) });
       const key = new URL(String(url)).pathname + new URL(String(url)).search;
-      const fixture = fixtures[`${init.method || 'GET'} ${key}`] ?? fixtures[key];
+      const fixture = fixtures[`${init.method || 'GET'} ${key}`]
+        ?? fixtures[key]
+        ?? Object.entries(fixtures).find(([route]) => route.endsWith('*') && key.startsWith(route.slice(0, -1)))?.[1];
       if (!fixture) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
       const response = typeof fixture === 'function' ? fixture({ url: String(url), init, requests }) : fixture;
       const status = response?.status || 200;
@@ -117,6 +119,27 @@ test('Apple source reader refuses an incomplete library page', async () => {
   await page.scan();
   assert.ok(page.messages.some((message) => message.type === 'scan-error'));
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Apple source reader follows more than 10,000 pages without an artificial item cap', async () => {
+  const total = 10001;
+  const page = makePage({
+    '/v1/me/library/songs?limit=100*': ({ url }) => {
+      const offset = Number(new URL(url).searchParams.get('offset') || 0);
+      return {
+        meta: { total },
+        next: offset + 1 < total ? `/v1/me/library/songs?limit=100&offset=${offset + 1}` : null,
+        data: [{ id: `song-${offset}`, attributes: { name: `Song ${offset}`, artistName: 'Artist', inFavorites: true } }],
+      };
+    },
+    '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
+  });
+
+  const payload = await page.scan();
+
+  assert.equal(payload.completeness.librarySongsCount, total);
+  assert.equal(payload.tracks.length, total);
+  assert.equal(page.requests.filter((request) => request.url.includes('/v1/me/library/songs')).length, total);
 });
 
 test('Apple page session preserves the observed Media-User-Token header spelling', async () => {
