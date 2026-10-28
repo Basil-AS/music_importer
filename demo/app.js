@@ -1456,11 +1456,13 @@
       const selectedProvider = connected.includes(state.sourceProvider) ? state.sourceProvider : connected[0];
       selectProviderSnapshot(selectedProvider);
       const unavailable = Object.values(response.statuses || {}).filter((status) => status.status === 'unavailable').length;
+      const failed = Object.values(response.statuses || {}).filter((status) => status.status === 'failed').length;
       const stale = Object.values(response.statuses || {}).filter((status) => status.status === 'stale').length;
-      $('#extensionStatus').textContent = `Библиотек доступно: ${connected.length} из 4${stale ? ` · не обновились: ${stale}` : ''}${unavailable ? ` · без снимка: ${unavailable}` : ''}. Выберите источник выше.`;
+      $('#extensionStatus').textContent = `Библиотек доступно: ${connected.length} из 4${stale ? ` · не обновились: ${stale}` : ''}${failed ? ` · ошибка чтения: ${failed}` : ''}${unavailable ? ` · нет сессии: ${unavailable}` : ''}. Выберите источник выше.`;
       if (!automatic || connected.length) {
         if (stale) toast(`Доступно библиотек: ${connected.length}; часть снимков не обновилась`);
-        else if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не открыта`);
+        else if (failed) toast(`Загружено библиотек: ${connected.length}; часть сервисов не смогла прочитать аккаунт`);
+        else if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не подключена`);
         else toast(`Загружены библиотеки всех ${connected.length} аккаунтов`);
       }
     } catch (error) {

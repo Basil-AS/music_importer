@@ -372,7 +372,7 @@ async function requestProviderLibrary(provider, refresh) {
       .find((snapshot) => snapshot?.completeness?.confirmed === true);
     if (update.result) {
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: staleMessage };
-      return { error: staleMessage };
+      return { error: staleMessage, status: 'failed' };
     }
   }
   if (refresh && scan?.status !== 'reading') {
@@ -412,14 +412,14 @@ async function requestProviderLibrary(provider, refresh) {
       lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
         .find((snapshot) => snapshot?.completeness?.confirmed === true);
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: failed.result.message };
-      return { error: failed.result.message };
+      return { error: failed.result.message, status: 'failed' };
     }
     return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   }
   if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   if (scan?.status === 'failed') {
     if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message || `Обновление ${provider} не завершилось.` };
-    return { error: scan.message || `Не удалось прочитать ${provider}.` };
+    return { error: scan.message || `Не удалось прочитать ${provider}.`, status: 'failed' };
   }
   const payload = state.snapshots[provider];
   if (payload?.completeness?.confirmed === true) return { payload, stale: false };
@@ -441,7 +441,7 @@ async function requestZvukLibrary(refresh) {
       state.error = state.scan.error;
       await writeState(state);
       if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan.error };
-      return { error: state.scan.error };
+      return { error: state.scan.error, status: 'failed' };
     }
     return {
       pending: true,
@@ -454,7 +454,7 @@ async function requestZvukLibrary(refresh) {
   if (!refresh && lastGoodSnapshot?.completeness?.confirmed === true) {
     return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Сбер.Звука.' };
   }
-  if (!refresh) return { error: state.error || 'Сбор библиотеки Сбер.Звука не запускался.' };
+  if (!refresh) return { error: state.error || 'Сбор библиотеки Сбер.Звука не запускался.', status: state.error ? 'failed' : 'unavailable' };
   let tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
   if (!tabs.length) tabs = await chrome.tabs.query({ url: 'https://zvuk.com/*' });
   const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
@@ -465,7 +465,7 @@ async function requestZvukLibrary(refresh) {
   const result = await startAccountScan(tab.id, { forceRefresh: true });
   if (!result?.ok) {
     if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: result?.error || 'Не удалось обновить Сбер.Звук; сохранён последний полный снимок.' };
-    return { error: result?.error || 'Не удалось запустить сбор библиотеки Сбер.Звука.' };
+    return { error: result?.error || 'Не удалось запустить сбор библиотеки Сбер.Звука.', status: 'failed' };
   }
   return {
     pending: true,
@@ -507,7 +507,10 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
         message: result.message || '',
       };
     } else {
-      statuses[provider] = { status: 'unavailable', message: String(result.error || 'Полная библиотека пока недоступна.') };
+      statuses[provider] = {
+        status: result.status === 'failed' ? 'failed' : 'unavailable',
+        message: String(result.error || 'Полная библиотека пока недоступна.'),
+      };
     }
   }
   return { libraries, statuses, pending };
