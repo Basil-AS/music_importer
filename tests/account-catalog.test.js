@@ -50,9 +50,9 @@ test('account catalog index refuses incomplete snapshots and never guesses witho
   assert.equal(accountCatalog.findByISRC(index, { title: 'Song', artist: 'Artist' }).length, 0);
 });
 
-test('full target snapshot resolves a 1,000-track transfer without catalog searches, leaving misses and manual queries queued', () => {
+test('full target snapshot resolves a 10,000-track transfer without catalog searches, leaving misses and manual queries queued', () => {
   const accountCatalog = loadAccountCatalog();
-  const targetTracks = Array.from({ length: 1000 }, (_, index) => ({
+  const targetTracks = Array.from({ length: 10_000 }, (_, index) => ({
     id: `target-${index}`,
     title: `Song ${index}`,
     artists: ['Artist'],
@@ -70,18 +70,18 @@ test('full target snapshot resolves a 1,000-track transfer without catalog searc
 
   const index = accountCatalog.buildIndex(snapshot, 'spotify');
   const resolution = accountCatalog.resolveTracks(sourceTracks, index);
-  assert.equal(resolution.matches.size, 1000);
+  assert.equal(resolution.matches.size, 10_000);
   assert.equal(resolution.unresolved.length, 2);
   assert.equal(resolution.matches.get(sourceTracks[0])[0].trackId, 'target-0');
   assert.equal(resolution.unresolved[1].manualQuery, true);
 });
 
-test('full target snapshots resolve 1,000 no-ISRC metadata matches for every provider', () => {
+test('full target snapshots resolve 10,000 no-ISRC metadata matches for every provider', () => {
   const accountCatalog = loadAccountCatalog();
   const providers = ['apple-music', 'spotify', 'yandex-music', 'zvuk'];
 
   for (const provider of providers) {
-    const targetTracks = Array.from({ length: 1000 }, (_, index) => {
+    const targetTracks = Array.from({ length: 10_000 }, (_, index) => {
       const title = `Catalogue Song ${index}`;
       const artist = `Artist ${index % 30}`;
       const album = `Album ${index % 200}`;
@@ -108,9 +108,9 @@ test('full target snapshots resolve 1,000 no-ISRC metadata matches for every pro
     }, provider);
     const resolution = accountCatalog.resolveTracks(sourceTracks, index);
 
-    assert.equal(resolution.matches.size, 1000, provider);
+    assert.equal(resolution.matches.size, 10_000, provider);
     assert.equal(resolution.unresolved.length, 0, provider);
-    assert.equal(resolution.matches.get(sourceTracks[999])[0].trackId, `${provider === 'apple-music' ? 'apple' : provider === 'yandex-music' ? 'yandex' : provider}-${999}`, provider);
+    assert.equal(resolution.matches.get(sourceTracks[9_999])[0].trackId, `${provider === 'apple-music' ? 'apple' : provider === 'yandex-music' ? 'yandex' : provider}-${9_999}`, provider);
   }
 });
 
