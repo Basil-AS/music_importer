@@ -24,6 +24,14 @@ function makePage(respond, timerScale = 1) {
         ok: result.status === undefined || (result.status >= 200 && result.status < 300),
         status: result.status || 200,
         headers: { get: () => null },
+        clone: () => ({ arrayBuffer: async () => {
+          if (!result.pendingBody) return new ArrayBuffer(0);
+          await new Promise((resolve, reject) => {
+            if (request.init.signal.aborted) reject(new Error('aborted'));
+            else request.init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+          return new ArrayBuffer(0);
+        } }),
         json: async () => result.payload ?? result,
         text: async () => result.text || '',
       };
@@ -97,6 +105,15 @@ test('Spotify source reader imports liked tracks and every playlist with item or
   assert.ok(!emitted.includes('fixture-secret'));
   assert.ok(!emitted.includes('fixture-client-secret'));
   assert.ok(page.requests.filter((request) => request.url === endpoint).every((request) => request.init.headers.authorization === 'Bearer fixture-secret'));
+});
+
+test('Spotify source reader times out when an HTTP response body stalls after headers', async () => {
+  const page = makePage(({ payload }) => {
+    if (payload.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    return { pendingBody: true };
+  }, 0.001);
+  await page.startScan();
+  assert.match(page.messages.find((message) => message.type === 'scan-error')?.error || '', /Spotify не ответил за 45 с/);
 });
 
 test('Spotify source reader refuses a truncated liked-track page', async () => {

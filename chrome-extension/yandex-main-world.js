@@ -33,22 +33,33 @@
   });
 
   async function request(path, init = {}) {
-    const response = await window.fetch(`${api}${path}`, {
-      credentials: 'include',
-      ...init,
-      headers: {
-        Accept: 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-        ...(init.headers || {}),
-      },
-    });
-    if (!response.ok) throw Object.assign(new Error(`Яндекс Музыка: HTTP ${response.status} для ${path.split('?')[0]}`), {
-      status: response.status,
-      retryAfter: response.headers?.get?.('retry-after') || null,
-    });
-    const payload = await response.json();
-    if (payload?.error) throw new Error(`Яндекс Музыка: ${String(payload.error.message || payload.error.name || 'ошибка API')}`);
-    return payload?.result ?? payload;
+    const safePath = path.split('?')[0].replace(/^\/users\/[^/]+/, '/users/{uid}');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    try {
+      const response = await window.fetch(`${api}${path}`, {
+        credentials: 'include',
+        ...init,
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          ...(init.headers || {}),
+        },
+      });
+      if (!response.ok) throw Object.assign(new Error(`Яндекс Музыка: HTTP ${response.status} для ${safePath}`), {
+        status: response.status,
+        retryAfter: response.headers?.get?.('retry-after') || null,
+      });
+      const payload = await response.json();
+      if (payload?.error) throw new Error(`Яндекс Музыка: ${String(payload.error.message || payload.error.name || 'ошибка API')}`);
+      return payload?.result ?? payload;
+    } catch (error) {
+      if (controller.signal.aborted) throw Object.assign(new Error(`Яндекс Музыка не ответила за 45 с: ${safePath}`), { name: 'AbortError' });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function retryAfterDelay(value) {

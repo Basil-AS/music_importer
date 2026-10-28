@@ -9,6 +9,7 @@
   let lastFavoriteHasMore = true;
   let favoriteEndReported = false;
   let favoriteScanStarted = false;
+  let favoriteCursorError = '';
   let lastCollectionPageAt = 0;
   let lastCollectionHasMore = true;
   const captureAckWaiters = new Map();
@@ -61,7 +62,7 @@
       const isCollection = location.pathname.startsWith('/collection');
       if (Date.now() - startedAt > 20000 && isFavorites && !lastFavoritePageAt) {
         stopAutoScroll();
-        post('favorites-scroll-stall');
+        post('favorites-scroll-stall', { reason: favoriteCursorError || 'Не удалось получить первую страницу избранного.' });
       }
       if (Date.now() - startedAt > 20000 && isPlaylist && !lastPlaylistPageAt) {
         stopAutoScroll();
@@ -82,7 +83,7 @@
           post('favorites-scroll-end');
         } else if (lastFavoriteHasMore && Date.now() - lastFavoritePageAt > 12000) {
           stopAutoScroll();
-          post('favorites-scroll-stall');
+          post('favorites-scroll-stall', { reason: favoriteCursorError || 'Сервис сообщил, что в избранном есть продолжение, но новые страницы не появились.' });
         }
       }
       if (isPlaylist && lastPlaylistPageAt && Date.now() - lastPlaylistPageAt > 5000) {
@@ -235,6 +236,7 @@
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 45000);
         let response;
+        let payload;
         try {
           response = await originalFetch.call(window, url, {
             ...init,
@@ -246,11 +248,16 @@
         } catch (error) {
           if (controller.signal.aborted) throw new Error('Страница избранного Звука не ответила за 45 секунд.');
           throw error;
+        }
+        try {
+          if (!response.ok) throw new Error(`GraphQL ответил HTTP ${response.status}.`);
+          payload = await response.json();
+        } catch (error) {
+          if (controller.signal.aborted) throw new Error('Страница избранного Звука не загрузилась за 45 секунд.');
+          throw error;
         } finally {
           clearTimeout(timer);
         }
-        if (!response.ok) throw new Error(`GraphQL ответил HTTP ${response.status}.`);
-        const payload = await response.json();
         if (!payload?.data || payload.errors?.length) throw new Error('Звук не вернул страницу избранного.');
         const page = payload.data?.paginatedCollection?.tracks;
         if (!Array.isArray(page?.items) || !await reportFavoritePage(page)) throw new Error('Звук не сохранил страницу избранного.');
@@ -264,8 +271,9 @@
       favoriteEndReported = true;
       stopAutoScroll();
       return await postWithAck('favorites-scroll-end');
-    } catch {
+    } catch (error) {
       // If replaying the observed request is unsupported, fall back to the page's own infinite scroll.
+      favoriteCursorError = error instanceof Error ? error.message : 'Не удалось прочитать следующую страницу избранного.';
       startAutoScroll();
       return false;
     }
@@ -275,9 +283,16 @@
     if (location.pathname !== '/favorites' || favoriteScanStarted) return;
     favoriteScanStarted = true;
     try {
-      if (await reported !== true) { startAutoScroll(); return; }
+      if (await reported !== true) {
+        favoriteCursorError = 'Приложение не подтвердило получение первой страницы избранного.';
+        startAutoScroll();
+        return;
+      }
       const handled = await readFavoritesByCursor(url, init || {}, bodyText, firstPage);
-      if (!handled) startAutoScroll();
+      if (!handled) {
+        if (!favoriteCursorError) favoriteCursorError = 'В запросе избранного не удалось определить курсор следующей страницы.';
+        startAutoScroll();
+      }
     } finally {
       favoriteScanStarted = false;
     }

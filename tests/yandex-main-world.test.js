@@ -38,7 +38,7 @@ function makePage(fetchHandler) {
   };
   const context = {
     window, location, URL, URLSearchParams, Promise, Map, Set, String, Number, Array, Object, Error, JSON, Date,
-    setTimeout, clearTimeout, console,
+    setTimeout, clearTimeout, console, AbortController,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/yandex-main-world.js'), 'utf8'), context);
   return {

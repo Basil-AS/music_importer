@@ -1008,9 +1008,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === 'zvuk:favorites-scroll-stall') {
-      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Загрузка избранного остановилась до последней страницы.' };
+      const reason = String(message.reason || '').trim().slice(0, 240);
+      const error = reason
+        ? `Загрузка избранного остановилась до последней страницы. Причина: ${reason}`
+        : 'Загрузка избранного остановилась до последней страницы.';
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error };
       state.captureEnabled = false;
-      state.error = state.scan.error;
+      state.error = error;
       state.updatedAt = new Date().toISOString();
       await writeState(state);
       sendResponse({ ok: true });

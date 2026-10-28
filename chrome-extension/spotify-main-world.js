@@ -136,7 +136,11 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await originalFetch.call(window, input, { ...init, signal: controller.signal });
+      const response = await originalFetch.call(window, input, { ...init, signal: controller.signal });
+      // Fetch resolves when headers arrive. Keep the abort timer active until the body
+      // has arrived too, otherwise a stalled JSON body can leave a library scan pending.
+      if (response.ok) await response.clone().arrayBuffer();
+      return response;
     } catch (error) {
       if (controller.signal.aborted) {
         throw new Error(`Spotify не ответил за ${Math.ceil(timeoutMs / 1000)} с. Повторите сканирование.`);

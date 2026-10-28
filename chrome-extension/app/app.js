@@ -286,11 +286,11 @@
         button.disabled = true;
         button.textContent = 'Сканируем…';
       } else if (status?.status === 'unavailable') {
-        label.textContent = 'Войдите и откройте сервис в Chrome';
+        label.textContent = status.message || 'Войдите и откройте сервис в Chrome';
         label.classList.remove('connected');
         button.disabled = true;
-        button.textContent = 'Нет подключения';
-        button.title = status.message || '';
+        button.textContent = 'Не подключено';
+        button.title = status.message || 'Войдите и откройте сервис в Chrome';
       } else if (status?.status === 'failed') {
         label.textContent = status.message || 'Не удалось прочитать библиотеку';
         label.classList.remove('connected');

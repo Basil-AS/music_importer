@@ -42,3 +42,10 @@ Fixture coverage remains separate from this live observation. None of the 12 sou
 - Selecting Spotify as the destination automatically started a bulk search for the Apple Music snapshot. No result completed before the progress remained at zero for about a minute, so the queue was stopped. A later single-track Spotify catalog query returned HTTP 429 after its retry window. The request was not repeated; no account write occurred.
 - No destination write or read-back was run. All twelve live transfer directions remain unverified.
 - Fixture-driven follow-up: bulk search now shows its active request and 429 cooldown. After retries are exhausted on 429, network failure, 408, 5xx, 401 or 403, the search queue stops instead of falling back from a failed album batch into individual requests. Fixtures cover rate-limit UI callbacks, preserving earlier results, and no fallback fan-out. This guard is not yet live-verified against Spotify.
+
+## 2026-10-28 — scan with the unpacked extension installed
+
+- Repeated the scan from the live localhost app after the extension was installed. Apple Music remained selectable; Spotify still displayed its final Liked Songs progress without a complete snapshot. Zvuk and Yandex failed closed, so no partial library was offered for transfer.
+- The user-visible error details were available as button tooltips: Zvuk stopped before the final favorites page; Yandex rejected an incomplete likes-card result. The exact live responses were not captured, and those causes remain unverified.
+- Code inspection found a concrete timeout gap shared by readers: Spotify, Apple Music, and Yandex bounded fetch-to-headers, while JSON/body reads could remain pending after headers arrived. Zvuk's cursor reader also stopped its 45-second timer before reading JSON. Version `0.13.5` keeps the deadline active through body consumption and displays provider errors directly in their source cards. These changes are fixture-verified but have not yet been live-tested.
+- The Spotify live status did not reveal the current phase. No target search, write, or read-back was performed. All twelve live transfer directions remain unverified.

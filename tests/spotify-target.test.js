@@ -30,6 +30,7 @@ function makePage(respond) {
         ok: result.status === undefined || (result.status >= 200 && result.status < 300),
         status: result.status || 200,
         headers: { get: (name) => result.headers?.[String(name).toLowerCase()] || null },
+        clone: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }),
         json: async () => result.payload ?? result,
         text: async () => JSON.stringify(result.payload ?? result),
       };

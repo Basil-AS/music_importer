@@ -7,6 +7,9 @@ function makePage(path = '/favorites', respond = null) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
+  let scrollCallback = null;
+  let now = Date.now();
+  class TestDate extends Date { static now() { return now; } }
   const location = { origin: 'https://zvuk.com', pathname: path, href: `https://zvuk.com${path}?music_importer_capture=1` };
   const history = { state: {}, replaceState(_state, _title, url) { location.href = String(url); } };
   class XMLHttpRequest {
@@ -45,14 +48,16 @@ function makePage(path = '/favorites', respond = null) {
               { id: 'repeat-track', title: 'Repeated', artists: [{ title: 'Artist' }] },
             ] } } }
             : { errors: [{ message: 'Unexpected fixture operation' }] };
-      const payload = respond ? respond(request) : defaultPayload;
-      return { ok: true, status: 200, json: async () => payload, clone: () => ({ json: async () => payload }) };
+      const result = respond ? respond(request) : defaultPayload;
+      const payload = result?.payload || result;
+      const status = Number(result?.statusCode || 200);
+      return { ok: status >= 200 && status < 300, status, json: async () => payload, clone: () => ({ json: async () => payload }) };
     },
   };
   const context = {
-    window, location, history, document: {}, XMLHttpRequest, URL, Request: class Request {}, Promise,
-    Map, Set, String, Number, Array, Object, Error, JSON, Date, RegExp, Math, AbortController,
-    setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {},
+    window, location, history, document: { documentElement: { scrollHeight: 100, clientHeight: 100, scrollTop: 0 }, querySelectorAll: () => [] }, XMLHttpRequest, URL, Request: class Request {}, Promise,
+    Map, Set, String, Number, Array, Object, Error, JSON, Date: TestDate, RegExp, Math, AbortController,
+    setTimeout, clearTimeout, setInterval: (callback) => { scrollCallback = callback; return 1; }, clearInterval() {},
     getComputedStyle: () => ({ overflowY: 'visible' }),
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/main-world.js'), 'utf8'), context);
@@ -67,6 +72,7 @@ function makePage(path = '/favorites', respond = null) {
       await new Promise((resolve) => setImmediate(resolve));
     },
     setPath(pathname) { location.pathname = pathname; },
+    async tickScrollAfter(ms) { now += ms; scrollCallback?.(); await new Promise((resolve) => setImmediate(resolve)); },
   };
 }
 
@@ -121,4 +127,20 @@ test('Zvuk source reader follows observed favorite cursors without relying on sc
   assert.deepEqual(page.messages.filter((message) => message.type === 'favorites-scroll-end').length, 1);
   assert.deepEqual(page.requests.filter((request) => request.payload.operationName === 'getPaginatedCollection')
     .map((request) => request.payload.variables.after), [null, 'cursor-b', 'cursor-c']);
+});
+
+test('Zvuk source reader exposes a failed cursor request when scroll fallback stalls', async () => {
+  const page = makePage('/favorites', ({ payload }) => {
+    const cursor = payload.variables?.after || null;
+    if (cursor) return { statusCode: 503, payload: { errors: [{ message: 'temporarily unavailable' }] } };
+    return { data: { paginatedCollection: { tracks: {
+      items: [{ id: 'favorite-a', title: 'A', artists: [{ title: 'Artist' }] }],
+      page: { endCursor: 'cursor-b' },
+    } } } };
+  });
+
+  await page.request('getPaginatedCollection', { first: 100, after: null });
+  await page.tickScrollAfter(21000);
+  const stalled = page.messages.find((message) => message.type === 'favorites-scroll-stall');
+  assert.match(stalled.reason, /GraphQL ответил HTTP 503/);
 });

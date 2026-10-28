@@ -551,6 +551,18 @@ test('Zvuk account scan refuses a favorites total mismatch', async () => {
   assert.ok(!app.updates.some((entry) => entry.update.url === 'https://zvuk.com/collection?music_importer_capture=1'));
 });
 
+test('Zvuk account scan preserves a sanitized cursor failure reason', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/favorites' }];
+  const storage = { [ZVUK_KEY]: makeZvukState() };
+  const app = bootWorker(storage, tabs);
+  await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  await app.pageMessage({ type: 'zvuk:favorites-scroll-stall', reason: 'GraphQL ответил HTTP 503.' }, 1);
+
+  assert.equal(storage[ZVUK_KEY].scan.phase, 'needs_review');
+  assert.match(storage[ZVUK_KEY].scan.error, /Причина: GraphQL ответил HTTP 503/);
+  assert.equal(storage[ZVUK_KEY].captureEnabled, false);
+});
+
 test('Zvuk waits for the independent favorites count if cursor scan finishes first', async () => {
   const tabs = [{ id: 1, url: 'https://zvuk.com/favorites' }];
   const storage = { [ZVUK_KEY]: makeZvukState() };

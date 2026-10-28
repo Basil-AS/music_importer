@@ -33,12 +33,16 @@ function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck 
       if (!fixture) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
       const response = typeof fixture === 'function' ? fixture({ url: String(url), init, requests }) : fixture;
       const status = response?.status || 200;
-      return { ok: status >= 200 && status < 300, status, headers: new Headers(response?.headers || {}), json: async () => response?.payload ?? response };
+      return {
+        ok: status >= 200 && status < 300, status, headers: new Headers(response?.headers || {}),
+        clone: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }),
+        json: async () => response?.payload ?? response,
+      };
     },
   };
   const context = {
     window, location, URL, URLSearchParams, Headers, Request, Promise, Map, Set, String, Number, Array, Object, Error, JSON, Date,
-    setTimeout, clearTimeout, console,
+    setTimeout, clearTimeout, console, AbortController,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/apple-main-world.js'), 'utf8'), context);
   return {

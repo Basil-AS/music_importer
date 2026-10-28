@@ -124,7 +124,21 @@
     const attempts = retryable ? 4 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        response = await originalFetch.call(window, url.href, init);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 45000);
+        try {
+          response = await originalFetch.call(window, url.href, { ...init, signal: controller.signal });
+          if (response.ok && response.status !== 202 && response.status !== 204) {
+            // Fetch resolves at headers; consume a clone under the deadline so a stalled
+            // body cannot leave a library scan or write request hanging indefinitely.
+            await response.clone().arrayBuffer();
+          }
+        } catch (error) {
+          if (controller.signal.aborted) throw new Error(`Apple Music не загрузил ответ за 45 с: ${method} ${url.pathname}.`);
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
       } catch (error) {
         if (attempt === attempts - 1) throw error;
         await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
