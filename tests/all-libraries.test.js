@@ -332,6 +332,14 @@ test('Zvuk reader error is shown with safe operation and HTTP status metadata', 
   assert.equal(storage[ZVUK_KEY].captureEnabled, false);
 });
 
+test('Zvuk pagination stall is not mislabeled as a rejected HTTP response', async () => {
+  const storage = { [ZVUK_KEY]: { ...makeZvukState(), captureEnabled: true, scan: { active: true, phase: 'catalog', tabId: 1 } } };
+  const worker = bootWorker(storage, [{ id: 1, url: 'https://zvuk.com/collection', status: 'complete' }]);
+  await worker.pageMessage({ type: 'zvuk:collection-scroll-stall', reason: 'pagination-stalled' }, 1);
+  assert.match(storage[ZVUK_KEY].error, /остановилась до следующей страницы/);
+  assert.ok(!storage[ZVUK_KEY].error.includes('HTTP 200'));
+});
+
 test('one-click library scan starts readers in every open provider tab', async () => {
   const tabs = [
     { id: 1, url: 'https://zvuk.com/favorites' },

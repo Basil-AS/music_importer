@@ -58,6 +58,12 @@ function makePage(respond, timerScale = 1, scriptUrls = []) {
         data: { source: 'music-importer-spotify', type: 'start-library-scan' },
       });
     },
+    refreshSession(headers) {
+      return window.fetch(endpoint, {
+        method: 'POST', headers,
+        body: JSON.stringify({ operationName: 'initialPageRequest', extensions: { persistedQuery: { sha256Hash: 'b'.repeat(64) } } }),
+      });
+    },
   };
 }
 
@@ -187,6 +193,55 @@ test('Spotify scan diagnostics sanitize provider errors and include page coordin
   assert.ok(!error.error.includes(privateProviderMessage));
   assert.ok(!error.error.includes('spotify:track:private-id'));
   assert.ok(!error.error.includes('session value'));
+});
+
+test('Spotify retries one 401 only after the page captures a newer session snapshot', async () => {
+  let page;
+  let favoritesRequests = 0;
+  page = makePage(async ({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') {
+      favoritesRequests += 1;
+      if (favoritesRequests === 1) {
+        void page.refreshSession({ authorization: 'Bearer refreshed-fixture-secret', 'client-token': 'refreshed-fixture-client' });
+        return { status: 401, payload: {} };
+      }
+      return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    }
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 0.001);
+
+  await page.startScan();
+
+  const favoriteRequests = page.requests.filter((request) => request.payload?.operationName === 'fetchLibraryTracks');
+  assert.equal(favoritesRequests, 2);
+  assert.equal(favoriteRequests[1].init.headers.authorization, 'Bearer refreshed-fixture-secret');
+  assert.ok(page.messages.some((message) => message.type === 'library-snapshot'));
+  const emitted = JSON.stringify(page.messages);
+  assert.ok(!emitted.includes('refreshed-fixture-secret'));
+  assert.ok(!emitted.includes('refreshed-fixture-client'));
+});
+
+test('Spotify does not blindly replay a 401 when the page session was not refreshed', async () => {
+  let favoritesRequests = 0;
+  const page = makePage(({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') {
+      favoritesRequests += 1;
+      return { status: 401, payload: {} };
+    }
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 0.001);
+
+  await page.startScan();
+
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.equal(favoritesRequests, 1);
+  assert.equal(error?.diagnostic?.result?.status, 401);
+  assert.ok(!JSON.stringify(page.messages).includes('fixture-secret'));
+  assert.ok(!JSON.stringify(page.messages).includes('fixture-client-secret'));
 });
 
 test('Spotify source reader skips downloading the web-player bundle when seeded query hashes are available', async () => {

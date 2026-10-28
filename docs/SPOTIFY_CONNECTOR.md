@@ -30,6 +30,10 @@ Chrome MV3 connector читает персональную библиотеку 
 - Предыдущий smoke scan дошёл до конца Liked Songs и завис до подтверждённого snapshot; повторное чтение уже завершилось явным HTTP 401. Таймауты и progress прошли fixture-тесты, но не устраняют текущий live auth/API отказ.
 - Все Spotify API paths остаются экспериментальными. Fixtures не доказывают live поиск или запись в аккаунт. Автоматический matcher и пакетная orchestration существуют, но точность и скорость на тысячах треков ещё не измерены.
 
+## Recovery after HTTP 401
+
+Version `0.13.38` waits up to eight seconds for the Spotify page to issue a newer Pathfinder request after one 401. It retries once only if the page supplied a fresh session snapshot; otherwise it surfaces the original sanitized 401 and does not replay stale credentials. Header values remain in page memory and never enter diagnostics. This is a recovery hypothesis covered by fixtures, not a live-confirmed fix.
+
 ## Последняя live-проверка
 
 2026-10-28: read-only refresh на открытой странице Liked Songs завершился `fetchLibraryTracks: HTTP 401`; полный snapshot не создан. На странице не было видимых кнопок входа, но это не доказывает, что private Pathfinder-запрос принимает текущую сессию. Точный ответ сервера, заголовки, cookies и токены не извлекались. Причина 401 не установлена; каталоговые запросы и playlist items после ошибки не запускались. Требуется повторная проверка после явного обновления/входа в Spotify, без вывода о работоспособности по одному заголовку вкладки.

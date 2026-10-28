@@ -51,6 +51,7 @@ Upstream [`API_DOCUMENTATION.md`](https://github.com/Basil-AS/ZvukDownloader/blo
 - Zvuk target writer добавлен в extension версии `0.5.0`. Его private mutations fixture-tested, но live mutation и целевой read-back ещё не проверены; текущие операции могут поменяться вместе с web-клиентом.
 - Автоматизация использует только активную вкладку и её текущую пользовательскую сессию: сначала повторяет наблюдаемый GraphQL cursor-запрос, затем при необходимости fallback-ит на прокрутку страницы. Каждый продолженный запрос ограничен 45 секундами, а скан без прогресса завершается через две минуты. Это частный и изменяемый API; секреты сессии не читаются и не сохраняются.
 - Cursor reader и ожидание независимого счётчика проверены fixture-тестами. В последнем live read-only refresh extension→app handoff работал, но reader завершился без полного snapshot из-за ошибки каталога плейлистов.
+- Catalog reader prefers `hasNextPage` when present and falls back to `endCursor`; successful responses are no longer retained as an error diagnostic. A stalled next-page request is reported separately from malformed data. Fixtures cover cursor/boolean disagreement and the pagination-stall status; the live response shape still needs revalidation.
 - Перед массовым использованием нужны повторный live sweep и независимая сверка чисел/статусов на аккаунте.
 
 ## Последняя live-проверка

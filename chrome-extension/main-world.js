@@ -178,11 +178,11 @@
       httpStatus: Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? httpStatus : null,
       graphqlError: Boolean(payload?.errors?.length),
     };
-    if (operationName === 'getPaginatedCollectionAll' || operationName === 'getPaginatedCollectionAllSections') {
-      lastCollectionDiagnostic = diagnostic;
-    }
     if (!enabled || !payload || payload.errors?.length || (Number.isInteger(httpStatus) && httpStatus >= 400)) {
       if (enabled && ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(operationName)) {
+        if (operationName === 'getPaginatedCollectionAll' || operationName === 'getPaginatedCollectionAllSections') {
+          lastCollectionDiagnostic = diagnostic;
+        }
         stopAutoScroll();
         post('read-error', diagnostic);
       }
@@ -199,15 +199,27 @@
       const collection = payload.data?.paginatedCollectionAll || payload.data?.paginatedCollectionAllSections;
       const page = collection?.playlists;
       const items = Array.isArray(page) ? page : page?.items;
-      if (!Array.isArray(items)) return;
+      if (!Array.isArray(items)) {
+        lastCollectionDiagnostic = { ...diagnostic, invalidShape: true };
+        if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
+        return;
+      }
+      const pageInfo = page?.page || collection?.page || {};
+      const hasMore = typeof pageInfo.hasNextPage === 'boolean' ? pageInfo.hasNextPage : Boolean(pageInfo.endCursor);
+      if (hasMore && !pageInfo.endCursor) {
+        lastCollectionDiagnostic = { ...diagnostic, invalidPagination: true };
+        if (enabled) { stopAutoScroll(); post('read-error', lastCollectionDiagnostic); }
+        return;
+      }
+      lastCollectionDiagnostic = null;
       lastCollectionPageAt = Date.now();
-      lastCollectionHasMore = Boolean(page?.page?.endCursor);
+      lastCollectionHasMore = hasMore;
       const playlists = items.map((playlist) => ({
         id: String(playlist.id || ''),
         title: String(playlist.title || ''),
         trackCount: Number.isInteger(playlist.trackCount) ? playlist.trackCount : null,
       })).filter((playlist) => playlist.id && playlist.title);
-      post('playlist-list-page', { playlists, hasMore: Boolean(page?.page?.endCursor) });
+      post('playlist-list-page', { playlists, hasMore });
       if (!lastCollectionHasMore && location.pathname.startsWith('/collection')) {
         stopAutoScroll();
         post('collection-scroll-end');

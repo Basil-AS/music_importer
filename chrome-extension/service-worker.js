@@ -1196,7 +1196,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const error = status
         ? `Каталог плейлистов: ${operation || 'запрос'} вернул HTTP ${status}. Проверьте вход в Сбер.Звук и повторите сбор.`
         : operation
-          ? `Каталог плейлистов: запрос ${operation} ${message.graphqlError === true ? 'вернул GraphQL-ошибку' : message.invalidJson === true ? 'вернул не JSON' : 'не вернул ожидаемую страницу'}. Возможно, сервис изменил формат ответа.`
+          ? `Каталог плейлистов: запрос ${operation} ${message.graphqlError === true ? 'вернул GraphQL-ошибку' : message.invalidJson === true ? 'вернул не JSON' : message.invalidPagination === true ? 'вернул неполную пагинацию' : message.invalidShape === true ? 'вернул неожиданный формат' : 'не вернул ожидаемую страницу'}. Возможно, сервис изменил формат ответа.`
           : message.reason === 'pagination-stalled'
             ? 'Загрузка каталога остановилась до следующей страницы. Повторите сбор; если повторится, пришлите диагностику.'
             : 'Каталог не ответил за минуту. Проверьте, что Сбер.Звук загрузился, и повторите сбор.';
@@ -1220,6 +1220,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ? `Сбер.Звук вернул GraphQL-ошибку при запросе ${operation}. Повторите сбор; при повторе потребуется обновить коннектор.`
           : message.invalidJson === true
             ? `Сбер.Звук вернул не JSON при запросе ${operation}. Возможно, изменился API.`
+            : message.invalidPagination === true
+              ? `Сбер.Звук вернул неполную пагинацию при запросе ${operation}. Возможно, изменился API.`
             : `Сбер.Звук вернул неподдерживаемый ответ при запросе ${operation}. Возможно, изменился API.`;
       const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
       const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;

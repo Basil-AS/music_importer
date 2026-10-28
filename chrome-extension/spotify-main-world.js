@@ -12,6 +12,7 @@
     ['addToPlaylist', 'b907ad6b088d5bf7680fa81198996d58398c2d55dfcdf59fcc959e0be98a418a'],
   ]);
   let sessionHeaders = null;
+  let sessionHeaderGeneration = 0;
   let scanPromise = null;
   let lastScanDiagnostic = null;
   const scanQueryDiagnostics = new WeakMap();
@@ -123,6 +124,7 @@
         'client-token': clientToken,
         'app-platform': headers.get('app-platform') || 'WebPlayer',
       };
+      sessionHeaderGeneration += 1;
     }
     const body = typeof init?.body === 'string' ? init.body : null;
     if (!body) return;
@@ -226,11 +228,13 @@
 
   async function query(operationName, variables) {
     const startedAt = Date.now();
-    const headers = await waitForSession();
+    let headers = await waitForSession();
+    let headerGeneration = sessionHeaderGeneration;
     let hash = queryHashes.get(operationName);
     if (!hash) throw new Error(`В bundle Spotify не найден query hash для ${operationName}.`);
     let retries = 0;
     let hashRefreshes = 0;
+    let sessionRefreshes = 0;
     while (true) {
       await reserveQueryStart();
       let response;
@@ -253,6 +257,20 @@
         retries += 1;
         await waitForRateLimit(waitMs, operationName);
         continue;
+      }
+      if (response.status === 401 && sessionRefreshes < 1) {
+        sessionRefreshes += 1;
+        const message = 'Spotify отклонил запрос. Проверяем, обновилась ли сессия страницы…';
+        if (activeCommandId) transferProgress(message);
+        else post('scan-progress', { phase: 'auth-refresh', message });
+        for (let attempt = 0; attempt < 32 && sessionHeaderGeneration <= headerGeneration; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (sessionHeaderGeneration > headerGeneration && sessionHeaders) {
+          headers = sessionHeaders;
+          headerGeneration = sessionHeaderGeneration;
+          continue;
+        }
       }
       if (!response.ok) {
         emitScanDiagnostic(operationName, variables, startedAt, { status: response.status });

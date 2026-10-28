@@ -245,6 +245,36 @@ test('Zvuk playlist catalog read errors carry only safe operation and HTTP metad
   assert.ok(!JSON.stringify(error).includes('private response detail'));
 });
 
+test('Zvuk catalog distinguishes a successful first page from a stalled next page', async () => {
+  const page = makePage('/collection', () => ({
+    data: { paginatedCollectionAll: { playlists: { items: [], page: { endCursor: 'next-cursor' } } } },
+  }));
+  await page.request('getPaginatedCollectionAll', { first: 100, after: null });
+  await page.tickScrollAfter(13000);
+  const stall = page.messages.find((message) => message.type === 'collection-scroll-stall');
+  assert.equal(stall.reason, 'pagination-stalled');
+  assert.equal(stall.operation, undefined);
+  assert.equal(stall.httpStatus, undefined);
+  assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
+});
+
+test('Zvuk catalog prefers explicit hasNextPage over cursor presence', async () => {
+  const stopped = makePage('/collection', () => ({
+    data: { paginatedCollectionAll: { playlists: { items: [], page: { endCursor: 'stale-cursor', hasNextPage: false } } } },
+  }));
+  await stopped.request('getPaginatedCollectionAll', { first: 100, after: null });
+  assert.equal(stopped.messages.find((message) => message.type === 'playlist-list-page')?.hasMore, false);
+  assert.ok(stopped.messages.some((message) => message.type === 'collection-scroll-end'));
+
+  const incomplete = makePage('/collection', () => ({
+    data: { paginatedCollectionAll: { playlists: { items: [], page: { endCursor: null, hasNextPage: true } } } },
+  }));
+  await incomplete.request('getPaginatedCollectionAll', { first: 100, after: null });
+  const error = incomplete.messages.find((message) => message.type === 'read-error');
+  assert.equal(error.invalidPagination, true);
+  assert.equal(error.operation, 'getPaginatedCollectionAll');
+});
+
 test('Zvuk source reader keeps its deadline active while reading cursor response JSON', async () => {
   const page = makePage('/favorites', ({ payload }) => {
     if (payload.variables?.after) return { pendingBody: true };
