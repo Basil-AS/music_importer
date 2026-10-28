@@ -477,6 +477,16 @@
     return searchWithMetadataFallback(track, search);
   }
 
+  function targetCommandError(response, fallback) {
+    const error = new Error(response?.error || fallback);
+    const status = Number(response?.status);
+    if (Number.isInteger(status) && status >= 100 && status <= 599) error.status = status;
+    if (response?.retryAfter !== undefined && response?.retryAfter !== null) error.retryAfter = String(response.retryAfter);
+    const retryAfterMs = Number(response?.retryAfterMs);
+    if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) error.retryAfterMs = retryAfterMs;
+    return error;
+  }
+
   const appleCatalogAdapter = {
     id: 'apple-music',
     maxConcurrentSearches: 2,
@@ -490,7 +500,7 @@
         query: `isrc:${isrcs.join(',')}`,
         storefront: context.storefront || $('#storefront').value,
       }, 'apple');
-      if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось пакетно найти ISRC в каталоге Apple Music.');
+      if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось пакетно найти ISRC в каталоге Apple Music.');
       const candidatesByIsrc = new Map(isrcs.map((isrc) => [isrc, []]));
       for (const candidate of response.results) {
         const isrc = window.MusicMatcher.normalizeISRC(candidate?.isrc || '');
@@ -506,7 +516,7 @@
             entity: 'song', limit: '15', country: context.storefront || $('#storefront').value,
           });
           const response = await fetch(`https://itunes.apple.com/search?${params}`);
-          if (!response.ok) throw new Error(`Каталог Apple ответил ${response.status}`);
+          if (!response.ok) throw targetCommandError({ status: response.status, retryAfter: response.headers.get('retry-after') }, `Каталог Apple ответил ${response.status}`);
           const payload = await response.json();
           return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
         });
@@ -516,7 +526,7 @@
           query,
           storefront: context.storefront || $('#storefront').value,
         }, 'apple');
-        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Apple Music.');
+        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Apple Music.');
         return response.results.filter((item) => item.trackId && item.trackViewUrl).slice(0, 25);
       });
     },
@@ -528,7 +538,7 @@
     async searchTracks(track) {
       return searchWithMetadataFallback(track, async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query });
-        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Яндекс Музыки.');
+        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Яндекс Музыки.');
         return response.results;
       });
     },
@@ -540,7 +550,7 @@
     async searchTracks(track) {
       return searchWithMetadataFallback(track, async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query }, 'zvuk');
-        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Звука.');
+        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Звука.');
         return response.results;
       });
     },
@@ -552,7 +562,7 @@
     async searchTracks(track) {
       return searchWithExactIsrc(track, 'spotify', async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query }, 'spotify');
-        if (!response?.ok || !Array.isArray(response.results)) throw new Error(response?.error || 'Не удалось получить каталог Spotify.');
+        if (!response?.ok || !Array.isArray(response.results)) throw targetCommandError(response, 'Не удалось получить каталог Spotify.');
         return response.results;
       });
     },
@@ -592,7 +602,7 @@
         }).then((response) => {
           clearTimeout(timeout);
           extensionAppPort.onMessage.removeListener(onProgressMessage);
-          if (response?.ok === false && response?.error) reject(new Error(response.error));
+          if (response?.ok === false && response?.error) reject(targetCommandError(response, 'Сервис не выполнил команду.'));
           else resolve(response || { ok: false, error: 'Сервис не вернул результат.' });
         }, (error) => {
           clearTimeout(timeout);

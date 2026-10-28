@@ -18,7 +18,10 @@
         ...(init.headers || {}),
       },
     });
-    if (!response.ok) throw new Error(`Яндекс Музыка: HTTP ${response.status} для ${path.split('?')[0]}`);
+    if (!response.ok) throw Object.assign(new Error(`Яндекс Музыка: HTTP ${response.status} для ${path.split('?')[0]}`), {
+      status: response.status,
+      retryAfter: response.headers?.get?.('retry-after') || null,
+    });
     const payload = await response.json();
     if (payload?.error) throw new Error(`Яндекс Музыка: ${String(payload.error.message || payload.error.name || 'ошибка API')}`);
     return payload?.result ?? payload;
@@ -354,7 +357,12 @@
         const results = await searchTracks(event.data.query);
         post('command-response', { requestId, ok: true, results });
       } catch (error) {
-        post('command-response', { requestId, ok: false, error: error instanceof Error ? error.message : 'Поиск Яндекс Музыки не выполнен.' });
+        post('command-response', {
+          requestId, ok: false,
+          error: error instanceof Error ? error.message : 'Поиск Яндекс Музыки не выполнен.',
+          status: Number(error?.status) || null,
+          retryAfter: error?.retryAfter || null,
+        });
       }
       return;
     }

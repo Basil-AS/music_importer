@@ -19,6 +19,7 @@ function makePage(respond) {
       return {
         ok: result.status === undefined || (result.status >= 200 && result.status < 300),
         status: result.status || 200,
+        headers: { get: (name) => result.headers?.[String(name).toLowerCase()] || null },
         json: async () => result.payload ?? result,
       };
     },
@@ -60,6 +61,15 @@ test('Zvuk search returns provider IDs and normalized candidate metadata', async
   assert.equal(response.results[0].providerId, 'zvuk-1');
   assert.equal(response.results[0].collectionId, 'release-1');
   assert.equal(response.results[0].artistName, 'Artist');
+});
+
+test('Zvuk catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
+  const page = makePage(() => ({ status: 429, headers: { 'retry-after': '11' }, payload: {} }));
+  const response = await page.command('search-tracks', { query: 'Limited Song Artist' });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.status, 429);
+  assert.equal(response.retryAfter, '11');
 });
 
 test('Zvuk favorites write is idempotent and confirmed by cursor read-back', async () => {

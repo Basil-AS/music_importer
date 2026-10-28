@@ -110,6 +110,37 @@ test('catalog search waits longer after rate limiting and does not retry permane
   assert.match(result.error.message, /401/);
 });
 
+test('catalog search honors Retry-After seconds and HTTP-date values on 429', async () => {
+  const seconds = loadEngine();
+  let secondsAttempts = 0;
+  await seconds.engine.searchMany({
+    id: 'spotify',
+    async searchTracks() {
+      secondsAttempts += 1;
+      if (secondsAttempts === 1) throw Object.assign(new Error('Spotify: HTTP 429.'), { status: 429, retryAfter: '7' });
+      return [];
+    },
+  }, [{ title: 'Song', artist: 'Artist' }], { maxRetries: 1 });
+  assert.deepEqual(seconds.delays, [7000]);
+
+  const date = loadEngine();
+  let dateAttempts = 0;
+  const retryAt = Date.now() + 6000;
+  await date.engine.searchMany({
+    id: 'yandex-music',
+    async searchTracks() {
+      dateAttempts += 1;
+      if (dateAttempts === 1) throw Object.assign(new Error('Яндекс Музыка: HTTP 429.'), {
+        status: 429,
+        retryAfter: new Date(retryAt).toUTCString(),
+      });
+      return [];
+    },
+  }, [{ title: 'Song', artist: 'Artist' }], { maxRetries: 1 });
+  assert.equal(date.delays[0] >= 2500, true);
+  assert.equal(date.delays[0] <= 6000, true);
+});
+
 test('batch catalog search preserves order and individually retries missing ISRC results', async () => {
   const { engine } = loadEngine();
   let batchCalls = 0;

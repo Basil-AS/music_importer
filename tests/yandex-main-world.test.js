@@ -21,6 +21,7 @@ function makePage(fetchHandler) {
       return {
         ok: response.status === undefined || (response.status >= 200 && response.status < 300),
         status: response.status || 200,
+        headers: { get: (name) => response.headers?.[String(name).toLowerCase()] || null },
         json: async () => response.payload ?? response,
       };
     },
@@ -115,6 +116,16 @@ test('Yandex catalog search normalizes candidate IDs, album, ISRC, and URL', asy
     ['target-1', 'album-target-1', 'USABC1234567'],
   ]);
   assert.equal(response.results[0].trackViewUrl, 'https://music.yandex.ru/album/album-target-1/track/target-1');
+});
+
+test('Yandex catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
+  const page = makePage(async () => ({ status: 429, headers: { 'retry-after': '9' }, payload: {} }));
+  await page.dispatch('search-tracks', { query: 'Limited Song Artist' });
+  const response = page.messages.find((message) => message.type === 'command-response');
+
+  assert.equal(response.ok, false);
+  assert.equal(response.status, 429);
+  assert.equal(response.retryAfter, '9');
 });
 
 test('Yandex target writer adds and verifies favorites and ordered playlist tracks', async () => {

@@ -13,6 +13,8 @@
       resolve({
         ok: detail.ok === true,
         error: detail.error || null,
+        status: detail.status || null,
+        retryAfter: detail.retryAfter || null,
         results: detail.result && Array.isArray(detail.result) ? detail.result : null,
         report: detail.result && !Array.isArray(detail.result) ? detail.result : detail.report || null,
       });

@@ -10,6 +10,15 @@
     window.postMessage({ source: marker, type, ...detail }, location.origin);
   }
 
+  function retryAfterDelay(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  }
+
   function headerBag(input, init) {
     try {
       const headers = new Headers(input instanceof Request ? input.headers : undefined);
@@ -76,7 +85,7 @@
       init.body = JSON.stringify(options.body);
     }
     let response;
-    const retryable = method === 'GET';
+    const retryable = method === 'GET' && options.retry !== false;
     const attempts = retryable ? 4 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
@@ -88,11 +97,14 @@
       }
       if (response.ok) break;
       if (!retryable || (response.status !== 429 && response.status < 500) || attempt === attempts - 1) {
-        throw new Error(`Apple Music: HTTP ${response.status} для ${method} ${url.pathname}.`);
+        throw Object.assign(new Error(`Apple Music: HTTP ${response.status} для ${method} ${url.pathname}.`), {
+          status: response.status,
+          retryAfter: response.headers.get('retry-after') || null,
+        });
       }
-      const retryAfter = Number(response.headers.get('retry-after'));
-      const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * (2 ** attempt);
-      await new Promise((resolve) => setTimeout(resolve, Math.min(delay, 10000)));
+      const retryAfter = retryAfterDelay(response.headers.get('retry-after'));
+      const delay = retryAfter === null ? 500 * (2 ** attempt) : retryAfter;
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
     if (!response?.ok) throw new Error('Apple Music не ответил после повторных попыток.');
     if (response.status === 202 || response.status === 204) return { data: [] };
@@ -232,7 +244,8 @@
       ? new URLSearchParams({ 'filter[isrc]': isrcQuery[1].toUpperCase(), limit: '25' })
       : new URLSearchParams({ term, types: 'songs', limit: '25' });
     const path = isrcQuery ? `/v1/catalog/${country}/songs?${params}` : `/v1/catalog/${country}/search?${params}`;
-    const result = await request(path, { allowCatalog: true });
+    // Let the shared library-search engine enforce the catalog's Retry-After delay.
+    const result = await request(path, { allowCatalog: true, retry: false });
     const songs = isrcQuery ? result?.data : result?.results?.songs?.data;
     if (!Array.isArray(songs)) throw new Error('Каталог Apple Music вернул неожиданный формат поиска.');
     return songs.map(normalizeCatalogSong);
@@ -395,6 +408,8 @@
         post('command-result', {
           requestId, ok: false,
           error: error instanceof Error ? error.message : 'Не удалось выполнить команду Apple Music.',
+          status: Number(error?.status) || null,
+          retryAfter: error?.retryAfter || null,
           report: error?.transferReport || null,
         });
       }

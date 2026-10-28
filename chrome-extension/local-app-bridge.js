@@ -57,6 +57,8 @@
           requestId,
           ok: response?.ok === true,
           error: response?.error || null,
+          status: response?.status || null,
+          retryAfter: response?.retryAfter || null,
           results: response?.results || null,
           report: response?.report || null,
         }, location.origin);
@@ -84,6 +86,8 @@
           requestId,
           ok: response?.ok === true,
           error: response?.error || null,
+          status: response?.status || null,
+          retryAfter: response?.retryAfter || null,
           results: response?.results || null,
           report: response?.report || null,
         }, location.origin);
@@ -110,6 +114,8 @@
           requestId,
           ok: response?.ok === true,
           error: response?.error || null,
+          status: response?.status || null,
+          retryAfter: response?.retryAfter || null,
           results: response?.results || null,
           report: response?.report || null,
         }, location.origin);
@@ -136,6 +142,8 @@
           requestId,
           ok: response?.ok === true,
           error: response?.error || null,
+          status: response?.status || null,
+          retryAfter: response?.retryAfter || null,
           results: response?.results || null,
           report: response?.report || null,
         }, location.origin);

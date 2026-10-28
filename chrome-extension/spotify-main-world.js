@@ -18,6 +18,15 @@
     window.postMessage({ source: marker, type, ...detail }, location.origin);
   }
 
+  function retryAfterDelay(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  }
+
   function transferProgress(message) {
     if (activeCommandId) post('transfer-progress', { requestId: activeCommandId, progress: { message } });
   }
@@ -113,13 +122,16 @@
         body: JSON.stringify({ variables, operationName, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
       });
       if (response.status === 429 && retries < 4) {
-        const retryAfter = Number(response.headers.get('retry-after'));
-        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * (2 ** retries);
+        const retryAfter = retryAfterDelay(response.headers.get('retry-after'));
+        const waitMs = retryAfter === null ? 1000 * (2 ** retries) : retryAfter;
         retries += 1;
-        await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 60000)));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
         continue;
       }
-      if (!response.ok) throw new Error(`${operationName}: HTTP ${response.status}`);
+      if (!response.ok) throw Object.assign(new Error(`${operationName}: HTTP ${response.status}`), {
+        status: response.status,
+        retryAfter: response.headers.get('retry-after') || null,
+      });
       const payload = await response.json();
       if (payload.errors?.length) {
         const errorMessage = String(payload.errors[0]?.message || 'ошибка GraphQL');
@@ -252,7 +264,10 @@
     const response = await originalFetch.call(window, `https://api.spotify.com/v1/search?${params}`, {
       method: 'GET', credentials: 'include', headers: { ...headers, Accept: 'application/json' },
     });
-    if (!response.ok) throw new Error(`Каталог Spotify: HTTP ${response.status}.`);
+    if (!response.ok) throw Object.assign(new Error(`Каталог Spotify: HTTP ${response.status}.`), {
+      status: response.status,
+      retryAfter: response.headers?.get?.('retry-after') || null,
+    });
     const payload = await response.json();
     if (!Array.isArray(payload?.tracks?.items)) throw new Error('Spotify вернул неожиданный ответ каталога.');
     return payload.tracks.items.map(spotifyCandidate).filter(Boolean);
@@ -413,7 +428,14 @@
         : await executeTransfer(event.data.plan);
       post('command-result', { requestId, ok: true, result });
     } catch (error) {
-      post('command-result', { requestId, ok: false, error: error instanceof Error ? error.message : 'Команда Spotify не выполнена.', report: error?.transferReport || null });
+      post('command-result', {
+        requestId,
+        ok: false,
+        error: error instanceof Error ? error.message : 'Команда Spotify не выполнена.',
+        status: Number(error?.status) || null,
+        retryAfter: error?.retryAfter || null,
+        report: error?.transferReport || null,
+      });
     } finally {
       if (activeCommandId === requestId) activeCommandId = '';
     }

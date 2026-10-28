@@ -31,6 +31,17 @@
     return error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(error?.message || error || ''));
   }
 
+  function retryAfterDelay(error) {
+    const milliseconds = Number(error?.retryAfterMs);
+    if (Number.isFinite(milliseconds) && milliseconds >= 0) return milliseconds;
+    const value = String(error?.retryAfter ?? error?.headers?.get?.('retry-after') ?? '').trim();
+    if (!value) return null;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(value);
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  }
+
   function waitForRetry(delayMs, signal) {
     if (signal?.aborted) return Promise.reject(new DOMException('Поиск отменён', 'AbortError'));
     return new Promise((resolve, reject) => {
@@ -61,7 +72,9 @@
         if (attempt >= maxRetries || !retryableSearchError(error)) throw error;
         const status = searchStatus(error);
         const baseDelay = status === 429 ? 2500 : 500;
-        const delayMs = Math.min(30000, baseDelay * (2 ** attempt));
+        const backoffMs = Math.min(30000, baseDelay * (2 ** attempt));
+        const serverDelayMs = status === 429 ? retryAfterDelay(error) : null;
+        const delayMs = serverDelayMs === null ? backoffMs : Math.max(backoffMs, serverDelayMs);
         await waitForRetry(delayMs, options.signal);
       }
     }

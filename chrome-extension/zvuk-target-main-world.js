@@ -40,7 +40,10 @@
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ operationName, query, variables }),
     });
-    if (!response.ok) throw new Error(`Звук: GraphQL ${operationName} ответил HTTP ${response.status}.`);
+    if (!response.ok) throw Object.assign(new Error(`Звук: GraphQL ${operationName} ответил HTTP ${response.status}.`), {
+      status: response.status,
+      retryAfter: response.headers?.get?.('retry-after') || null,
+    });
     let payload;
     try { payload = await response.json(); }
     catch { throw new Error(`Звук: GraphQL ${operationName} вернул не JSON.`); }
@@ -220,7 +223,12 @@
         const results = await searchTracks(event.data.query);
         post('command-response', { requestId, ok: true, results });
       } catch (error) {
-        post('command-response', { requestId, ok: false, error: error instanceof Error ? error.message : 'Поиск в Звуке не выполнен.' });
+        post('command-response', {
+          requestId, ok: false,
+          error: error instanceof Error ? error.message : 'Поиск в Звуке не выполнен.',
+          status: Number(error?.status) || null,
+          retryAfter: error?.retryAfter || null,
+        });
       }
     }
     if (event.data.type === 'execute-transfer') {

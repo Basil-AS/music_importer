@@ -19,7 +19,7 @@ function makePage(respond) {
       return {
         ok: result.status === undefined || (result.status >= 200 && result.status < 300),
         status: result.status || 200,
-        headers: { get: () => null },
+        headers: { get: (name) => result.headers?.[String(name).toLowerCase()] || null },
         json: async () => result.payload ?? result,
         text: async () => JSON.stringify(result.payload ?? result),
       };
@@ -79,6 +79,22 @@ test('Spotify catalog search uses session-bound Web Player request and normalize
   assert.equal(response.result[0].uri, 'spotify:track:target1');
   assert.equal(response.result[0].artistName, 'Artist');
   assert.equal(response.result[0].isrc, 'USABC1234567');
+});
+
+test('Spotify catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
+  const page = makePage((request) => {
+    if (request.url.startsWith('https://api-partner.spotify.com/')) return { payload: { data: {} } };
+    if (request.url.startsWith('https://api.spotify.com/v1/search?')) {
+      return { status: 429, headers: { 'retry-after': '8' }, payload: {} };
+    }
+    throw new Error(`Unexpected URL: ${request.url}`);
+  });
+  await page.captureSession();
+  const response = await page.command('search-tracks', { query: 'Limited Song Artist' });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.status, 429);
+  assert.equal(response.retryAfter, '8');
 });
 
 test('Spotify writer skips existing likes, batches new likes and verifies read-back', async () => {

@@ -20,7 +20,7 @@ function makePage(fixtures, userTokenHeader = 'music-user-token') {
       if (!fixture) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
       const response = typeof fixture === 'function' ? fixture({ url: String(url), init, requests }) : fixture;
       const status = response?.status || 200;
-      return { ok: status >= 200 && status < 300, status, headers: new Headers(), json: async () => response?.payload ?? response };
+      return { ok: status >= 200 && status < 300, status, headers: new Headers(response?.headers || {}), json: async () => response?.payload ?? response };
     },
   };
   const context = {
@@ -137,6 +137,22 @@ test('Apple catalog search returns catalog song IDs without exposing session hea
   assert.equal(result.result[0].trackName, 'One More Time');
   assert.ok(page.requests[1].url.startsWith('https://amp-api.music.apple.com/v1/catalog/ae/search?'));
   assert.ok(!JSON.stringify(page.messages).includes(page.token));
+});
+
+test('Apple catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
+  const page = makePage({
+    'GET /v1/catalog/ae/search?term=Limited+Song&types=songs&limit=25': {
+      status: 429,
+      headers: { 'retry-after': '6' },
+      payload: {},
+    },
+  });
+  const result = await page.command('search-tracks', { query: 'Limited Song', storefront: 'AE' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 429);
+  assert.equal(result.retryAfter, '6');
+  assert.equal(page.requests.filter((request) => request.url.includes('/v1/catalog/ae/search?')).length, 1);
 });
 
 test('Apple catalog search accepts a batch of ISRCs and keeps each result ISRC', async () => {

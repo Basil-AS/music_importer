@@ -10,7 +10,14 @@
       const respond = pendingCommands.get(String(detail.requestId || ''));
       if (!respond) return;
       pendingCommands.delete(String(detail.requestId));
-      respond({ ok: detail.ok === true, error: detail.error || null, results: Array.isArray(detail.result) ? detail.result : null, report: Array.isArray(detail.result) ? null : detail.result || detail.report || null });
+      respond({
+        ok: detail.ok === true,
+        error: detail.error || null,
+        status: detail.status || null,
+        retryAfter: detail.retryAfter || null,
+        results: Array.isArray(detail.result) ? detail.result : null,
+        report: Array.isArray(detail.result) ? null : detail.result || detail.report || null,
+      });
       return;
     }
     if (type === 'transfer-progress') {
