@@ -17,3 +17,9 @@ These are private, reverse-engineered GraphQL routes, not a supported public API
 Zvuk's [official migration guide](https://help.zvuk.com/article/42207) currently supports importing selected playlists from Apple Music, Spotify, Yandex Music, VK, Deezer, and YouTube Music, using provider login or a playlist link depending on source. It creates a separate playlist and imports only tracks present in Zvuk's catalog; it does not add them to favorites. The same guide says exporting a Zvuk library is not supported. This is a useful supported fallback for playlist→Zvuk when a user accepts the service's UI, but it does not replace the writer's favorites path or any Zvuk source connector.
 
 For a first live validation, use a disposable, complete source snapshot and a small transfer after inspecting the exact confirmation summary. Confirm the resulting likes and playlist in Zvuk before using the connector for a large library.
+
+## Albums (releases), fixture-only
+
+- Plans with `operation: "add_album"` (collection type `albums`, or `library` alongside tracks) are written as releases, never expanded into favorite tracks. Existing saved releases are read with `getCollectionIds { collection { releases { id } } }`; only missing IDs are sent, in batches of 100, through `collection.addItems(items: [{ id, type: RELEASE_ITEM_TYPE }])`. The type is an unconfirmed constant (`'release'`).
+- Before the first album mutation the writer saves a local checkpoint (`phase: "albums-writing"`); if it is not acknowledged the account is left untouched. The run is idempotent (re-running adds nothing) and ends with a read-back that must find every planned release ID, otherwise the report is `partial_failure`. `report.albums` holds `{requested, added, alreadyPresent, verified}`.
+- Favorite-track operations in an `albums` plan are ignored; the album path never calls track mutations. Not live-verified.
