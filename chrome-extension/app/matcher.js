@@ -159,6 +159,31 @@
       .replace(/\s+(?:feat\.?|featuring|ft\.?)\s+.*$/i, ' ');
   }
 
+  function featuredArtistCredit(value) {
+    const match = String(value || '').match(/\b(?:feat\.?|featuring|ft\.?)\s+(.+?)(?=[)\]}]|$)/i);
+    return match?.[1]?.trim() || '';
+  }
+
+  function featuredArtistConflict(sourceTitle, targetTitle) {
+    const names = (value) => featuredArtistCredit(value).split(/\s*(?:,|;|&|\band\b|\bwith\b)\s*/i)
+      .map(normalizeText).filter(Boolean);
+    const sourceCredits = names(sourceTitle);
+    const targetCredits = names(targetTitle);
+    if (!sourceCredits.length || !targetCredits.length) return false;
+    return !sourceCredits.some((sourceName) => targetCredits.some((targetName) => similarity(sourceName, targetName) >= 0.82));
+  }
+
+  function titleSearchKeys(value) {
+    const original = String(value || '');
+    const withoutFeatures = titleWithoutFeatureCredits(original);
+    return [...new Set([
+      normalizeText(original),
+      normalizeText(romanize(original)),
+      normalizeText(withoutFeatures),
+      normalizeText(romanize(withoutFeatures)),
+    ].filter(Boolean))];
+  }
+
   function artistScore(sourceArtist, candidateArtist) {
     const splitCredits = (value) => {
       const names = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '') : [String(value || '')];
@@ -200,16 +225,18 @@
   }
 
   function scoreCandidate(source, candidate) {
+    const candidateTitle = candidate.trackName || candidate.title || candidate.name;
+    const featuredConflict = featuredArtistConflict(source.title || source.name, candidateTitle);
     const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
     const candidateISRC = normalizeISRC(candidate.isrc || candidate.ISRC || candidate.externalIds?.isrc);
     if (sourceISRC && candidateISRC && sourceISRC === candidateISRC) {
-      return { score: 1, exactISRC: true, isrcConflict: false, versionConflict: hasVersionConflict(source, candidate) };
+      return { score: 1, exactISRC: true, isrcConflict: false, versionConflict: hasVersionConflict(source, candidate), featuredConflict };
     }
     const isrcConflict = Boolean(sourceISRC && candidateISRC && sourceISRC !== candidateISRC);
 
     const title = similarity(
       titleWithoutFeatureCredits(source.title),
-      titleWithoutFeatureCredits(candidate.trackName || candidate.title || candidate.name),
+      titleWithoutFeatureCredits(candidateTitle),
     );
     const artist = artistScore(source.artist, candidate.artistName || candidate.artist || candidate.artists);
     const sourceAlbum = source.album || '';
@@ -223,7 +250,7 @@
     if (album !== null) { total += album * 0.04; weight += 0.04; }
     if (duration !== null) { total += duration * 0.04; weight += 0.04; }
     const score = Math.max(0, Math.min(0.98, total / weight - (versionConflict ? 0.2 : 0)));
-    return { score, exactISRC: false, isrcConflict, versionConflict, titleScore: title, artistScore: artist, durationScore: duration };
+    return { score, exactISRC: false, isrcConflict, versionConflict, featuredConflict, titleScore: title, artistScore: artist, durationScore: duration };
   }
 
   function candidateISRC(candidate) {
@@ -265,13 +292,13 @@
     const metadataDuplicates = Boolean(!bestISRC && closeRivals.length > 1
       && closeRivals.every((candidate) => !candidateISRC(candidate.candidate) && sameMetadataRecording(source, candidate.candidate)));
     const sameRecordingDuplicates = sameISRCDuplicates || metadataDuplicates;
-    const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && (best.exactISRC
+    const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && !best.featuredConflict && (best.exactISRC
       || (best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
     return {
       best: best?.candidate || null,
       confidence: best?.score || 0,
       automatic,
-      reason: !best ? 'no_candidates' : (best.versionConflict || best.isrcConflict) ? 'manual_review'
+      reason: !best ? 'no_candidates' : (best.versionConflict || best.isrcConflict || best.featuredConflict) ? 'manual_review'
         : best.exactISRC ? 'exact_isrc'
         : sameISRCDuplicates && automatic ? 'catalog_duplicates_same_isrc'
           : metadataDuplicates && automatic ? 'catalog_duplicates_same_metadata'
@@ -281,5 +308,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, catalogSearchGroupKey, propagateSourceMatch, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, catalogSearchGroupKey, propagateSourceMatch, romanize, detransliterate, titleSearchKeys, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();

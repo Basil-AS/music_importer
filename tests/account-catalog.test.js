@@ -140,6 +140,33 @@ test('target account metadata auto-matches exact-title transliterations only abo
   assert.equal(resolution.unresolved.includes(ambiguous), true);
 });
 
+test('target account matching finds equivalent titles when only one service embeds featured artists in the title', () => {
+  const accountCatalog = loadAccountCatalog();
+  const index = accountCatalog.buildIndex({
+    service: 'spotify',
+    completeness: { confirmed: true },
+    tracks: [{
+      id: 'spotify:track:featured',
+      title: 'Song',
+      artists: ['Main Artist', 'Guest Artist'],
+      album: { name: 'Album' },
+      durationMs: 180000,
+      isrc: '',
+    }],
+    playlists: [],
+  }, 'spotify');
+  const source = {
+    title: 'Song (feat. Guest Artist)',
+    artist: 'Main Artist',
+    album: 'Album',
+    durationMs: 180200,
+  };
+  const resolution = accountCatalog.resolveTracks([source], index);
+
+  assert.equal(resolution.matches.get(source)?.[0]?.trackId, 'spotify:track:featured');
+  assert.equal(resolution.unresolved.length, 0);
+});
+
 test('Zvuk release metadata preserves live-version conflicts in no-ISRC account matching', () => {
   const accountCatalog = loadAccountCatalog();
   const index = accountCatalog.buildIndex({

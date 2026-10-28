@@ -62,6 +62,24 @@ test('matching ignores featured-title decoration but keeps recording-version che
   assert.equal(differentVersion.automatic, false);
 });
 
+test('matching keeps explicitly different featured artists in the manual-review queue', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song (feat. Guest Artist)', artist: 'Main Artist', album: 'Album', durationMs: 180000 },
+    [{
+      trackId: 'other-feature',
+      trackName: 'Song (feat. Different Guest)',
+      artistName: 'Main Artist',
+      collectionName: 'Album',
+      trackTimeMillis: 180000,
+    }],
+  );
+
+  assert.equal(result.ranked[0].featuredConflict, true);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'manual_review');
+});
+
 test('an exact ISRC does not auto-select a conflicting recording version', () => {
   const matcher = loadMatcher();
   const result = matcher.suggestBestMatch(

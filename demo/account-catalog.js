@@ -54,7 +54,7 @@
         candidates.push(candidate);
         index.set(candidate.isrc, candidates);
       }
-      const titleKeys = new Set([
+      const titleKeys = new Set(window.MusicMatcher?.titleSearchKeys(candidate.trackName) || [
         normalizeTitle(candidate.trackName),
         normalizeTitle(window.MusicMatcher?.romanize(candidate.trackName) || candidate.trackName),
       ].filter(Boolean));
@@ -85,9 +85,10 @@
         matches.set(track, isrcCandidates);
         continue;
       }
-      const titleKeys = new Set([
-        normalizeTitle(track?.title || track?.trackName || track?.name),
-        normalizeTitle(window.MusicMatcher?.romanize(track?.title || track?.trackName || track?.name) || track?.title || track?.trackName || track?.name),
+      const title = track?.title || track?.trackName || track?.name;
+      const titleKeys = new Set(window.MusicMatcher?.titleSearchKeys(title) || [
+        normalizeTitle(title),
+        normalizeTitle(window.MusicMatcher?.romanize(title) || title),
       ].filter(Boolean));
       const titleCandidates = [...new Map([...titleKeys].flatMap((key) => index.byTitle?.get(key) || [])
         .map((candidate) => [candidate.trackId, candidate])).values()];
