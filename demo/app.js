@@ -380,26 +380,49 @@
 
   async function searchWithMetadataFallback(track, search) {
     const queries = window.MusicMatcher.buildSearchQueries(track);
+    track.searchExpansionComplete = false;
     const primaryCandidates = await search(queries.primary);
-    if (!queries.fallback || !Array.isArray(primaryCandidates) || !primaryCandidates.length) {
-      if (!primaryCandidates.length && queries.fallback) return search(queries.fallback);
-      return primaryCandidates;
-    }
-
-    // Catalogs often return something for a title+artist+album query even when
-    // the correct recording is absent from the first page. Expand only when
-    // the first page does not already contain a safe automatic match.
-    if (window.MusicMatcher.suggestBestMatch(track, primaryCandidates).automatic) return primaryCandidates;
-
-    let fallbackCandidates = [];
-    try { fallbackCandidates = await search(queries.fallback); }
-    catch { return primaryCandidates; }
     const unique = new Map();
-    for (const candidate of [...primaryCandidates, ...(Array.isArray(fallbackCandidates) ? fallbackCandidates : [])]) {
-      const id = candidate?.trackId ?? candidate?.providerId ?? candidate?.id;
-      const key = id ? `id:${id}` : `metadata:${[candidate?.trackName || candidate?.title || candidate?.name, candidate?.artistName || candidate?.artist, candidate?.collectionName || candidate?.album].map((value) => String(value || '').toLocaleLowerCase().trim()).join('|')}`;
-      if (!unique.has(key)) unique.set(key, candidate);
+    const addCandidates = (candidates) => {
+      for (const candidate of Array.isArray(candidates) ? candidates : []) {
+        const id = candidate?.trackId ?? candidate?.providerId ?? candidate?.id;
+        const key = id ? `id:${id}` : `metadata:${[candidate?.trackName || candidate?.title || candidate?.name, candidate?.artistName || candidate?.artist, candidate?.collectionName || candidate?.album].map((value) => String(value || '').toLocaleLowerCase().trim()).join('|')}`;
+        if (!unique.has(key)) unique.set(key, candidate);
+      }
+    };
+    addCandidates(primaryCandidates);
+
+    const artists = Array.isArray(track.artists)
+      ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(' ')
+      : String(track.artist || '');
+    const romanized = track.manualQuery ? '' : [track.title, artists].map((value) => window.MusicMatcher.romanize(value)).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const normalizeQuery = (value) => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+    const expandedQueries = [...new Set([queries.fallback, romanized]
+      .map((query) => String(query || '').trim())
+      .filter((query) => query && normalizeQuery(query) !== normalizeQuery(queries.primary)))];
+
+    // Catalogs can return irrelevant results even for a precise query. Expand
+    // only while no candidate reaches the existing safe auto-match threshold.
+    let expansionFailed = false;
+    let reachedSafeMatch = false;
+    for (const query of expandedQueries) {
+      if (window.MusicMatcher.suggestBestMatch(track, [...unique.values()]).automatic) {
+        reachedSafeMatch = true;
+        break;
+      }
+      try {
+        addCandidates(await search(query));
+        if (window.MusicMatcher.suggestBestMatch(track, [...unique.values()]).automatic) {
+          reachedSafeMatch = true;
+          break;
+        }
+      } catch {
+        // Keep usable first-page results. Mark the expansion incomplete so a
+        // later run can retry the query that failed.
+        expansionFailed = true;
+      }
     }
+    track.searchExpansionComplete = reachedSafeMatch || !expansionFailed;
     return [...unique.values()];
   }
 
@@ -408,7 +431,10 @@
     if (!isrcQuery) return searchWithMetadataFallback(track, search);
     const isrc = isrcQuery.slice('isrc:'.length);
     const exactCandidates = await search(isrcQuery);
-    if (exactCandidates.some((candidate) => candidateHasIsrc(candidate, isrc))) return exactCandidates;
+    if (exactCandidates.some((candidate) => candidateHasIsrc(candidate, isrc))) {
+      track.searchExpansionComplete = true;
+      return exactCandidates;
+    }
     return searchWithMetadataFallback(track, search);
   }
 
@@ -713,6 +739,12 @@
         track.cachedResults = true;
         applySuggestion(track);
         restoreMatchDecision(track, savedDecisions);
+        track.searchExpansionComplete = cached.searchExpansionComplete === true;
+        if (track.matches.length && !track.match && !track.userExcluded && !track.searchExpansionComplete) {
+          track.searching = true;
+          pendingSearch.push(track);
+          continue;
+        }
         if (track.autoMatched && track.match) {
           track.cachedMatch = true;
         }

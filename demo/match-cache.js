@@ -100,6 +100,7 @@
       targetProvider: String(targetProvider),
       storefront: targetProvider === 'apple-music' ? String(storefront || '').toUpperCase() : '',
       candidates,
+      searchExpansionComplete: track.searchExpansionComplete === true,
       resultKind: candidates.length ? 'candidates' : 'no-results',
       updatedAt: now,
       expiresAt: now + (candidates.length ? expiresAfterMs : noResultExpiresAfterMs),

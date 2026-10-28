@@ -158,5 +158,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, romanize, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();
