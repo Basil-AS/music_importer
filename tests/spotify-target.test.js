@@ -38,7 +38,7 @@ function makePage(respond) {
   const context = {
     window, location, URL, URLSearchParams, Headers, Request, Promise, Map, Set,
     String, Number, Array, Object, Error, JSON, Date, RegExp, Math,
-    setTimeout, clearTimeout,
+    setTimeout, clearTimeout, AbortController,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/spotify-main-world.js'), 'utf8'), context);
   return {

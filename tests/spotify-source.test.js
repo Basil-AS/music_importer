@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const origin = 'https://open.spotify.com';
 const endpoint = 'https://api-partner.spotify.com/pathfinder/v2/query';
 
-function makePage(respond) {
+function makePage(respond, timerScale = 1) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
@@ -32,7 +32,8 @@ function makePage(respond) {
   const context = {
     window, location, document, URL, URLSearchParams, Headers, Request, Promise, Map, Set,
     String, Number, Array, Object, Error, JSON, Date, RegExp, Math,
-    setTimeout, clearTimeout, setImmediate,
+    setTimeout: (callback, delay, ...args) => setTimeout(callback, delay * timerScale, ...args), clearTimeout, setImmediate,
+    AbortController,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/spotify-main-world.js'), 'utf8'), context);
   return {
@@ -108,5 +109,22 @@ test('Spotify source reader refuses a truncated liked-track page', async () => {
 
   await page.startScan();
   assert.ok(page.messages.some((message) => message.type === 'scan-error' && /пустую страницу/i.test(message.error)));
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Spotify source reader reports the playlist phase and fails a stalled API request', async () => {
+  const page = makePage(({ payload, init }) => {
+    const operation = payload?.operationName;
+    if (operation === 'initialPageRequest') return { payload: { data: {} } };
+    if (operation === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    if (operation === 'libraryV3') return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+    throw new Error(`Unexpected Spotify operation: ${operation}`);
+  }, 0.001);
+
+  await page.startScan();
+  assert.ok(page.messages.some((message) => message.type === 'scan-progress' && /каталог плейлистов/i.test(message.message)));
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /не ответил за 45 с/i.test(message.error)));
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });

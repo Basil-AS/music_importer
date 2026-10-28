@@ -2,6 +2,8 @@
   const marker = 'music-importer-spotify';
   const endpoint = 'https://api-partner.spotify.com/pathfinder/v2/query';
   const pageSize = 1000;
+  const apiTimeoutMs = 45000;
+  const scriptTimeoutMs = 15000;
   const queryHashes = new Map([
     ['fetchLibraryTracks', '087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240'],
     ['libraryV3', '973e511ca44261fda7eebac8b653155e7caee3675abb4fb110cc1b8c78b091c3'],
@@ -110,7 +112,7 @@
     for (const src of scripts) {
       let source;
       try {
-        const response = await originalFetch.call(window, src);
+        const response = await fetchWithTimeout(src, {}, scriptTimeoutMs);
         if (!response.ok) continue;
         source = await response.text();
       } catch { continue; }
@@ -130,6 +132,36 @@
     return sessionHeaders;
   }
 
+  async function fetchWithTimeout(input, init, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await originalFetch.call(window, input, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`Spotify не ответил за ${Math.ceil(timeoutMs / 1000)} с. Повторите сканирование.`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function waitForRateLimit(waitMs, operationName) {
+    let remaining = waitMs;
+    while (remaining > 0) {
+      const interval = Math.min(remaining, 15000);
+      await new Promise((resolve) => setTimeout(resolve, interval));
+      remaining -= interval;
+      const seconds = Math.ceil(remaining / 1000);
+      const message = seconds
+        ? `Spotify ограничил запросы; ждём ещё ${seconds} с (${operationName}).`
+        : `Spotify продолжит запрос (${operationName}).`;
+      if (activeCommandId) transferProgress(message);
+      else post('scan-progress', { phase: 'rate-limit', message });
+    }
+  }
+
   async function query(operationName, variables) {
     const headers = await waitForSession();
     let hash = queryHashes.get(operationName);
@@ -140,16 +172,16 @@
     let hashRefreshes = 0;
     while (true) {
       lastQueryAt = Date.now();
-      const response = await originalFetch.call(window, endpoint, {
+      const response = await fetchWithTimeout(endpoint, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ variables, operationName, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
-      });
+      }, apiTimeoutMs);
       if (response.status === 429 && retries < 4) {
         const retryAfter = retryAfterDelay(response.headers.get('retry-after'));
         const waitMs = retryAfter === null ? 1000 * (2 ** retries) : retryAfter;
         retries += 1;
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        await waitForRateLimit(waitMs, operationName);
         continue;
       }
       if (!response.ok) throw Object.assign(new Error(`${operationName}: HTTP ${response.status}`), {
@@ -194,6 +226,7 @@
     const tracksData = [];
     let total = null;
     for (let offset = 0; total === null || offset < total; offset += pageSize) {
+      post('scan-progress', { phase: 'favorites', message: `Читаем Spotify Liked Songs: страница с ${offset + 1}…` });
       const data = await query('fetchLibraryTracks', { offset, limit: pageSize });
       const library = data?.me?.library?.tracks;
       if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) throw new Error('Неожиданный ответ Spotify с любимыми треками.');
@@ -213,6 +246,7 @@
     const playlists = [];
     let total = null;
     for (let offset = 0; total === null || offset < total; offset += 50) {
+      post('scan-progress', { phase: 'playlists', message: `Читаем каталог плейлистов Spotify: страница с ${offset + 1}…` });
       const data = await query('libraryV3', {
         filters: ['Playlists'], order: null, textFilter: '',
         features: ['LIKED_SONGS', 'YOUR_EPISODES_V2', 'PRERELEASES', 'EVENTS'],
@@ -243,6 +277,7 @@
     const rows = [];
     let total = null;
     for (let offset = 0; total === null || offset < total; offset += pageSize) {
+      post('scan-progress', { phase: 'playlist-items', message: `Запрашиваем треки плейлиста «${playlist.title}» с позиции ${offset + 1}…` });
       const data = await query('fetchPlaylistContents', { uri: playlist.id, offset, limit: pageSize, includeEpisodeContentRatingsV2: true });
       const page = data?.playlistV2?.content;
       if (!Array.isArray(page?.items) || !Number.isInteger(page.totalCount)) throw new Error(`Неожиданный ответ плейлиста «${playlist.title}».`);
