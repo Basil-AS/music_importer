@@ -712,26 +712,8 @@
   }
 
   function propagateSourceRecording(track) {
-    const key = window.MusicMatcher.sourceRecordingKey(track, state.sourceProvider);
-    if (!key) return [track];
-    const duplicates = state.tracks.filter((candidate) => window.MusicMatcher.sourceRecordingKey(candidate, state.sourceProvider) === key);
-    for (const duplicate of duplicates) {
-      if (duplicate === track) continue;
-      duplicate.matches = track.matches;
-      duplicate.match = track.match;
-      duplicate.matchConfidence = track.matchConfidence;
-      duplicate.matchReason = track.matchReason;
-      duplicate.autoMatched = track.autoMatched;
-      duplicate.cachedMatch = track.cachedMatch;
-      duplicate.cachedResults = track.cachedResults;
-      duplicate.searched = track.searched;
-      duplicate.searchError = track.searchError;
-      duplicate.errorMessage = track.errorMessage;
-      duplicate.searchExpansionComplete = track.searchExpansionComplete;
-      duplicate.userExcluded = track.userExcluded;
-      duplicate.selected = track.selected;
-      persistMatchDecision(duplicate);
-    }
+    const duplicates = window.MusicMatcher.propagateSourceMatch(state.tracks, track, state.sourceProvider);
+    for (const duplicate of duplicates) if (duplicate !== track) persistMatchDecision(duplicate);
     return duplicates;
   }
 

@@ -91,3 +91,18 @@ test('source recording identity groups repeated library items by ISRC or stable 
   assert.notEqual(matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'spotify'), matcher.sourceRecordingKey({ sourceId: 'same-track' }, 'apple-music'));
   assert.equal(matcher.sourceRecordingKey({ title: 'Song', artist: 'Artist' }, 'spotify'), '');
 });
+
+test('a resolved recording match propagates without replacing playlist occurrence metadata', () => {
+  const matcher = loadMatcher();
+  const chosen = { sourceId: 'same-track', sourceCollectionId: 'likes', sourcePosition: 2, matches: [{ trackId: 'target' }], match: { trackId: 'target' }, matchConfidence: 0.98, selected: true };
+  const duplicate = { sourceId: 'same-track', sourceCollectionId: 'playlist-7', sourcePosition: 4, matches: [], selected: false };
+  const unrelated = { sourceId: 'different-track', sourceCollectionId: 'playlist-7', sourcePosition: 5, matches: [], selected: false };
+  const affected = matcher.propagateSourceMatch([chosen, duplicate, unrelated], chosen, 'spotify');
+  assert.equal(affected.length, 2);
+  assert.equal(duplicate.match.trackId, 'target');
+  assert.equal(duplicate.selected, true);
+  assert.equal(duplicate.sourceCollectionId, 'playlist-7');
+  assert.equal(duplicate.sourcePosition, 4);
+  assert.equal(unrelated.match, undefined);
+  assert.equal(unrelated.selected, false);
+});

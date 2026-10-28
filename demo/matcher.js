@@ -52,6 +52,22 @@
     return providerId ? `${service}:id:${providerId}` : '';
   }
 
+  function propagateSourceMatch(tracks, track, provider) {
+    const key = sourceRecordingKey(track, provider);
+    if (!key) return [track];
+    const duplicates = tracks.filter((candidate) => sourceRecordingKey(candidate, provider) === key);
+    const fields = [
+      'matches', 'match', 'matchConfidence', 'matchReason', 'autoMatched', 'cachedMatch',
+      'cachedResults', 'searched', 'searchError', 'errorMessage', 'searchExpansionComplete',
+      'userExcluded', 'selected',
+    ];
+    for (const duplicate of duplicates) {
+      if (duplicate === track) continue;
+      for (const field of fields) duplicate[field] = track[field];
+    }
+    return duplicates;
+  }
+
   function buildSearchQueries(track) {
     const artists = Array.isArray(track.artists)
       ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(', ')
@@ -214,5 +230,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, propagateSourceMatch, romanize, detransliterate, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();
