@@ -60,7 +60,7 @@ test('Apple source reader classifies favorites and preserves playlist duplicates
   const fixtures = {
     '/v1/me/library/songs?limit=100': {
       meta: { total: 2 }, next: '/v1/me/library/songs?limit=100&offset=1',
-      data: [{ id: 'library-song-1', attributes: { name: 'Liked track', artistName: 'Artist', albumName: 'Album', inFavorites: true } }],
+      data: [{ id: 'library-song-1', attributes: { name: 'Liked track', artistName: 'Artist', albumName: 'Album', inFavorites: true, playParams: { id: 'catalog-track-1' }, isrc: 'USABC1234567' } }],
     },
     '/v1/me/library/songs?limit=100&offset=1': {
       meta: { total: 2 }, next: null,
@@ -89,6 +89,7 @@ test('Apple source reader classifies favorites and preserves playlist duplicates
   assert.equal(payload.completeness.confirmed, true);
   assert.equal(payload.completeness.librarySongsCount, 2);
   assert.deepEqual(Array.from(payload.tracks, (track) => track.id), ['library-song-1']);
+  assert.equal(payload.tracks[0].catalogId, 'catalog-track-1');
   assert.equal(payload.playlists.length, 2);
   assert.equal(payload.playlists[0].tracks.length, 2);
   assert.deepEqual(Array.from(payload.playlists[0].tracks, (track) => track.position), [0, 1]);

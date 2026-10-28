@@ -132,8 +132,11 @@
     const artist = String(attributes.artistName || '').trim();
     const id = String(row?.id || '').trim();
     if (!title || !artist || !id) throw new Error('В библиотеке Apple Music найден трек без ID, названия или артиста.');
+    const catalogRelationship = row?.relationships?.catalog?.data;
+    const catalogId = String(attributes.playParams?.id || attributes.catalogId || (Array.isArray(catalogRelationship) ? catalogRelationship[0]?.id : '') || '');
     return {
       id,
+      catalogId,
       title,
       artist,
       artists: [artist],

@@ -9,6 +9,7 @@ const assets = [
   'index.html',
   'app.js',
   'matcher.js',
+  'account-catalog.js',
   'match-cache.js',
   'transfer-core.js',
   'transfer-engine.js',

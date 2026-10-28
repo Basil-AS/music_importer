@@ -72,7 +72,7 @@
     const duplicates = tracks.filter((candidate) => sourceRecordingKey(candidate, provider) === key);
     const fields = [
       'matches', 'match', 'matchConfidence', 'matchReason', 'autoMatched', 'cachedMatch',
-      'cachedResults', 'searched', 'searchError', 'errorMessage', 'searchExpansionComplete',
+      'cachedResults', 'accountLibraryMatch', 'searched', 'searchError', 'errorMessage', 'searchExpansionComplete',
       'userExcluded', 'selected',
     ];
     for (const duplicate of duplicates) {

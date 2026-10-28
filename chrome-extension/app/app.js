@@ -143,11 +143,11 @@
     $('#trackList').innerHTML = visibleTracks.map(({ track, index }) => {
       const title = escapeHTML(track.title);
       const artist = escapeHTML(track.artist);
-      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.userExcluded ? 'Исключено вами' : track.searched && !track.matches.length ? (track.cachedResults ? 'Нет совпадений · кэш' : 'Не найдено') : track.match ? (track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? (track.cachedResults ? 'Проверьте · кэш' : 'Проверьте') : 'Не искали';
+      const status = track.searching ? 'Ищем…' : track.searchError ? 'Ошибка поиска' : track.userExcluded ? 'Исключено вами' : track.searched && !track.matches.length ? (track.cachedResults ? 'Нет совпадений · кэш' : 'Не найдено') : track.match ? (track.accountLibraryMatch ? `Уже в аккаунте · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Локальный кэш · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автоматически · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную') : track.searched ? (track.cachedResults ? 'Проверьте · кэш' : 'Проверьте') : 'Не искали';
       const badgeClass = track.searchError ? 'error' : track.match ? '' : !track.userExcluded && track.searched && track.matches.length ? 'review' : 'pending';
       const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' })[state.targetProvider] || state.targetProvider;
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
-      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.cachedMatch ? `Из локального кэша · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
+      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.accountLibraryMatch ? `Уже в библиотеке аккаунта · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Из локального кэша · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
       return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">♫</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${collection}${track.album ? `<div class="track-artist">${escapeHTML(track.album)}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
     }).join('');
@@ -774,6 +774,7 @@
     track.searching = true;
     track.searchError = false;
     track.cachedMatch = false;
+    track.accountLibraryMatch = false;
     track.cachedResults = false;
     track.matches = [];
     track.match = null;
@@ -828,6 +829,7 @@
         track.searching = true;
         track.searchError = false;
         track.cachedMatch = false;
+        track.accountLibraryMatch = false;
         track.cachedResults = false;
         track.matches = [];
         track.match = null;
@@ -844,31 +846,41 @@
       } catch { /* Saved review choices are optional; fresh matching remains available. */ }
       if (controller.signal.aborted) throw new DOMException('Поиск отменён', 'AbortError');
       const pendingSearch = [];
+      const accountCatalogIndex = window.MusicAccountCatalog?.buildIndex(state.librarySnapshots[state.targetProvider], state.targetProvider) || new Map();
+      let accountLibraryCount = 0;
       for (const track of pending) {
+        if (track.searched) continue;
         const key = window.MusicMatchCache?.keyFor(track, state.targetProvider, $('#storefront').value, state.sourceSnapshot?.completeness?.confirmed === true);
         const cached = key ? cacheHits.get(key) : null;
-        if (!Array.isArray(cached?.candidates)) { pendingSearch.push(track); continue; }
-        track.matches = cached.candidates;
+        const accountCandidates = track.manualQuery
+          ? []
+          : (window.MusicAccountCatalog?.findByISRC(accountCatalogIndex, track) || []);
+        const useAccountCandidates = accountCandidates.length > 0;
+        if (!useAccountCandidates && !Array.isArray(cached?.candidates)) { pendingSearch.push(track); continue; }
+        track.matches = useAccountCandidates ? accountCandidates : cached.candidates;
         track.searched = true;
         track.searching = false;
         track.searchError = false;
-        track.cachedResults = true;
+        track.accountLibraryMatch = useAccountCandidates;
+        track.cachedResults = !track.accountLibraryMatch;
         applySuggestion(track);
-        restoreMatchDecision(track, savedDecisions);
-        track.searchExpansionComplete = cached.searchExpansionComplete === true;
-        if (track.matches.length && !track.match && !track.userExcluded && !track.searchExpansionComplete) {
+        if (!track.accountLibraryMatch) restoreMatchDecision(track, savedDecisions);
+        track.searchExpansionComplete = track.accountLibraryMatch || cached.searchExpansionComplete === true;
+        if (!track.accountLibraryMatch && track.matches.length && !track.match && !track.userExcluded && !track.searchExpansionComplete) {
           track.searching = true;
           pendingSearch.push(track);
           continue;
         }
-        if (track.autoMatched && track.match) {
+        if (track.accountLibraryMatch) {
+          accountLibraryCount += 1;
+        } else if (track.autoMatched && track.match) {
           track.cachedMatch = true;
         }
         completed += 1;
-        cachedCount += 1;
+        if (!track.accountLibraryMatch) cachedCount += 1;
       }
       if (cacheHits.size) {
-        $('#searchStatus').textContent = `${completed} из ${state.tracks.length} · из локального кэша ${completed - (state.tracks.length - pending.length)}`;
+        $('#searchStatus').textContent = `${completed} из ${state.tracks.length} · из локального кэша ${cachedCount}${accountLibraryCount ? ` · уже в аккаунте: ${accountLibraryCount}` : ''}`;
         renderTracks();
       }
       updateCounts();
@@ -909,7 +921,7 @@
       const withResults = state.tracks.filter((track) => track.searched && track.matches.length).length;
       const failed = state.tracks.filter((track) => track.searchError).length;
       const resultStatus = failed ? `Найдено: ${withResults} · ошибок: ${failed}` : `Найдено: ${withResults} из ${state.tracks.length}`;
-      $('#searchStatus').textContent = `${resultStatus}${cachedCount ? ` · из локального кэша: ${cachedCount}` : ''}`;
+      $('#searchStatus').textContent = `${resultStatus}${accountLibraryCount ? ` · уже в аккаунте: ${accountLibraryCount}` : ''}${cachedCount ? ` · из локального кэша: ${cachedCount}` : ''}`;
       $('#searchStatus').classList.toggle('search-error', failed > 0);
       setStep(4);
       toast(failed ? 'Часть запросов не прошла — можно повторить' : `Совпадений в каталоге: ${withResults}`);
