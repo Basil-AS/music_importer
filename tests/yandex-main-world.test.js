@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 const origin = 'https://music.yandex.ru';
 
-function makePage(fetchHandler) {
+function makePage(fetchHandler, timerScale = 1) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
@@ -32,13 +32,21 @@ function makePage(fetchHandler) {
         ok: response.status === undefined || (response.status >= 200 && response.status < 300),
         status: response.status || 200,
         headers: { get: (name) => response.headers?.[String(name).toLowerCase()] || null },
-        json: async () => response.payload ?? response,
+        json: async () => {
+          if (!response.pendingBody) return response.payload ?? response;
+          await new Promise((resolve, reject) => {
+            if (init.signal.aborted) reject(new Error('aborted'));
+            else init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+          return response.payload ?? response;
+        },
       };
     },
   };
   const context = {
     window, location, URL, URLSearchParams, Promise, Map, Set, String, Number, Array, Object, Error, JSON, Date,
-    setTimeout, clearTimeout, console, AbortController,
+    setTimeout: (callback, delay, ...args) => setTimeout(callback, delay * timerScale, ...args),
+    clearTimeout, console, AbortController,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/yandex-main-world.js'), 'utf8'), context);
   return {
@@ -95,6 +103,13 @@ test('Yandex source reader confirms favorites, every playlist, order, and empty 
   assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => track.position), [0, 1]);
   assert.equal(snapshot.playlists[1].complete, true);
   assert.ok(page.requests.every((request) => request.init.credentials === 'include'));
+});
+
+test('Yandex source reader times out a response body that stalls after headers', async () => {
+  const page = makePage(async () => ({ pendingBody: true }), 0.001);
+  await page.dispatch('start-library-scan');
+  assert.match(page.messages.find((message) => message.type === 'scan-error')?.error || '', /не ответила за 45 с/);
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
 test('Yandex source reader rejects playlist kind mismatches instead of claiming a complete library', async () => {

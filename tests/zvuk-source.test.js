@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function makePage(path = '/favorites', respond = null) {
+function makePage(path = '/favorites', respond = null, timerScale = 1) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
@@ -51,13 +51,22 @@ function makePage(path = '/favorites', respond = null) {
       const result = respond ? respond(request) : defaultPayload;
       const payload = result?.payload || result;
       const status = Number(result?.statusCode || 200);
-      return { ok: status >= 200 && status < 300, status, json: async () => payload, clone: () => ({ json: async () => payload }) };
+      const readPayload = async () => {
+        if (!result?.pendingBody) return payload;
+        await new Promise((resolve, reject) => {
+          if (init.signal.aborted) reject(new Error('aborted'));
+          else init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+        return payload;
+      };
+      return { ok: status >= 200 && status < 300, status, json: readPayload, clone: () => ({ json: readPayload }) };
     },
   };
   const context = {
     window, location, history, document: { documentElement: { scrollHeight: 100, clientHeight: 100, scrollTop: 0 }, querySelectorAll: () => [] }, XMLHttpRequest, URL, Request: class Request {}, Promise,
     Map, Set, String, Number, Array, Object, Error, JSON, Date: TestDate, RegExp, Math, AbortController,
-    setTimeout, clearTimeout, setInterval: (callback) => { scrollCallback = callback; return 1; }, clearInterval() {},
+    setTimeout: (callback, delay, ...args) => setTimeout(callback, delay * timerScale, ...args),
+    clearTimeout, setInterval: (callback) => { scrollCallback = callback; return 1; }, clearInterval() {},
     getComputedStyle: () => ({ overflowY: 'visible' }),
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/main-world.js'), 'utf8'), context);
@@ -143,4 +152,20 @@ test('Zvuk source reader exposes a failed cursor request when scroll fallback st
   await page.tickScrollAfter(21000);
   const stalled = page.messages.find((message) => message.type === 'favorites-scroll-stall');
   assert.match(stalled.reason, /GraphQL ответил HTTP 503/);
+});
+
+test('Zvuk source reader keeps its deadline active while reading cursor response JSON', async () => {
+  const page = makePage('/favorites', ({ payload }) => {
+    if (payload.variables?.after) return { pendingBody: true };
+    return { data: { paginatedCollection: { tracks: {
+      items: [{ id: 'favorite-a', title: 'A', artists: [{ title: 'Artist' }] }],
+      page: { endCursor: 'cursor-b' },
+    } } } };
+  }, 0.001);
+
+  await page.request('getPaginatedCollection', { first: 100, after: null });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await page.tickScrollAfter(21000);
+  const stalled = page.messages.find((message) => message.type === 'favorites-scroll-stall');
+  assert.match(stalled.reason, /не загрузилась за 45 секунд/);
 });

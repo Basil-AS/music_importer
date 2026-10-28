@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck = true) {
+function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck = true, timerScale = 1) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
@@ -35,14 +35,22 @@ function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck 
       const status = response?.status || 200;
       return {
         ok: status >= 200 && status < 300, status, headers: new Headers(response?.headers || {}),
-        clone: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }),
+        clone: () => ({ arrayBuffer: async () => {
+          if (!response?.pendingBody) return new ArrayBuffer(0);
+          await new Promise((resolve, reject) => {
+            if (init.signal.aborted) reject(new Error('aborted'));
+            else init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+          return new ArrayBuffer(0);
+        } }),
         json: async () => response?.payload ?? response,
       };
     },
   };
   const context = {
     window, location, URL, URLSearchParams, Headers, Request, Promise, Map, Set, String, Number, Array, Object, Error, JSON, Date,
-    setTimeout, clearTimeout, console, AbortController,
+    setTimeout: (callback, delay, ...args) => setTimeout(callback, delay * timerScale, ...args),
+    clearTimeout, console, AbortController,
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../chrome-extension/apple-main-world.js'), 'utf8'), context);
   return {
@@ -113,6 +121,16 @@ test('Apple source reader classifies favorites and preserves playlist duplicates
   assert.equal(payload.playlists[1].complete, true);
   assert.ok(page.requests.every((request) => request.headers.get('authorization') === `Bearer ${page.token}`));
   assert.ok(!JSON.stringify(page.messages).includes(page.token));
+});
+
+test('Apple Music reader times out a response body that stalls after headers', async () => {
+  const page = makePage({
+    '/v1/me/library/songs?limit=100': { pendingBody: true },
+    '/v1/me/library/playlists?limit=100': { pendingBody: true },
+  }, 'music-user-token', true, 0.001);
+  await page.scan();
+  assert.match(page.messages.find((message) => message.type === 'scan-error')?.error || '', /не загрузил ответ за 45 с/);
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
 test('Apple source reader refuses an incomplete library page', async () => {
