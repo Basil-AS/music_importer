@@ -193,8 +193,9 @@
     const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
     const candidateISRC = normalizeISRC(candidate.isrc || candidate.ISRC || candidate.externalIds?.isrc);
     if (sourceISRC && candidateISRC && sourceISRC === candidateISRC) {
-      return { score: 1, exactISRC: true, versionConflict: false };
+      return { score: 1, exactISRC: true, isrcConflict: false, versionConflict: false };
     }
+    const isrcConflict = Boolean(sourceISRC && candidateISRC && sourceISRC !== candidateISRC);
 
     const title = similarity(
       titleWithoutFeatureCredits(source.title),
@@ -215,7 +216,7 @@
     if (album !== null) { total += album * 0.04; weight += 0.04; }
     if (duration !== null) { total += duration * 0.04; weight += 0.04; }
     const score = Math.max(0, Math.min(0.98, total / weight - (versionConflict ? 0.2 : 0)));
-    return { score, exactISRC: false, versionConflict, titleScore: title, artistScore: artist, durationScore: duration };
+    return { score, exactISRC: false, isrcConflict, versionConflict, titleScore: title, artistScore: artist, durationScore: duration };
   }
 
   function candidateISRC(candidate) {
@@ -249,7 +250,7 @@
     const metadataDuplicates = Boolean(!bestISRC && closeRivals.length > 1
       && closeRivals.every((candidate) => !candidateISRC(candidate.candidate) && sameMetadataRecording(source, candidate.candidate)));
     const sameRecordingDuplicates = sameISRCDuplicates || metadataDuplicates;
-    const automatic = Boolean(best && !best.versionConflict && (best.exactISRC
+    const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && (best.exactISRC
       || (best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
     return {
       best: best?.candidate || null,

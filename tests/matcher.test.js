@@ -62,6 +62,18 @@ test('matching ignores featured-title decoration but keeps recording-version che
   assert.equal(differentVersion.automatic, false);
 });
 
+test('matching never auto-selects an exact metadata candidate with a conflicting ISRC', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist', album: 'Album', durationMs: 180000, isrc: 'USAAA0000001' },
+    [{ trackId: 'different-recording', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 180000, isrc: 'USBBB0000002' }],
+  );
+  assert.equal(result.best.trackId, 'different-recording', 'keep the candidate visible for a deliberate manual decision');
+  assert.equal(result.ranked[0].isrcConflict, true);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'manual_review');
+});
+
 test('matching auto-selects tied catalog editions only when ISRC or metadata confirms the same recording', () => {
   const matcher = loadMatcher();
   const sameRecording = matcher.suggestBestMatch(
