@@ -347,7 +347,7 @@ async function repairStaleProviderTabs() {
   await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
     try {
       const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
-      if (health?.ok === true) return;
+      if (health?.ok === true && health.bridgeProtocol === 2) return;
     } catch {
       // A stale content script loses its extension context after the worker update.
     }

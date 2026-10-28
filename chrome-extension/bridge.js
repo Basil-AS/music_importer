@@ -3,7 +3,7 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== 'music-importer:bridge-health-check') return false;
-    sendResponse({ ok: true, provider: 'zvuk' });
+    sendResponse({ ok: true, provider: 'zvuk', bridgeProtocol: 2 });
     return false;
   });
 
