@@ -122,3 +122,28 @@ test('Zvuk release metadata preserves live-version conflicts in no-ISRC account 
   assert.equal(resolution.matches.has(source), false);
   assert.equal(resolution.unresolved[0], source);
 });
+
+test('no-ISRC metadata matches normalize catalog IDs and artist/album fields for all four providers', () => {
+  const accountCatalog = loadAccountCatalog();
+  const fixtures = [
+    ['apple-music', { catalogId: 'apple-catalog-1', title: 'Song', artist: 'Artist', album: 'Album', isrc: '' }],
+    ['spotify', { id: 'spotify:track:1', title: 'Song', artists: [{ name: 'Artist' }], album: { name: 'Album' }, isrc: '' }],
+    ['yandex-music', { id: 'yandex-track-1', title: 'Song', artists: ['Artist'], album: 'Album', isrc: '' }],
+    ['zvuk', { id: 'zvuk-track-1', title: 'Song', artists: [{ title: 'Artist' }], release: { title: 'Album' }, isrc: '' }],
+  ];
+
+  for (const [provider, targetTrack] of fixtures) {
+    const index = accountCatalog.buildIndex({
+      service: provider,
+      completeness: { confirmed: true },
+      tracks: [targetTrack],
+      playlists: [],
+    }, provider);
+    const source = { title: 'Song', artist: 'Artist', album: 'Album' };
+    const resolution = accountCatalog.resolveTracks([source], index);
+    const expectedTargetId = provider === 'apple-music' ? 'apple-catalog-1' : targetTrack.id;
+
+    assert.equal(resolution.matches.get(source)?.[0]?.trackId, expectedTargetId, provider);
+    assert.equal(resolution.unresolved.length, 0, provider);
+  }
+});
