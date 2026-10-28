@@ -123,15 +123,27 @@
       const batchIndexes = queue.map((group, index) => index)
         .filter((index) => adapter.canBatchSearch(queue[index].tracks[0], options.context || {}));
       const batchSize = Math.max(1, Math.min(25, Math.floor(adapter.batchSearchSize || 25)));
-      const batchQueue = Array.from({ length: Math.ceil(batchIndexes.length / batchSize) }, (_, index) => index);
+      const batchGroups = new Map();
+      for (const index of batchIndexes) {
+        const track = queue[index].tracks[0];
+        const key = typeof adapter.batchSearchKey === 'function'
+          ? String(adapter.batchSearchKey(track, options.context || {}) || `single:${index}`)
+          : 'default';
+        if (!batchGroups.has(key)) batchGroups.set(key, []);
+        batchGroups.get(key).push(index);
+      }
+      const batchQueue = [];
+      for (const indexes of batchGroups.values()) {
+        if (adapter.batchSearchRequiresGroup === true && indexes.length < 2) continue;
+        for (let offset = 0; offset < indexes.length; offset += batchSize) batchQueue.push(indexes.slice(offset, offset + batchSize));
+      }
       let nextBatch = 0;
       const batchWorkerCount = Math.min(concurrency, batchQueue.length);
       await Promise.all(Array.from({ length: batchWorkerCount }, async () => {
         while (true) {
           const batchIndex = nextBatch++;
           if (batchIndex >= batchQueue.length) return;
-          const offset = batchIndex * batchSize;
-          const indexes = batchIndexes.slice(offset, offset + batchSize);
+          const indexes = batchQueue[batchIndex];
           const batchTracks = indexes.map((index) => queue[index].tracks[0]);
           let batchResults;
           try {

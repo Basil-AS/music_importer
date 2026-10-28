@@ -426,6 +426,44 @@
     return /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc) ? `isrc:${isrc}` : '';
   }
 
+  function albumBatchSearchKey(track) {
+    if (!track || track.manualQuery) return '';
+    const album = String(track.album?.name || track.album || track.collectionName || '').trim();
+    const artists = Array.isArray(track.artists)
+      ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean)
+      : [track.artist || track.artistName || ''];
+    const artist = String(artists[0] || '').trim();
+    const normalize = window.MusicMatcher.normalizeText;
+    const albumKey = normalize(album);
+    const artistKey = normalize(artist);
+    return albumKey && artistKey ? `album:${albumKey}|artist:${artistKey}` : '';
+  }
+
+  function albumBatchTrackCandidates(tracks, candidates) {
+    return tracks.map((track) => {
+      const suggestion = window.MusicMatcher.suggestBestMatch(track, candidates);
+      return suggestion.automatic && suggestion.best ? [suggestion.best] : [];
+    });
+  }
+
+  async function searchAlbumBatch(provider, tracks, context = {}) {
+    const track = tracks[0];
+    const album = String(track?.album?.name || track?.album || track?.collectionName || '').trim();
+    const artists = Array.isArray(track?.artists)
+      ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean)
+      : [track?.artist || track?.artistName || ''];
+    const artist = String(artists[0] || '').trim();
+    const action = provider === 'zvuk' ? 'search-tracks' : 'search-album-tracks';
+    const details = provider === 'zvuk'
+      ? { query: `${album} ${artist}`.trim() }
+      : { album, artist, storefront: context.storefront || $('#storefront').value };
+    const response = await requestExtensionCommand(action, details, provider === 'apple-music' ? 'apple' : provider);
+    if (!response?.ok || !Array.isArray(response.results)) {
+      throw targetCommandError(response, `Не удалось пакетно прочитать альбом в каталоге ${provider}.`);
+    }
+    return albumBatchTrackCandidates(tracks, response.results);
+  }
+
   function candidateHasIsrc(candidate, isrc) {
     return window.MusicMatcher.normalizeISRC(candidate?.isrc || candidate?.ISRC || candidate?.externalIds?.isrc || '') === isrc;
   }
@@ -508,9 +546,13 @@
     maxConcurrentSearches: 2,
     batchSearchSize: 25,
     canBatchSearch(track, context = {}) {
-      return context.accountWrite === true && Boolean(exactIsrcQuery(track, 'apple-music'));
+      return context.accountWrite === true && (Boolean(exactIsrcQuery(track, 'apple-music')) || Boolean(albumBatchSearchKey(track)));
+    },
+    batchSearchKey(track) {
+      return exactIsrcQuery(track, 'apple-music') ? 'apple-isrc-batch' : albumBatchSearchKey(track);
     },
     async searchTracksBatch(tracks, context = {}) {
+      if (!tracks.every((track) => exactIsrcQuery(track, 'apple-music'))) return searchAlbumBatch('apple-music', tracks, context);
       const isrcs = tracks.map((track) => exactIsrcQuery(track, 'apple-music').slice('isrc:'.length));
       const response = await requestExtensionCommand('search-tracks', {
         query: `isrc:${isrcs.join(',')}`,
@@ -551,6 +593,10 @@
   const yandexCatalogAdapter = {
     id: 'yandex-music',
     maxConcurrentSearches: 2,
+    batchSearchRequiresGroup: true,
+    canBatchSearch(track) { return Boolean(albumBatchSearchKey(track)); },
+    batchSearchKey(track) { return albumBatchSearchKey(track); },
+    async searchTracksBatch(tracks, context = {}) { return searchAlbumBatch('yandex-music', tracks, context); },
     async searchTracks(track) {
       return searchWithMetadataFallback(track, async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query });
@@ -563,6 +609,10 @@
   const zvukCatalogAdapter = {
     id: 'zvuk',
     maxConcurrentSearches: 2,
+    batchSearchRequiresGroup: true,
+    canBatchSearch(track) { return Boolean(albumBatchSearchKey(track)); },
+    batchSearchKey(track) { return albumBatchSearchKey(track); },
+    async searchTracksBatch(tracks, context = {}) { return searchAlbumBatch('zvuk', tracks, context); },
     async searchTracks(track) {
       return searchWithMetadataFallback(track, async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query }, 'zvuk');
@@ -575,6 +625,10 @@
   const spotifyCatalogAdapter = {
     id: 'spotify',
     maxConcurrentSearches: 2,
+    batchSearchRequiresGroup: true,
+    canBatchSearch(track) { return Boolean(albumBatchSearchKey(track)); },
+    batchSearchKey(track) { return albumBatchSearchKey(track); },
+    async searchTracksBatch(tracks, context = {}) { return searchAlbumBatch('spotify', tracks, context); },
     async searchTracks(track) {
       return searchWithExactIsrc(track, 'spotify', async (query) => {
         const response = await requestExtensionCommand('search-tracks', { query }, 'spotify');

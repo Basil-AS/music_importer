@@ -309,5 +309,5 @@
     };
   }
 
-  window.MusicMatcher = { normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, catalogSearchGroupKey, propagateSourceMatch, romanize, detransliterate, titleSearchKeys, buildSearchQueries, scoreCandidate, suggestBestMatch };
+  window.MusicMatcher = { normalizeText, normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, catalogSearchGroupKey, propagateSourceMatch, romanize, detransliterate, titleSearchKeys, buildSearchQueries, scoreCandidate, suggestBestMatch };
 })();

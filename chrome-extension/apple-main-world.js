@@ -90,6 +90,17 @@
     return `${url.pathname}${url.search}`;
   }
 
+  function safeCatalogNext(value, storefront) {
+    if (!value) return null;
+    let url;
+    try { url = new URL(value, apiBase); }
+    catch { throw new Error('Apple Music вернул некорректную ссылку следующей страницы каталога.'); }
+    if (url.origin !== apiBase || !url.pathname.startsWith(`/v1/catalog/${storefront}/`)) {
+      throw new Error('Apple Music вернул ссылку пагинации каталога за пределы выбранного storefront.');
+    }
+    return `${url.pathname}${url.search}`;
+  }
+
   function apiUrl(path, allowCatalog = false) {
     const url = new URL(path, apiBase);
     const personal = url.origin === apiBase && url.pathname.startsWith('/v1/me/');
@@ -270,6 +281,38 @@
     const songs = isrcQuery ? result?.data : result?.results?.songs?.data;
     if (!Array.isArray(songs)) throw new Error('Каталог Apple Music вернул неожиданный формат поиска.');
     return songs.map(normalizeCatalogSong);
+  }
+
+  async function searchAlbumTracks(albumName, artistName, storefront) {
+    const country = String(storefront || '').toLowerCase();
+    const album = String(albumName || '').trim().slice(0, 200);
+    const artist = String(artistName || '').trim().slice(0, 200);
+    if (!/^[a-z]{2}$/.test(country) || !album || !artist) throw new Error('Для пакетного поиска Apple Music нужны storefront, альбом и артист.');
+    const params = new URLSearchParams({ term: `${album} ${artist}`, types: 'albums', limit: '5' });
+    const search = await request(`/v1/catalog/${country}/search?${params}`, { allowCatalog: true, retry: false });
+    const albums = search?.results?.albums?.data;
+    if (!Array.isArray(albums)) throw new Error('Apple Music вернул неизвестную выдачу альбомов.');
+    const candidates = new Map();
+    for (const result of albums.slice(0, 3)) {
+      const albumId = String(result?.id || '').trim();
+      if (!albumId) continue;
+      let path = `/v1/catalog/${country}/albums/${encodeURIComponent(albumId)}/tracks?limit=100`;
+      const seen = new Set();
+      while (path) {
+        if (seen.has(path)) throw new Error('Apple Music повторил страницу треклиста альбома.');
+        seen.add(path);
+        const payload = await request(path, { allowCatalog: true, retry: false });
+        if (!Array.isArray(payload?.data)) throw new Error('Apple Music вернул неизвестный формат треклиста альбома.');
+        for (const row of payload.data) {
+          const candidate = normalizeCatalogSong({ ...row, attributes: { ...row?.attributes, albumName: row?.attributes?.albumName || result?.attributes?.name } });
+          if (candidate?.trackId) candidates.set(candidate.trackId, candidate);
+        }
+        const next = safeCatalogNext(payload.next, country);
+        if (next && !payload.data.length) throw new Error('Apple Music вернул пустую страницу треклиста альбома с продолжением.');
+        path = next;
+      }
+    }
+    return [...candidates.values()];
   }
 
   async function readFavoriteRows() {
@@ -459,6 +502,7 @@
       try {
         let result;
         if (event.data.action === 'search-tracks') result = await searchCatalog(event.data.query, event.data.storefront);
+        else if (event.data.action === 'search-album-tracks') result = await searchAlbumTracks(event.data.album, event.data.artist, event.data.storefront);
         else if (event.data.action === 'execute-transfer') result = await executeTransfer(event.data.plan, requestId);
         else throw new Error('Неизвестная команда Apple Music.');
         post('command-result', { requestId, ok: true, result });

@@ -180,6 +180,34 @@
     return rows.map(normalizeCandidate).filter(Boolean).slice(0, 20);
   }
 
+  async function searchAlbumTracks(albumName, artistName) {
+    const album = String(albumName || '').trim().slice(0, 200);
+    const artist = String(artistName || '').trim().slice(0, 200);
+    if (!album || !artist) throw new Error('Для пакетного поиска Яндекс Музыки нужны альбом и артист.');
+    const params = new URLSearchParams({ text: `${album} ${artist}`, page: '0', type: 'album' });
+    const result = await request(`/search?${params.toString()}`);
+    const albums = result?.albums?.results ?? result?.albums;
+    if (!Array.isArray(albums)) throw new Error('Яндекс Музыка вернула неизвестную выдачу альбомов.');
+    const candidates = new Map();
+    for (const albumResult of albums.slice(0, 3)) {
+      const albumId = String(albumResult?.id || '').trim();
+      if (!albumId) continue;
+      const albumDetail = await request(`/albums/${encodeURIComponent(albumId)}/with-tracks`);
+      const detail = Array.isArray(albumDetail) ? albumDetail[0] : albumDetail?.album || albumDetail;
+      const volumes = Array.isArray(detail?.volumes) ? detail.volumes : null;
+      if (!volumes) throw new Error('Яндекс Музыка не вернула треклист найденного альбома.');
+      for (const row of volumes.flat()) {
+        const track = row?.track || row;
+        const albumMetadata = Array.isArray(track?.albums) && track.albums.length
+          ? track.albums
+          : [{ id: albumId, title: detail?.title || albumResult?.title || album }];
+        const candidate = normalizeCandidate({ ...track, albums: albumMetadata });
+        if (candidate?.trackId) candidates.set(candidate.trackId, candidate);
+      }
+    }
+    return [...candidates.values()];
+  }
+
   async function readPlaylistDetail(uid, kind) {
     const result = await request(`/users/${encodeURIComponent(uid)}/playlists/${encodeURIComponent(kind)}`);
     const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
@@ -423,6 +451,21 @@
 
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
+    if (event.data.type === 'search-album-tracks') {
+      const requestId = String(event.data.requestId || '');
+      try {
+        const results = await searchAlbumTracks(event.data.album, event.data.artist);
+        post('command-response', { requestId, ok: true, results });
+      } catch (error) {
+        post('command-response', {
+          requestId, ok: false,
+          error: error instanceof Error ? error.message : 'Поиск альбома Яндекс Музыки не выполнен.',
+          status: Number(error?.status) || null,
+          retryAfter: error?.retryAfter || null,
+        });
+      }
+      return;
+    }
     if (event.data.type === 'search-tracks') {
       const requestId = String(event.data.requestId || '');
       try {

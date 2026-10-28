@@ -42,7 +42,7 @@
       return false;
     }
     if (message?.type !== 'spotify:command' || !/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || ''))
-      || !['search-tracks', 'execute-transfer'].includes(message.action)) return false;
+      || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) return false;
     const requestId = String(message.requestId);
     const timer = setTimeout(() => {
       pendingCommands.delete(requestId);
@@ -55,6 +55,8 @@
       requestId,
       action: message.action,
       query: String(message.query || '').slice(0, 400),
+      album: String(message.album || '').slice(0, 200),
+      artist: String(message.artist || '').slice(0, 200),
       plan: message.action === 'execute-transfer' ? message.plan : undefined,
     }, location.origin);
     return true;

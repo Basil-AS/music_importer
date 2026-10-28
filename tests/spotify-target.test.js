@@ -90,6 +90,36 @@ test('Spotify catalog search uses session-bound Web Player request and normalize
   assert.equal(response.result[0].isrc, 'USABC1234567');
 });
 
+test('Spotify album batch lookup searches albums and reads their tracklists with the active session', async () => {
+  const page = makePage((request) => {
+    if (request.url.startsWith('https://api-partner.spotify.com/')) return { payload: { data: {} } };
+    if (request.url.startsWith('https://api.spotify.com/v1/search?')) {
+      const url = new URL(request.url);
+      assert.equal(url.searchParams.get('type'), 'album');
+      assert.equal(url.searchParams.get('limit'), '5');
+      return { payload: { albums: { items: [{ id: 'album-1', name: 'Discovery' }] } } };
+    }
+    if (request.url.startsWith('https://api.spotify.com/v1/albums/album-1/tracks?')) {
+      const url = new URL(request.url);
+      assert.equal(url.searchParams.get('limit'), '50');
+      assert.equal(request.init.credentials, 'include');
+      return { payload: { total: 2, items: [
+        { id: 'one', uri: 'spotify:track:one', name: 'One More Time', artists: [{ name: 'Daft Punk' }], duration_ms: 320357 },
+        { id: 'two', uri: 'spotify:track:two', name: 'Aerodynamic', artists: [{ name: 'Daft Punk' }], duration_ms: 212546 },
+      ] } };
+    }
+    throw new Error(`Unexpected URL: ${request.url}`);
+  });
+  await page.captureSession();
+  const response = await page.command('search-album-tracks', { album: 'Discovery', artist: 'Daft Punk' });
+
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(Array.from(response.result, (track) => [track.trackId, track.collectionName]), [
+    ['spotify:track:one', 'Discovery'], ['spotify:track:two', 'Discovery'],
+  ]);
+  assert.ok(page.requests.slice(1).every((request) => request.init.headers.authorization === 'Bearer fixture'));
+});
+
 test('Spotify catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
   const page = makePage((request) => {
     if (request.url.startsWith('https://api-partner.spotify.com/')) return { payload: { data: {} } };

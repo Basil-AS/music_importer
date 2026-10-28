@@ -128,6 +128,30 @@ test('Yandex catalog search normalizes candidate IDs, album, ISRC, and URL', asy
   assert.equal(response.results[0].trackViewUrl, 'https://music.yandex.ru/album/album-target-1/track/target-1');
 });
 
+test('Yandex album batch lookup reads tracks from found album releases', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/search') {
+      assert.equal(parsed.searchParams.get('type'), 'album');
+      return { result: { albums: { results: [{ id: 55, title: 'Discovery' }] } } };
+    }
+    if (parsed.pathname === '/albums/55/with-tracks') {
+      return { result: { id: 55, title: 'Discovery', volumes: [[
+        { id: 1, title: 'One More Time', artists: [{ id: 1, name: 'Daft Punk' }], durationMs: 320357 },
+        { id: 2, title: 'Aerodynamic', artists: [{ id: 1, name: 'Daft Punk' }], durationMs: 212546 },
+      ]] } };
+    }
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+  await page.dispatch('search-album-tracks', { album: 'Discovery', artist: 'Daft Punk' });
+  const response = page.messages.find((message) => message.type === 'command-response');
+
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(Array.from(response.results, (track) => [track.trackId, track.collectionName]), [
+    ['1', 'Discovery'], ['2', 'Discovery'],
+  ]);
+});
+
 test('Yandex catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
   const page = makePage(async () => ({ status: 429, headers: { 'retry-after': '9' }, payload: {} }));
   await page.dispatch('search-tracks', { query: 'Limited Song Artist' });

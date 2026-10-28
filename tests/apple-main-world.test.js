@@ -210,6 +210,28 @@ test('Apple catalog search accepts a batch of ISRCs and keeps each result ISRC',
   assert.equal(page.requests[1].url, 'https://amp-api.music.apple.com/v1/catalog/ae/songs?filter%5Bisrc%5D=USABC1234567%2CGBDEF1234567&limit=25');
 });
 
+test('Apple album batch search returns tracks from matching catalog album pages', async () => {
+  const page = makePage({
+    '/v1/catalog/ae/search?term=Discovery+Daft+Punk&types=albums&limit=5': {
+      results: { albums: { data: [{ id: 'album-1', attributes: { name: 'Discovery' } }] } },
+    },
+    '/v1/catalog/ae/albums/album-1/tracks?limit=100': {
+      data: [
+        { id: 'song-1', attributes: { name: 'One More Time', artistName: 'Daft Punk', durationInMillis: 320357 } },
+        { id: 'song-2', attributes: { name: 'Aerodynamic', artistName: 'Daft Punk', durationInMillis: 212546 } },
+      ],
+      next: null,
+    },
+  });
+  const result = await page.command('search-album-tracks', { album: 'Discovery', artist: 'Daft Punk', storefront: 'AE' });
+
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(Array.from(result.result, (track) => [track.trackId, track.collectionName]), [
+    ['song-1', 'Discovery'], ['song-2', 'Discovery'],
+  ]);
+  assert.equal(page.requests.filter((request) => request.url.includes('/v1/catalog/ae/')).length, 2);
+});
+
 test('Apple target writer adds favorites and ordered playlist items, then verifies both', async () => {
   let favoriteReads = 0;
   const fixtures = {

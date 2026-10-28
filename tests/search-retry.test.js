@@ -202,6 +202,35 @@ test('batch catalog search preserves order and individually retries missing ISRC
   assert.deepEqual(progress, [1, 2]);
 });
 
+test('album batch search groups matching source albums and falls back for tracks without a safe batch result', async () => {
+  const { engine } = loadEngine();
+  const batchCalls = [];
+  const individualQueries = [];
+  const tracks = [
+    { title: 'Song A', artist: 'Artist', album: 'Album One' },
+    { title: 'Song B', artist: 'Artist', album: 'Album One' },
+    { title: 'Song C', artist: 'Artist', album: 'Album Two' },
+  ];
+  const results = await engine.searchMany({
+    id: 'spotify',
+    batchSearchRequiresGroup: true,
+    canBatchSearch(track) { return Boolean(track.album); },
+    batchSearchKey(track) { return track.album; },
+    async searchTracksBatch(batchTracks) {
+      batchCalls.push(Array.from(batchTracks, (track) => track.title));
+      return batchTracks.map((track) => track.title === 'Song A' ? [{ trackId: 'target:a' }] : []);
+    },
+    async searchTracks(track) {
+      individualQueries.push(track.title);
+      return [{ trackId: `individual:${track.title}` }];
+    },
+  }, tracks);
+
+  assert.deepEqual(batchCalls, [['Song A', 'Song B']]);
+  assert.deepEqual(individualQueries, ['Song B', 'Song C']);
+  assert.deepEqual(results.map((result) => result.candidates[0].trackId), ['target:a', 'individual:Song B', 'individual:Song C']);
+});
+
 test('batch catalog search uses bounded parallelism for large ISRC queues', async () => {
   const { engine } = loadEngine();
   const tracks = Array.from({ length: 9 }, (_, index) => ({

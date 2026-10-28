@@ -323,6 +323,26 @@ test('extension-hosted app can send a catalog command to a signed-in service tab
   assert.ok(app.messages.some(({ tabId, message }) => tabId === 4 && message.type === 'apple:command'));
 });
 
+test('extension-hosted app can send album batch search to the signed-in Apple Music tab', async () => {
+  const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);
+  const response = await app.callFrom({
+    type: 'music-importer:apple-command',
+    requestId: 'fixture-request-0001',
+    action: 'search-album-tracks',
+    album: 'Discovery',
+    artist: 'Daft Punk',
+    storefront: 'AE',
+  }, 'chrome-extension://fixture-extension/app/index.html');
+
+  assert.equal(response.ok, true);
+  const command = app.messages.find(({ tabId, message }) => tabId === 4 && message.type === 'apple:command')?.message;
+  assert.equal(command?.action, 'search-album-tracks');
+  assert.equal(command?.album, 'Discovery');
+  assert.equal(command?.artist, 'Daft Punk');
+  assert.equal(command?.storefront, 'AE');
+});
+
 test('extension app receives transfer progress through its private runtime port', async () => {
   const tabs = [{ id: 4, url: 'https://music.apple.com/us/library' }];
   const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);

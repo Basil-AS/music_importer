@@ -531,7 +531,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
-      if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Некорректная команда Звука.' });
         return;
       }
@@ -560,6 +560,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           requestId: String(message.requestId),
           action: message.action,
           query: String(message.query || '').slice(0, 400),
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
           plan: message.action === 'execute-transfer' ? message.plan : undefined,
         });
         sendResponse(response || { ok: false, error: 'Звук не вернул результат.' });
@@ -587,7 +589,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const requestId = String(message.requestId || '');
-      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Некорректная команда Spotify.' });
         return;
       }
@@ -614,6 +616,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const response = await chrome.tabs.sendMessage(tab.id, {
           type: 'spotify:command', requestId, action: message.action,
           query: String(message.query || '').slice(0, 400),
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
           plan: message.action === 'execute-transfer' ? message.plan : undefined,
         });
         sendResponse(response || { ok: false, error: 'Spotify не вернул результат.' });
@@ -641,7 +645,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const requestId = String(message.requestId || '');
-      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Некорректная команда Apple Music.' });
         return;
       }
@@ -664,6 +668,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           requestId,
           action: message.action,
           query: String(message.query || '').slice(0, 400),
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
           storefront: String(message.storefront || '').slice(0, 2),
           plan: message.action === 'execute-transfer' ? message.plan : undefined,
         });
@@ -691,7 +697,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
         return;
       }
-      if (!['search-tracks', 'execute-transfer'].includes(message.action)) {
+      if (!['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) {
         sendResponse({ ok: false, error: 'Неизвестная команда Яндекс Музыки.' });
         return;
       }
@@ -709,6 +715,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           action: message.action,
           requestId: String(message.requestId || ''),
           query: message.query,
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
           plan: message.plan,
         });
         sendResponse(response || { ok: false, error: 'Расширение Яндекс Музыки не вернуло результат.' });

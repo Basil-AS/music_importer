@@ -297,6 +297,51 @@
     return payload.tracks.items.map(spotifyCandidate).filter(Boolean);
   }
 
+  async function searchAlbumTracks(albumName, artistName) {
+    const album = String(albumName || '').trim().slice(0, 200);
+    const artist = String(artistName || '').trim().slice(0, 200);
+    if (!album || !artist) throw new Error('Для пакетного поиска Spotify нужны альбом и артист.');
+    const headers = await waitForSession();
+    const fetchCatalog = async (url, label) => {
+      const response = await originalFetch.call(window, url, {
+        method: 'GET', credentials: 'include', headers: { ...headers, Accept: 'application/json' },
+      });
+      if (!response.ok) throw Object.assign(new Error(`Каталог Spotify: HTTP ${response.status} (${label}).`), {
+        status: response.status,
+        retryAfter: response.headers?.get?.('retry-after') || null,
+      });
+      return response.json();
+    };
+    const searchParams = new URLSearchParams({ q: `album:${album} artist:${artist}`, type: 'album', limit: '5', market: 'from_token' });
+    const search = await fetchCatalog(`https://api.spotify.com/v1/search?${searchParams}`, 'поиск альбома');
+    if (!Array.isArray(search?.albums?.items)) throw new Error('Spotify вернул неизвестную выдачу альбомов.');
+    const candidates = new Map();
+    for (const albumResult of search.albums.items.slice(0, 3)) {
+      const albumId = String(albumResult?.id || '').trim();
+      if (!albumId) continue;
+      let offset = 0;
+      let total = null;
+      const seen = new Set();
+      while (total === null || offset < total) {
+        if (seen.has(offset)) throw new Error('Spotify повторил страницу треклиста альбома.');
+        seen.add(offset);
+        const params = new URLSearchParams({ limit: '50', offset: String(offset), market: 'from_token' });
+        const page = await fetchCatalog(`https://api.spotify.com/v1/albums/${encodeURIComponent(albumId)}/tracks?${params}`, 'треклист альбома');
+        if (!Array.isArray(page?.items) || !Number.isInteger(page.total)) throw new Error('Spotify вернул неизвестный формат треклиста альбома.');
+        if (total !== null && total !== page.total) throw new Error('Spotify изменил число треков альбома во время чтения.');
+        total = page.total;
+        for (const row of page.items) {
+          const candidate = spotifyCandidate({ ...row, album: { name: albumResult?.name || album } });
+          if (candidate?.trackId) candidates.set(candidate.trackId, candidate);
+        }
+        if (!page.items.length && offset < total) throw new Error('Spotify вернул пустую страницу треклиста альбома до его конца.');
+        if (offset + page.items.length <= offset && offset < total) throw new Error('Spotify не продвинул смещение треклиста альбома.');
+        offset += page.items.length;
+      }
+    }
+    return [...candidates.values()];
+  }
+
   async function addSpotifyLibraryItems(uris) {
     for (let offset = 0; offset < uris.length; offset += 40) {
       await query('addToLibrary', { libraryItemUris: uris.slice(offset, offset + 40), interactionId: null });
@@ -486,7 +531,9 @@
     try {
       const result = event.data.action === 'search-tracks'
         ? await searchCatalog(event.data.query)
-        : await executeTransfer(event.data.plan);
+        : event.data.action === 'search-album-tracks'
+          ? await searchAlbumTracks(event.data.album, event.data.artist)
+          : await executeTransfer(event.data.plan);
       post('command-result', { requestId, ok: true, result });
     } catch (error) {
       post('command-result', {
@@ -535,7 +582,7 @@
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker) return;
     if (event.data.type === 'command') {
-      if (!/^[a-z0-9-]{16,80}$/i.test(String(event.data.requestId || '')) || !['search-tracks', 'execute-transfer'].includes(event.data.action)) return;
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(event.data.requestId || '')) || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(event.data.action)) return;
       void handleCommand(event);
       return;
     }

@@ -24,7 +24,7 @@
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== 'yandex:command' || !['search-tracks', 'execute-transfer'].includes(message.action)) return false;
+    if (message?.type !== 'yandex:command' || !['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) return false;
     const requestId = String(message.requestId || '');
     const timeout = setTimeout(() => {
       window.removeEventListener('message', onResponse);
@@ -38,7 +38,7 @@
       sendResponse(event.data);
     };
     window.addEventListener('message', onResponse);
-    window.postMessage({ source: marker, type: message.action, requestId, query: message.query, plan: message.plan }, location.origin);
+    window.postMessage({ source: marker, type: message.action, requestId, query: message.query, album: message.album, artist: message.artist, plan: message.plan }, location.origin);
     return true;
   });
 })();
