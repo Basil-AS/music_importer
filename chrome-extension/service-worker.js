@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
+const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
 const APP_TAB_URLS = [
   'http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*',
   'http://localhost:8000/*', 'http://localhost:8001/*',
@@ -349,13 +350,15 @@ async function requestProviderLibrary(provider, refresh) {
   const state = await readProviderState();
   let scan = state.scans[provider];
   const lastUpdate = Date.parse(scan?.updatedAt || scan?.startedAt || '');
-  if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > 45 * 60 * 1000) {
-    scan = { status: 'failed', message: 'Предыдущий сбор остановился без ответа. Запустите его повторно.' };
-    state.scans[provider] = scan;
-    await writeProviderState(state);
-  }
   const lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
+  if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > PROVIDER_SCAN_STALE_AFTER_MS) {
+    scan = { status: 'failed', message: 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.' };
+    state.scans[provider] = scan;
+    await writeProviderState(state);
+    if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message };
+    return { error: scan.message };
+  }
   if (refresh && scan?.status !== 'reading') {
     const tabs = await chrome.tabs.query({ url: providerConfig.tabPattern });
     const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];

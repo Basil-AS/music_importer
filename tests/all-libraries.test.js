@@ -282,6 +282,27 @@ test('selective library refresh rejects unknown provider IDs', async () => {
   assert.deepEqual(app.updates, []);
 });
 
+test('a provider scan with no progress for two minutes stops blocking the other libraries', async () => {
+  const tabs = [{ id: 2, url: 'https://open.spotify.com/collection/tracks' }];
+  const startedAt = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+  const app = bootWorker({
+    [PROVIDER_KEY]: {
+      snapshots: {},
+      scans: { spotify: { status: 'reading', message: 'Old progress', updatedAt: startedAt } },
+      previousSnapshots: {},
+    },
+    [ZVUK_KEY]: makeZvukState(),
+  }, tabs);
+
+  const response = await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+
+  assert.equal(response.pending, false);
+  assert.equal(response.statuses.spotify.status, 'unavailable');
+  assert.match(response.statuses.spotify.message, /не сообщал о прогрессе 2 минуты/i);
+  assert.equal(response.statuses['apple-music'].status, 'unavailable');
+  assert.deepEqual(app.messages, []);
+});
+
 test('one-click provider scan uses the most recently accessed matching service tab', async () => {
   const tabs = [
     { id: 1, url: 'https://music.apple.com/us/library', lastAccessed: 10 },
