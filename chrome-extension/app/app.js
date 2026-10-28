@@ -15,6 +15,10 @@
   const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
   let extensionCheckInProgress = false;
+  let accountScanInProgress = false;
+  let focusScanQueued = false;
+  let focusScanTimer = null;
+  let lastFocusScanAt = 0;
   let activeSearchController = null;
   window.MusicTransferSafety.installBeforeUnloadGuard(() => state.transferInProgress);
   const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
@@ -1127,11 +1131,11 @@
     }
   });
 
-  function requestAllLibraries(refresh = false) {
+  function requestAllLibraries(refresh = false, refreshProviders = null) {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает запрос к локальному расширению.'));
     const requestId = window.crypto.randomUUID();
     if (extensionApp) {
-      return chrome.runtime.sendMessage({ type: 'music-importer:get-all-libraries', requestId, refresh })
+      return chrome.runtime.sendMessage({ type: 'music-importer:get-all-libraries', requestId, refresh, refreshProviders })
         .catch(() => ({ error: 'Не удалось связаться с расширением. Перезапустите Music Importer из панели Chrome.' }));
     }
     return new Promise((resolve, reject) => {
@@ -1149,7 +1153,7 @@
         resolve(event.data);
       };
       window.addEventListener('message', onMessage);
-      window.postMessage({ source: 'music-importer-local-app', type: 'get-all-libraries', requestId, refresh }, location.origin);
+      window.postMessage({ source: 'music-importer-local-app', type: 'get-all-libraries', requestId, refresh, refreshProviders }, location.origin);
     });
   }
 
@@ -1190,8 +1194,8 @@
       const opened = (response.opened || []).map((id) => names[id] || id);
       const alreadyOpen = (response.alreadyOpen || []).map((id) => names[id] || id);
       $('#extensionStatus').textContent = opened.length
-        ? `Открыты вкладки: ${opened.join(', ')}. Войдите в нужные аккаунты и нажмите «Обновить открытые аккаунты». Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
-        : `Все вкладки уже открыты: ${alreadyOpen.join(', ') || 'нет'}. Войдите в нужные аккаунты и нажмите «Обновить открытые аккаунты».`;
+        ? `Открыты вкладки: ${opened.join(', ')}. Войдите в нужные аккаунты и вернитесь в Music Importer — он проверит их автоматически. Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
+        : `Все вкладки уже открыты: ${alreadyOpen.join(', ') || 'нет'}. Войдите в нужные аккаунты и вернитесь в Music Importer — он проверит их автоматически.`;
       toast(opened.length ? `Открыто вкладок для входа: ${opened.length}` : 'Все вкладки сервисов уже открыты');
     } catch (error) {
       $('#extensionStatus').textContent = error.message || 'Не удалось открыть сервисы.';
@@ -1201,12 +1205,17 @@
     }
   }
 
-  async function scanOpenAccounts(automatic = false) {
+  async function scanOpenAccounts(automatic = false, refreshProviders = null) {
     const button = $('#extensionImportBtn');
     if (!state.extensionAvailable) {
       checkLocalExtension();
       return;
     }
+    if (accountScanInProgress) {
+      if (automatic) focusScanQueued = true;
+      return;
+    }
+    accountScanInProgress = true;
     button.disabled = true;
     button.textContent = 'Сканируем аккаунты…';
     $('#extensionStatus').textContent = automatic
@@ -1214,7 +1223,7 @@
       : 'Проверяю открытые вкладки сервисов и читаю подтверждённые библиотеки…';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
     try {
-      let response = await requestAllLibraries(true);
+      let response = await requestAllLibraries(true, refreshProviders);
       while (response.pending && Date.now() < deadline) {
         state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
         renderSourceAvailability(response.statuses || {});
@@ -1247,10 +1256,45 @@
       $('#extensionStatus').textContent = error.message || 'Не удалось загрузить открытые библиотеки.';
       if (!automatic) toast(error.message || 'Не удалось получить данные из расширения.');
     } finally {
+      accountScanInProgress = false;
       button.disabled = false;
       button.textContent = 'Обновить открытые аккаунты';
+      if (focusScanQueued) {
+        focusScanQueued = false;
+        scheduleFocusRefresh();
+      }
     }
   }
+
+  function missingAccountProviders() {
+    const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+    return providers.filter((provider) => {
+      const status = state.libraryStatuses[provider]?.status;
+      return !state.librarySnapshots[provider] || status === 'unavailable' || status === 'stale';
+    });
+  }
+
+  function scheduleFocusRefresh() {
+    if (!extensionApp || !state.extensionAvailable || document.visibilityState !== 'visible') return;
+    const providers = missingAccountProviders();
+    if (!providers.length) return;
+    if (accountScanInProgress) {
+      focusScanQueued = true;
+      return;
+    }
+    if (Date.now() - lastFocusScanAt < 10000) return;
+    lastFocusScanAt = Date.now();
+    void scanOpenAccounts(true, providers);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!extensionApp || !state.extensionAvailable || document.visibilityState !== 'visible') return;
+    if (focusScanTimer) clearTimeout(focusScanTimer);
+    focusScanTimer = setTimeout(() => {
+      focusScanTimer = null;
+      scheduleFocusRefresh();
+    }, 700);
+  });
 
   $('#extensionImportBtn').addEventListener('click', () => {
     if (state.searching || state.tracks.some((track) => track.searching)) {

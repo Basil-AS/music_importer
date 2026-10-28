@@ -208,6 +208,38 @@ test('one-click library scan starts readers in every open provider tab', async (
   assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url.includes('/favorites?music_importer_capture=1')));
 });
 
+test('selective library refresh rescans only the requested provider', async () => {
+  const tabs = [
+    { id: 1, url: 'https://zvuk.com/favorites' },
+    { id: 2, url: 'https://open.spotify.com/collection/tracks' },
+    { id: 3, url: 'https://music.yandex.ru/users/me/playlists' },
+    { id: 4, url: 'https://music.apple.com/us/library' },
+  ];
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() }, tabs);
+  const response = await app.callFrom({
+    type: 'music-importer:get-all-libraries',
+    refresh: true,
+    refreshProviders: ['apple-music'],
+  }, 'chrome-extension://fixture-extension/app/index.html');
+
+  assert.equal(response.pending, true);
+  assert.equal(response.statuses['apple-music'].status, 'scanning');
+  assert.deepEqual(app.messages.map((entry) => entry.message.type), ['apple:start-library-scan']);
+  assert.ok(!app.updates.some((entry) => entry.update.url?.includes('/favorites?music_importer_capture=1')));
+});
+
+test('selective library refresh rejects unknown provider IDs', async () => {
+  const app = bootWorker({});
+  const response = await app.callFrom({
+    type: 'music-importer:get-all-libraries',
+    refresh: true,
+    refreshProviders: ['unknown-provider'],
+  }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.match(response.error, /некорректный список сервисов/i);
+  assert.deepEqual(app.messages, []);
+  assert.deepEqual(app.updates, []);
+});
+
 test('one-click provider scan uses the most recently accessed matching service tab', async () => {
   const tabs = [
     { id: 1, url: 'https://music.apple.com/us/library', lastAccessed: 10 },

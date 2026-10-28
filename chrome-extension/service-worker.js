@@ -406,12 +406,13 @@ async function requestZvukLibrary(refresh) {
   };
 }
 
-async function requestAllLibraries(refresh) {
+async function requestAllLibraries(refresh, refreshProviders = null) {
   const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
   const outcomes = await Promise.all(providers.map(async (provider) => {
+    const refreshProvider = refresh === true && (!Array.isArray(refreshProviders) || refreshProviders.includes(provider));
     const result = provider === 'zvuk'
-      ? await requestZvukLibrary(refresh)
-      : await requestProviderLibrary(provider, refresh);
+      ? await requestZvukLibrary(refreshProvider)
+      : await requestProviderLibrary(provider, refreshProvider);
     return [provider, result || { error: 'Сервис не вернул состояние.' }];
   }));
   const libraries = {};
@@ -737,7 +738,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ error: 'Команда доступна только локальному приложению.' });
         return;
       }
-      sendResponse(await requestAllLibraries(message.refresh === true));
+      const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+      if (message.refreshProviders !== undefined && message.refreshProviders !== null
+        && (!Array.isArray(message.refreshProviders) || message.refreshProviders.some((provider) => !providers.includes(provider)))) {
+        sendResponse({ error: 'Некорректный список сервисов для обновления.' });
+        return;
+      }
+      sendResponse(await requestAllLibraries(message.refresh === true, message.refreshProviders ?? null));
       return;
     }
 

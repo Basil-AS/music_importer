@@ -168,6 +168,7 @@
         const response = await chrome.runtime.sendMessage({
           type: 'music-importer:get-all-libraries',
           refresh: event.data.refresh === true,
+          refreshProviders: event.data.refreshProviders,
         });
         window.postMessage({
           source: marker,
