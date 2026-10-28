@@ -75,6 +75,17 @@ test('an exact ISRC does not auto-select a conflicting recording version', () =>
   assert.equal(result.reason, 'manual_review');
 });
 
+test('a safe exact-ISRC result outranks conflicting catalog duplicates', () => {
+  const matcher = loadMatcher();
+  const source = { title: 'Song', artist: 'Artist', album: 'Studio', durationMs: 180000, isrc: 'USABC1234567' };
+  const suggestion = matcher.suggestBestMatch(source, [
+    { trackId: 'conflicting-live', trackName: 'Song (Live)', artistName: 'Artist', collectionName: 'Live Album', trackTimeMillis: 190000, isrc: 'USABC1234567' },
+    { trackId: 'correct-studio', trackName: 'Song', artistName: 'Artist', collectionName: 'Studio', trackTimeMillis: 180000, isrc: 'USABC1234567' },
+  ]);
+  assert.equal(suggestion.best.trackId, 'correct-studio');
+  assert.equal(suggestion.automatic, true);
+});
+
 test('matching never auto-selects an exact metadata candidate with a conflicting ISRC', () => {
   const matcher = loadMatcher();
   const result = matcher.suggestBestMatch(

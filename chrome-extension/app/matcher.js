@@ -245,8 +245,16 @@
   }
 
   function suggestBestMatch(source, candidates) {
+    const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
     const ranked = candidates.map((candidate) => ({ candidate, ...scoreCandidate(source, candidate) }))
-      .sort((left, right) => right.score - left.score);
+      .sort((left, right) => {
+        if (sourceISRC) {
+          const exactPriority = (entry) => entry.exactISRC ? (entry.versionConflict ? 2 : 3) : 1;
+          const priorityDelta = exactPriority(right) - exactPriority(left);
+          if (priorityDelta) return priorityDelta;
+        }
+        return right.score - left.score;
+      });
     const best = ranked[0] || null;
     const runnerUp = ranked[1] || null;
     const margin = best ? best.score - (runnerUp?.score ?? 0) : 0;
