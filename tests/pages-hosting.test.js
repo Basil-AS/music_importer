@@ -57,7 +57,7 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   for (const iconPath of Object.values(manifest.icons)) {
     assert.ok(fs.existsSync(require.resolve(`../chrome-extension/${iconPath}`)), `missing extension icon ${iconPath}`);
   }
-  assert.equal(manifest.version, '0.13.34');
+  assert.equal(manifest.version, '0.13.35');
 
   const workflow = fs.readFileSync(require.resolve('../.github/workflows/deploy-pages.yml'), 'utf8');
   assert.match(workflow, /branches:\s*\[master\]/);

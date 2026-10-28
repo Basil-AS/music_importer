@@ -32,6 +32,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
   const createdTabs = [];
   let runtimeListener;
   let installedListener;
+  let startupListener;
   let connectListener;
   let actionListener;
   const chrome = {
@@ -40,6 +41,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
       getURL(path) { return `chrome-extension://fixture-extension/${path}`; },
       onMessage: { addListener(listener) { runtimeListener = listener; } },
       onInstalled: { addListener(listener) { installedListener = listener; } },
+      onStartup: { addListener(listener) { startupListener = listener; } },
       onConnect: { addListener(listener) { connectListener = listener; } },
     },
     action: { onClicked: { addListener(listener) { actionListener = listener; } } },
@@ -107,6 +109,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
     storageState,
     clickAction(tab) { return actionListener(tab); },
     install(reason = 'install') { return installedListener({ reason }); },
+    startup() { return startupListener(); },
     call(message) {
       return this.callFrom(message, 'http://127.0.0.1:8001/');
     },
@@ -169,6 +172,17 @@ test('extension update reloads provider tabs with an old bridge protocol', async
   assert.deepEqual(worker.reloads, [41]);
   assert.ok(worker.messages.some(({ tabId, message }) => tabId === 41 && message.type === 'music-importer:bridge-health-check'));
   assert.ok(worker.messages.some(({ tabId, message }) => tabId === 42 && message.type === 'music-importer:bridge-health-check'));
+});
+
+test('browser startup reloads only provider tabs with a stale bridge protocol', async () => {
+  const worker = bootWorker({}, [
+    { id: 51, url: 'https://music.apple.com/us/home', status: 'complete' },
+    { id: 52, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
+  ], { oldBridgeTabIds: [51] });
+  await worker.startup();
+  assert.deepEqual(worker.reloads, [51]);
+  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 51 && message.type === 'music-importer:bridge-health-check'));
+  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 52 && message.type === 'music-importer:bridge-health-check'));
 });
 
 test('extension update focuses the existing importer app without creating another tab', async () => {

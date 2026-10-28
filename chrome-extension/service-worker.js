@@ -102,6 +102,10 @@ chrome.runtime.onInstalled?.addListener(async (details) => {
   await openImporterApp().catch(() => {});
 });
 
+// A browser restart can leave provider tabs around with content scripts from a
+// previous extension context. Check their bridge protocol before the next scan.
+chrome.runtime.onStartup?.addListener(() => repairStaleProviderTabs());
+
 chrome.action?.onClicked?.addListener(() => {
   return openImporterApp().catch(() => {});
 });

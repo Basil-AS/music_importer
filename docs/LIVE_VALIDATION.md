@@ -44,6 +44,14 @@ Fixture coverage remains separate from this live observation. None of the 12 sou
 - The same run did not complete new snapshots from Spotify, Yandex Music, or Zvuk. No target search, account write, or read-back was run.
 - Provider tabs are required because readers run in the corresponding signed-in site page and use that page's authenticated requests. They can remain in the background; users should leave the Zvuk tab open until its multi-page collection scan finishes. Likes and playlist metadata are read into local extension storage; audio is not downloaded.
 
+## 2026-10-28 — automatic recovery after browser startup
+
+- The Apple stack trace still shown by Chrome is from a bridge that called `chrome.runtime.sendMessage(...).then(...)` directly. The current bridge source catches both synchronous “Extension context invalidated” exceptions and rejected message promises. A historical error entry in `chrome://extensions` can remain visible after recovery; its presence alone does not prove that the current bridge is still failing.
+- The extension now checks open Spotify, Apple Music, Yandex Music, and Zvuk tabs at browser startup. It reloads only tabs whose health check is missing or reports an old bridge protocol. Existing update-time recovery remains in place. A fixture verifies that a stale Apple tab reloads while a healthy Spotify tab is left alone.
+- This startup repair is implemented and fixture-checked, but Chrome must load manifest version `0.13.35` for it to take effect. If the old error is still actively emitted after that version is loaded and the Apple tab has been reloaded by the extension, collect the new error's timestamp and exact script line without sharing any session credentials.
+- `http://127.0.0.1:8001/` is Python's static server for `demo/`, not an application backend. The normal extension-hosted UI has no project server.
+- Fresh reads currently require open signed-in provider tabs. The extension sends a scan command to each tab; provider page code issues that site's authenticated library/API requests and sends normalized likes, playlists, and track metadata through a content-script bridge. The extension service worker saves complete snapshots locally. Provider tabs may remain in the background, but the Zvuk reader also scrolls/navigates its service page while collecting favorites and playlist pages. Transfer search and writes likewise need an open target-service tab. No audio is downloaded.
+
 ## 2026-10-28 — parallel scan state audit
 
 - Code review found that simultaneous Spotify, Apple Music, and Yandex progress/snapshot messages each performed an independent read-modify-write of the same Chrome storage record. A later write could therefore erase another provider's just-written progress or completed snapshot.
