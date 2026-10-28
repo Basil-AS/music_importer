@@ -6,6 +6,15 @@ const providers = [
   { id: 'yandex-music', statusId: '#yandexStatus', origin: 'https://music.yandex.ru' },
   { id: 'zvuk', statusId: '#zvukStatus', origin: 'https://zvuk.com' },
 ];
+let appTargetTabId = null;
+let appPermissionOrigin = null;
+
+function localPermissionOrigin(url) {
+  if (url.protocol !== 'http:') return null;
+  if (url.hostname === '127.0.0.1') return 'http://127.0.0.1/*';
+  if (url.hostname === 'localhost') return 'http://localhost/*';
+  return null;
+}
 
 async function renderConnections() {
   const tabs = await chrome.tabs.query({});
@@ -33,20 +42,63 @@ async function renderConnections() {
   };
   appTabs.sort((left, right) => appPriority(right) - appPriority(left));
   const appTab = appTabs[0];
+  appTargetTabId = appTab?.id || null;
+  appPermissionOrigin = null;
+  $('#connectAppBtn').hidden = true;
   if (!appTab) {
     $('#appConnectionStatus').textContent = 'Приложение не открыто';
     $('#appConnectionHelp').textContent = 'Запустите локальный сервер и откройте его страницу.';
     return;
   }
+  const appUrl = new URL(appTab.url);
+  appPermissionOrigin = localPermissionOrigin(appUrl);
   try {
     const health = await chrome.tabs.sendMessage(appTab.id, { type: 'music-importer:bridge-health' });
     $('#appConnectionStatus').textContent = health?.ok ? `Приложение подключено · расширение ${health.version}` : 'Страница найдена, расширение не ответило';
-    $('#appConnectionHelp').textContent = health?.ok ? 'После входа в сервисы приложение начнёт собирать библиотеки.' : 'Проверьте доступ расширения к адресу этой страницы и перезагрузите вкладку.';
+    $('#appConnectionHelp').textContent = health?.ok ? 'После входа в сервисы приложение начнёт собирать библиотеки.' : 'Нажмите ниже, чтобы выдать доступ и перезагрузить страницу.';
+    $('#connectAppBtn').hidden = Boolean(health?.ok) || !appPermissionOrigin;
+    $('#connectAppBtn').textContent = 'Разрешить доступ и подключить';
   } catch {
     $('#appConnectionStatus').textContent = 'Расширение не подключено к странице';
-    $('#appConnectionHelp').textContent = 'Разрешите расширению доступ к этому адресу, обновите его и перезагрузите страницу.';
+    $('#appConnectionHelp').textContent = appPermissionOrigin
+      ? 'Одним нажатием разрешите доступ к локальному приложению и перезагрузите страницу.'
+      : 'Обновите расширение и перезагрузите страницу приложения.';
+    $('#connectAppBtn').hidden = !appPermissionOrigin;
+    $('#connectAppBtn').textContent = 'Разрешить доступ и подключить';
   }
 }
+
+$('#connectAppBtn').addEventListener('click', () => {
+  const tabId = appTargetTabId;
+  const origin = appPermissionOrigin;
+  if (!tabId || !origin) return;
+  const button = $('#connectAppBtn');
+  button.disabled = true;
+  button.textContent = 'Запрашиваем разрешение…';
+  // Keep request() directly inside the click handler so Chrome can show its permission prompt.
+  chrome.permissions.request({ origins: [origin] }, (granted) => {
+    if (chrome.runtime.lastError || !granted) {
+      $('#appConnectionStatus').textContent = 'Доступ к приложению не выдан';
+      $('#appConnectionHelp').textContent = 'Нажмите кнопку ещё раз и подтвердите запрос Chrome.';
+      button.textContent = 'Повторить запрос доступа';
+      button.disabled = false;
+      return;
+    }
+    button.textContent = 'Перезагружаем страницу…';
+    chrome.tabs.reload(tabId, () => {
+      if (chrome.runtime.lastError) {
+        $('#appConnectionStatus').textContent = 'Не удалось перезагрузить страницу';
+        $('#appConnectionHelp').textContent = 'Обновите вкладку Music Importer вручную.';
+        button.textContent = 'Повторить подключение';
+        button.disabled = false;
+        return;
+      }
+      $('#appConnectionStatus').textContent = 'Проверяем подключение…';
+      $('#appConnectionHelp').textContent = 'Страница обновлена. Проверяем ответ расширения.';
+      setTimeout(() => void renderConnections(), 700);
+    });
+  });
+});
 
 function getCompleteness(state) {
   const parts = [];
