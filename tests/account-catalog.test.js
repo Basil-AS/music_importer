@@ -76,6 +76,44 @@ test('full target snapshot resolves a 1,000-track transfer without catalog searc
   assert.equal(resolution.unresolved[1].manualQuery, true);
 });
 
+test('full target snapshots resolve 1,000 no-ISRC metadata matches for every provider', () => {
+  const accountCatalog = loadAccountCatalog();
+  const providers = ['apple-music', 'spotify', 'yandex-music', 'zvuk'];
+
+  for (const provider of providers) {
+    const targetTracks = Array.from({ length: 1000 }, (_, index) => {
+      const title = `Catalogue Song ${index}`;
+      const artist = `Artist ${index % 30}`;
+      const album = `Album ${index % 200}`;
+      const durationMs = 160000 + index;
+      const common = { title, durationMs, isrc: '' };
+      if (provider === 'apple-music') return { ...common, catalogId: `apple-${index}`, artist, album };
+      if (provider === 'spotify') return { ...common, id: `spotify-${index}`, artists: [{ name: artist }], album: { name: album } };
+      if (provider === 'yandex-music') return { ...common, id: `yandex-${index}`, artists: [artist], album };
+      return { ...common, id: `zvuk-${index}`, artists: [{ title: artist }], release: { title: album } };
+    });
+    const sourceTracks = targetTracks.map((track) => ({
+      title: track.title,
+      artist: provider === 'apple-music' ? track.artist : provider === 'spotify' ? track.artists[0].name
+        : provider === 'yandex-music' ? track.artists[0] : track.artists[0].title,
+      album: provider === 'apple-music' || provider === 'yandex-music' ? track.album
+        : provider === 'spotify' ? track.album.name : track.release.title,
+      durationMs: track.durationMs,
+    }));
+    const index = accountCatalog.buildIndex({
+      service: provider,
+      completeness: { confirmed: true },
+      tracks: targetTracks,
+      playlists: [],
+    }, provider);
+    const resolution = accountCatalog.resolveTracks(sourceTracks, index);
+
+    assert.equal(resolution.matches.size, 1000, provider);
+    assert.equal(resolution.unresolved.length, 0, provider);
+    assert.equal(resolution.matches.get(sourceTracks[999])[0].trackId, `${provider === 'apple-music' ? 'apple' : provider === 'yandex-music' ? 'yandex' : provider}-${999}`, provider);
+  }
+});
+
 test('target account metadata auto-matches exact-title transliterations only above the matcher confidence threshold', () => {
   const accountCatalog = loadAccountCatalog();
   const index = accountCatalog.buildIndex({
