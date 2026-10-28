@@ -26,6 +26,9 @@
     .extension-help ol{padding-left:19px;max-width:720px}
     .extension-help li{margin:5px 0}
     .extension-help code{color:var(--text);overflow-wrap:anywhere}
+    .transfer-job-warning{display:none;margin:12px 0 0;padding:12px;border:1px solid #f28f8f66;border-radius:11px;background:#f28f8f0b;color:#f0d0d0;font-size:11px}
+    .transfer-job-warning.show{display:block}
+    .transfer-job-warning strong{color:#ffd7d7}
     @media(max-width:580px){.track-tools{align-items:flex-start}.track-pages{width:100%;justify-content:space-between}}
   </style>
 </head>
@@ -81,6 +84,7 @@
           <label class="quiet" for="targetProvider">Музыкальный сервис</label><select id="targetProvider" aria-label="Сервис назначения" style="width:100%;margin-top:6px;background:#222329;border:1px solid #3a3b43;color:#dedde2;border-radius:8px;padding:9px"><option value="apple-music">Apple Music · экспериментально</option><option value="yandex-music">Яндекс Музыка · экспериментально</option><option value="spotify">Spotify · экспериментально</option><option value="zvuk">Звук · экспериментально</option></select>
           <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title" id="targetProviderName">Apple Music</div><div class="dest-sub" id="targetCollection">Избранные песни</div></div></div>
           <div class="check-row"><span>Совпадения найдены</span><span id="readyStat">—</span></div><div class="check-row"><span>Нужно проверить</span><span id="reviewStat" style="color:var(--amber)">—</span></div><div class="check-row"><span>Без совпадения</span><span id="missingStat" style="color:var(--red)">—</span></div>
+          <div class="transfer-job-warning" id="transferJobWarning" role="alert" aria-live="polite"><strong>Предыдущий перенос прервался или не был подтверждён.</strong><p id="transferJobDetails"></p><p>Проверьте целевой аккаунт вручную: часть записей могла уже добавиться. После сверки подтвердите ниже, чтобы продолжить.</p><button class="secondary" id="acknowledgeTransferJob" type="button">Я сверил целевой аккаунт</button></div>
           <button class="primary side-primary" id="importBtn" type="button" disabled>Сформировать план <span aria-hidden="true">→</span></button>
           <p class="quiet" style="margin:8px 0 0">Во время записи оставьте эту вкладку и целевой сервис открытыми. При попытке закрыть страницу браузер предупредит, что перенос ещё идёт.</p>
           <div class="report" id="report" aria-live="polite"><h3>План готов</h3><div class="report-grid"><div class="metric"><b id="addedMetric">0</b><span>выбрано</span></div><div class="metric"><b id="skippedMetric">0</b><span>пропущено</span></div><div class="metric"><b>0</b><span>записано</span></div></div><div class="quiet" style="margin-top:10px">JSON-план содержит выбранные ID совпадений и исходные коллекции. До явного запуска библиотека не меняется.</div><button class="linkbtn" id="downloadReport" type="button" style="margin-top:12px">Скачать JSON-план</button></div>
@@ -97,6 +101,7 @@
   <script src="transfer-core.js" defer></script>
   <script src="transfer-engine.js" defer></script>
   <script src="transfer-safety.js" defer></script>
+  <script src="transfer-job-store.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

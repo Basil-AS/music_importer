@@ -10,7 +10,7 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false };
+  const state = { source: 'Звук', sourceProvider: 'zvuk', targetProvider: 'apple-music', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
   let trackPage = 0;
   let extensionCheckInProgress = false;
   window.MusicTransferSafety.installBeforeUnloadGuard(() => state.transferInProgress);
@@ -86,7 +86,7 @@
     $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков` : 'ожидает список';
     $('#selectedCount').textContent = `${selected} выбрано`;
     const hasPlaylistMappings = ['playlists', 'library'].includes(state.collectionType) && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
-    $('#importBtn').disabled = (selected === 0 && !hasPlaylistMappings) || state.searching;
+    $('#importBtn').disabled = (selected === 0 && !hasPlaylistMappings) || state.searching || Boolean(state.unresolvedTransferJob);
     $('#searchBtn').disabled = !state.loaded || state.searching;
     $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
   }
@@ -475,7 +475,7 @@
     throw new Error('Для выбранного сервиса назначения адаптер ещё не подключён.');
   }
 
-  function requestExtensionCommand(action, details = {}, provider = 'yandex') {
+  function requestExtensionCommand(action, details = {}, provider = 'yandex', onProgress = null) {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает защищённый запрос к расширению.'));
     const requestId = window.crypto.randomUUID();
     return new Promise((resolve, reject) => {
@@ -493,6 +493,7 @@
             $('#importBtn').textContent = progress.message;
             $('#searchStatus').textContent = progress.message;
           }
+          if (typeof onProgress === 'function') void onProgress(progress || {});
           return;
         }
         if (messageEvent.data?.type !== `${provider}-command-response`) return;
@@ -753,6 +754,43 @@
     });
   }
 
+  const providerLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+
+  function renderUnresolvedTransferJob() {
+    const job = state.unresolvedTransferJob;
+    const warning = $('#transferJobWarning');
+    if (!warning) return;
+    warning.classList.toggle('show', Boolean(job));
+    if (!job) return;
+    const source = providerLabels[job.sourceProvider] || job.sourceProvider;
+    const target = providerLabels[job.targetProvider] || job.targetProvider;
+    const progress = job.progress?.phase ? ` Этап: ${job.progress.phase}${job.progress.total != null ? ` (${job.progress.completed ?? 0}/${job.progress.total})` : ''}.` : '';
+    const outcome = job.outcome ? ` ${job.outcome}` : '';
+    $('#transferJobDetails').textContent = `${source} → ${target} · ${job.operationCount} треков · ${job.playlistCount} плейлистов.${progress}${outcome}`;
+  }
+
+  async function refreshUnresolvedTransferJob() {
+    state.unresolvedTransferJob = await window.MusicTransferJobStore?.latestUnresolved() || null;
+    renderUnresolvedTransferJob();
+    updateCounts();
+  }
+
+  void refreshUnresolvedTransferJob();
+
+  $('#acknowledgeTransferJob')?.addEventListener('click', async () => {
+    const job = state.unresolvedTransferJob;
+    if (!job) return;
+    const acknowledged = await window.MusicTransferJobStore?.acknowledge(job.id);
+    if (!acknowledged) {
+      toast('Не удалось сохранить отметку сверки. Проверьте доступность локального хранилища.');
+      return;
+    }
+    state.unresolvedTransferJob = null;
+    renderUnresolvedTransferJob();
+    updateCounts();
+    toast('Сверка сохранена; можно подготовить следующий перенос');
+  });
+
   $$('.source .connect').forEach((button) => button.addEventListener('click', () => {
     const card = button.closest('.source');
     const provider = card.dataset.provider;
@@ -975,9 +1013,43 @@
         if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
         state.transferInProgress = true;
         $('#importBtn').disabled = true;
+        $('#importBtn').textContent = 'Подготавливаем журнал переноса…';
+        if (state.unresolvedTransferJob) {
+          throw new Error('Сначала сверьте предыдущий перенос с целевым аккаунтом и подтвердите это в предупреждении.');
+        }
+        if (!window.MusicTransferJobStore || !window.crypto?.randomUUID) {
+          throw new Error('Не удалось включить защищённый журнал переноса. Обновите страницу в Chrome и повторите.');
+        }
+        const transferJobId = window.crypto.randomUUID();
+        const jobStarted = await window.MusicTransferJobStore.start({
+          id: transferJobId,
+          sourceProvider: state.sourceProvider,
+          targetProvider: state.targetProvider,
+          operationCount: plan.operations.length,
+          playlistCount,
+        });
+        if (!jobStarted) throw new Error('Не удалось надёжно сохранить начало переноса на этом устройстве. Запись в музыкальный аккаунт не запускалась.');
         $('#importBtn').textContent = 'Записываем и сверяем…';
         const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk', spotify: 'spotify' })[state.targetProvider];
-        const response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider);
+        let response;
+        try {
+          response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider, (progress) => window.MusicTransferJobStore.updateProgress(transferJobId, progress));
+        } catch (error) {
+          await window.MusicTransferJobStore.finish(transferJobId, 'unknown', 'Связь прервалась; проверьте целевой аккаунт.');
+          await refreshUnresolvedTransferJob();
+          throw error;
+        }
+        if (!response?.ok) {
+          const failedStatus = response?.report?.status === 'partial_failure' ? 'partial_failure' : 'failed';
+          const outcome = failedStatus === 'partial_failure'
+            ? 'Сервис сообщил о частичной ошибке; проверьте целевой аккаунт.'
+            : 'Сервис не подтвердил перенос; проверьте целевой аккаунт.';
+          await window.MusicTransferJobStore.finish(transferJobId, failedStatus, outcome);
+          await refreshUnresolvedTransferJob();
+        } else {
+          const jobFinished = await window.MusicTransferJobStore.finish(transferJobId, 'complete', 'Сервис подтвердил запись обратной сверкой.');
+          if (!jobFinished) await refreshUnresolvedTransferJob();
+        }
         if (!response?.ok) {
           if (response?.report) {
             state.report = { ...plan, mode: 'account-write', execution: response.report };
