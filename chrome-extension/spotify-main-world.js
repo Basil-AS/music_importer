@@ -337,6 +337,7 @@
     if (!normalized) throw new Error('Введите название песни или исполнителя.');
     const headers = await waitForSession();
     const params = new URLSearchParams({ q: normalized, type: 'track', limit: '10', market: 'from_token' });
+    await reserveQueryStart();
     const response = await originalFetch.call(window, `https://api.spotify.com/v1/search?${params}`, {
       method: 'GET', credentials: 'include', headers: { ...headers, Accept: 'application/json' },
     });
@@ -355,6 +356,7 @@
     if (!album || !artist) throw new Error('Для пакетного поиска Spotify нужны альбом и артист.');
     const headers = await waitForSession();
     const fetchCatalog = async (url, label) => {
+      await reserveQueryStart();
       const response = await originalFetch.call(window, url, {
         method: 'GET', credentials: 'include', headers: { ...headers, Accept: 'application/json' },
       });

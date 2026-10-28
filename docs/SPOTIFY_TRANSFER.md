@@ -7,6 +7,7 @@ The experimental writer uses the signed-in Spotify Web Player session in the ope
 ## Observed operations
 
 - Track search uses `GET https://api.spotify.com/v1/search` with the user's active Web Player authorization and `market=from_token`. When an unedited source record has a valid ISRC, it first queries `q=isrc:{code}` and falls back to title/artist if the response has no candidate returning that exact ISRC. Spotify documents `isrc` as a Search field filter in its [Search reference](https://developer.spotify.com/documentation/web-api/reference/search).
+- Catalog search and album-track pages share a serialized request-start limiter with Pathfinder calls. Catalog `429` responses forward `Retry-After` to the shared bulk-search backoff; live rate limits still require measurement on the current account.
 - Liked Songs are read with the existing `fetchLibraryTracks` Pathfinder query and added with `addToLibrary`, in batches of 40.
 - Playlists are created with `POST https://spclient.wg.spotify.com/playlist/v2/playlist`, then inserted into the user's root list through `/playlist/v2/user/{username}/rootlist/changes`.
 - Playlist items are appended through the Web Player `addToPlaylist` Pathfinder mutation, in batches of 100. The source order and repeated tracks are kept.

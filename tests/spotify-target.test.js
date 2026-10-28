@@ -23,7 +23,7 @@ function makePage(respond) {
       });
     },
     fetch: async (url, init = {}) => {
-      const request = { url: String(url), init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null };
+      const request = { url: String(url), startedAt: Date.now(), init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null };
       requests.push(request);
       const result = await respond(request);
       return {
@@ -119,6 +119,11 @@ test('Spotify album batch lookup searches albums and reads their tracklists with
     ['spotify:track:one', 'Discovery'], ['spotify:track:two', 'Discovery'],
   ]);
   assert.ok(page.requests.slice(1).every((request) => request.init.headers.authorization === 'Bearer fixture'));
+  const catalogRequestStarts = page.requests
+    .filter((request) => request.url.startsWith('https://api.spotify.com/v1/'))
+    .map((request) => request.startedAt);
+  assert.equal(catalogRequestStarts.length, 2);
+  assert.ok(catalogRequestStarts[1] - catalogRequestStarts[0] >= 250, 'Spotify catalog requests must share the serialized request-start limiter');
 });
 
 test('Spotify catalog search forwards HTTP 429 and Retry-After to the shared search engine', async () => {
