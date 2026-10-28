@@ -34,6 +34,7 @@
     const status = $('#extensionStatus');
     if (extensionApp) {
       state.extensionAvailable = true;
+      $('#openServicesBtn').disabled = false;
       status.textContent = 'Music Importer запущен в Chrome. Проверяю открытые аккаунты…';
       button.textContent = 'Подключаем аккаунты…';
       button.disabled = false;
@@ -71,6 +72,7 @@
       clearTimeout(timeout);
       window.removeEventListener('message', onMessage);
       state.extensionAvailable = true;
+      $('#openServicesBtn').disabled = false;
       status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}. Начинаю сбор открытых аккаунтов.`;
       button.textContent = 'Подключаем аккаунты…';
       button.disabled = false;
@@ -1151,6 +1153,54 @@
     });
   }
 
+  function requestOpenProviderTabs() {
+    if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает запуск вкладок сервисов.'));
+    const requestId = window.crypto.randomUUID();
+    if (extensionApp) {
+      return chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs' })
+        .catch(() => ({ ok: false, error: 'Не удалось связаться с расширением Chrome.' }));
+    }
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        reject(new Error('Расширение не ответило. Перезапустите Music Importer в обычном Chrome.'));
+      }, 10000);
+      const onMessage = (event) => {
+        if (event.source !== window || event.origin !== location.origin
+          || event.data?.source !== 'music-importer-local-app'
+          || event.data?.type !== 'provider-tabs-response'
+          || event.data?.requestId !== requestId) return;
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        resolve(event.data);
+      };
+      window.addEventListener('message', onMessage);
+      window.postMessage({ source: 'music-importer-local-app', type: 'open-provider-tabs', requestId }, location.origin);
+    });
+  }
+
+  async function openMissingServices() {
+    const button = $('#openServicesBtn');
+    if (!state.extensionAvailable) return;
+    button.disabled = true;
+    try {
+      const response = await requestOpenProviderTabs();
+      if (!response?.ok) throw new Error(response?.error || 'Не удалось открыть сервисы.');
+      const names = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
+      const opened = (response.opened || []).map((id) => names[id] || id);
+      const alreadyOpen = (response.alreadyOpen || []).map((id) => names[id] || id);
+      $('#extensionStatus').textContent = opened.length
+        ? `Открыты вкладки: ${opened.join(', ')}. Войдите в нужные аккаунты и нажмите «Обновить открытые аккаунты». Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
+        : `Все вкладки уже открыты: ${alreadyOpen.join(', ') || 'нет'}. Войдите в нужные аккаунты и нажмите «Обновить открытые аккаунты».`;
+      toast(opened.length ? `Открыто вкладок для входа: ${opened.length}` : 'Все вкладки сервисов уже открыты');
+    } catch (error) {
+      $('#extensionStatus').textContent = error.message || 'Не удалось открыть сервисы.';
+      toast(error.message || 'Не удалось открыть сервисы.');
+    } finally {
+      button.disabled = !state.extensionAvailable;
+    }
+  }
+
   async function scanOpenAccounts(automatic = false) {
     const button = $('#extensionImportBtn');
     if (!state.extensionAvailable) {
@@ -1209,6 +1259,8 @@
     }
     scanOpenAccounts(false);
   });
+
+  $('#openServicesBtn').addEventListener('click', openMissingServices);
 
   $('#templateBtn').addEventListener('click', () => {
     const blob = new Blob(['title,artist,album,isrc,duration_ms,id\n"Снег","Моя Мишель","Кино",,,\n'], { type: 'text/csv;charset=utf-8' });

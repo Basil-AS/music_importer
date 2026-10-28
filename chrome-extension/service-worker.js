@@ -442,6 +442,27 @@ async function requestAllLibraries(refresh) {
   return { libraries, statuses, pending };
 }
 
+async function openMissingProviderTabs() {
+  const providers = [
+    { id: 'zvuk', pattern: 'https://zvuk.com/*', url: 'https://zvuk.com/favorites' },
+    { id: 'spotify', pattern: 'https://open.spotify.com/*', url: 'https://open.spotify.com/collection/tracks' },
+    { id: 'yandex-music', pattern: 'https://music.yandex.ru/*', url: 'https://music.yandex.ru/home' },
+    { id: 'apple-music', pattern: 'https://music.apple.com/*', url: 'https://music.apple.com/library' },
+  ];
+  const opened = [];
+  const alreadyOpen = [];
+  for (const provider of providers) {
+    const tabs = await chrome.tabs.query({ url: provider.pattern });
+    if (tabs.some((tab) => tab.id)) {
+      alreadyOpen.push(provider.id);
+      continue;
+    }
+    await chrome.tabs.create({ url: provider.url, active: opened.length === 0 });
+    opened.push(provider.id);
+  }
+  return { ok: true, opened, alreadyOpen };
+}
+
 function pageKind(url) {
   try {
     const parsed = new URL(url);
@@ -476,6 +497,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       const acknowledged = acknowledgeTransferCheckpoint(message.checkpointAckId, message.ok === true);
       sendResponse({ ok: acknowledged });
+      return;
+    }
+
+    if (message?.type === 'music-importer:open-provider-tabs') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
+        return;
+      }
+      try {
+        sendResponse(await openMissingProviderTabs());
+      } catch {
+        sendResponse({ ok: false, error: 'Не удалось открыть вкладки музыкальных сервисов.' });
+      }
       return;
     }
 

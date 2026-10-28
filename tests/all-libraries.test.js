@@ -148,6 +148,34 @@ test('extension updates do not open an extra importer tab', async () => {
   assert.deepEqual(worker.createdTabs, []);
 });
 
+test('onboarding opens only missing provider tabs from the extension app', async () => {
+  const tabs = [{ id: 7, url: 'https://music.apple.com/library' }];
+  const app = bootWorker({}, tabs);
+  const response = await app.callFrom(
+    { type: 'music-importer:open-provider-tabs' },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(response.opened)), ['zvuk', 'spotify', 'yandex-music']);
+  assert.deepEqual(JSON.parse(JSON.stringify(response.alreadyOpen)), ['apple-music']);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), [
+    { url: 'https://zvuk.com/favorites', active: true },
+    { url: 'https://open.spotify.com/collection/tracks', active: false },
+    { url: 'https://music.yandex.ru/home', active: false },
+  ]);
+});
+
+test('onboarding rejects provider-tab requests from unrelated extension pages', async () => {
+  const app = bootWorker({});
+  const response = await app.callFrom(
+    { type: 'music-importer:open-provider-tabs' },
+    'chrome-extension://fixture-extension/popup.html',
+  );
+  assert.equal(response.ok, false);
+  assert.match(response.error, /только приложению Music Importer/i);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), []);
+});
+
 function makeZvukState(complete = false) {
   return {
     scan: { active: complete, phase: complete ? 'complete' : 'idle', tabId: 1 },

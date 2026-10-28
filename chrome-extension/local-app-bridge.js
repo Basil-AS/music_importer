@@ -192,6 +192,30 @@
       return;
     }
 
+    if (event.data.type === 'open-provider-tabs') {
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs' });
+        window.postMessage({
+          source: marker,
+          type: 'provider-tabs-response',
+          requestId,
+          ok: response?.ok === true,
+          opened: response?.opened || [],
+          alreadyOpen: response?.alreadyOpen || [],
+          error: response?.error || null,
+        }, location.origin);
+      } catch {
+        window.postMessage({
+          source: marker,
+          type: 'provider-tabs-response',
+          requestId,
+          ok: false,
+          error: 'Не удалось связаться с расширением Chrome.',
+        }, location.origin);
+      }
+      return;
+    }
+
     if (event.data.type !== 'get-library') return;
 
     try {
