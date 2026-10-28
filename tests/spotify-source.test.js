@@ -17,7 +17,7 @@ function makePage(respond, timerScale = 1) {
     addEventListener(name, callback) { listeners.set(name, callback); },
     postMessage(message) { messages.push(message); },
     async fetch(url, init = {}) {
-      const request = { url: String(url), init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null };
+      const request = { url: String(url), init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null, startedAt: Date.now() };
       requests.push(request);
       const result = await respond(request);
       return {
@@ -114,6 +114,21 @@ test('Spotify source reader times out when an HTTP response body stalls after he
   }, 0.001);
   await page.startScan();
   assert.match(page.messages.find((message) => message.type === 'scan-error')?.error || '', /Spotify не ответил за 45 с/);
+});
+
+test('Spotify source reader spaces concurrent likes and playlist requests instead of bursting', async () => {
+  const page = makePage(({ payload }) => {
+    if (payload.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload.operationName === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    if (payload.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    throw new Error(`Unexpected Spotify operation: ${payload.operationName}`);
+  });
+
+  await page.startScan();
+  const starts = page.requests.filter((request) => request.url === endpoint && request.payload?.operationName !== 'initialPageRequest')
+    .map((request) => request.startedAt);
+  assert.equal(starts.length, 2);
+  assert.ok(starts[1] - starts[0] >= 250, `Spotify requests started ${starts[1] - starts[0]} ms apart`);
 });
 
 test('Spotify source reader refuses a truncated liked-track page', async () => {

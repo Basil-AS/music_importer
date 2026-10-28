@@ -14,6 +14,7 @@
   let sessionHeaders = null;
   let scanPromise = null;
   let lastQueryAt = 0;
+  let queryStartQueue = Promise.resolve();
   let activeCommandId = '';
   const checkpointWaiters = new Map();
   let checkpointSequence = 0;
@@ -166,16 +167,28 @@
     }
   }
 
+  async function reserveQueryStart() {
+    const previous = queryStartQueue;
+    let release;
+    queryStartQueue = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try {
+      const spacing = 300 - (Date.now() - lastQueryAt);
+      if (spacing > 0) await new Promise((resolve) => setTimeout(resolve, spacing));
+      lastQueryAt = Date.now();
+    } finally {
+      release();
+    }
+  }
+
   async function query(operationName, variables) {
     const headers = await waitForSession();
     let hash = queryHashes.get(operationName);
     if (!hash) throw new Error(`В bundle Spotify не найден query hash для ${operationName}.`);
-    const spacing = 300 - (Date.now() - lastQueryAt);
-    if (spacing > 0) await new Promise((resolve) => setTimeout(resolve, spacing));
     let retries = 0;
     let hashRefreshes = 0;
     while (true) {
-      lastQueryAt = Date.now();
+      await reserveQueryStart();
       const response = await fetchWithTimeout(endpoint, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
