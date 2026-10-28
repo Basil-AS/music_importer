@@ -57,4 +57,7 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   const workflow = fs.readFileSync(require.resolve('../.github/workflows/deploy-pages.yml'), 'utf8');
   assert.match(workflow, /branches:\s*\[master\]/);
   assert.match(workflow, /path:\s*demo/);
+  const privacyPage = fs.readFileSync(require.resolve('../demo/privacy.html'));
+  assert.deepEqual(privacyPage, fs.readFileSync(require.resolve('../chrome-extension/app/privacy.html')));
+  assert.match(privacyPage.toString(), /локально в `chrome\.storage\.local`/);
 });

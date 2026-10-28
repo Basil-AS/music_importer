@@ -38,6 +38,8 @@ node scripts/build-extension-app.mjs
 
 Подробности сценария и границ прототипа: [`docs/MVP.md`](docs/MVP.md). Правила сопоставления и ограничения confidence: [`docs/MATCHING.md`](docs/MATCHING.md).
 
+Что расширение обрабатывает, где хранит снимки и куда отправляет запросы: [`demo/privacy.html`](demo/privacy.html). Этот disclosure описывает текущий код; публичный URL появится после настройки GitHub Pages.
+
 Изученные готовые проекты, их auth-модели, ограничения и идеи для повторного использования: [`docs/PROJECTS.md`](docs/PROJECTS.md).
 
 Локальное расширение находится в [`chrome-extension/`](chrome-extension/). Коннекторы и ограничения: [Zvuk source](docs/ZVUK_CONNECTOR.md), [Zvuk target](docs/ZVUK_TRANSFER.md), [Spotify](docs/SPOTIFY_CONNECTOR.md), [Apple Music source](docs/APPLE_CONNECTOR.md), [Apple Music target](docs/APPLE_TRANSFER.md), [Яндекс source](docs/YANDEX_CONNECTOR.md), [Яндекс target](docs/YANDEX_TRANSFER.md). Ни один из 12 маршрутов ещё не прошёл end-to-end live transfer.

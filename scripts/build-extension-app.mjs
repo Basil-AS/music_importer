@@ -7,6 +7,7 @@ const sourceDir = resolve(root, 'demo');
 const outputDir = resolve(root, 'chrome-extension', 'app');
 const assets = [
   'index.html',
+  'privacy.html',
   'app.js',
   'matcher.js',
   'account-catalog.js',
