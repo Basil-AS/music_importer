@@ -2,7 +2,7 @@
 (() => {
   const databaseName = 'music-importer-local';
   const databaseVersion = 4;
-  const cacheFormatVersion = 3;
+  const cacheFormatVersion = 4;
   const decisionFormatVersion = 2;
   const previousStoreName = 'automatic-matches';
   const storeName = 'catalog-search-results';
@@ -91,6 +91,8 @@
       trackName: String(match.trackName || match.title || match.name || ''),
       artistName: String(match.artistName || match.artist || (Array.isArray(match.artists) ? match.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(', ') : '')),
       collectionName: String(match.collectionName || match.album || ''),
+      artworkUrl: String(match.artworkUrl || ''),
+      releaseDate: String(match.releaseDate || ''),
       isrc: String(match.isrc || match.ISRC || ''),
       trackTimeMillis: Number(match.trackTimeMillis || match.durationMs || 0) || null,
       trackViewUrl: String(match.trackViewUrl || match.url || ''),

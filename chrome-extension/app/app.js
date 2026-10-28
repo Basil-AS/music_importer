@@ -25,6 +25,46 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
 
+  function normalizeArtworkUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const expanded = raw.replace(/^\/\//, 'https://')
+      .replace(/\{w\}/g, '600').replace(/\{h\}/g, '600').replace(/\{f\}/g, 'jpg')
+      .replace(/%%/g, '300x300').replace(/(^|\/)100x100bb(?=\.)/g, (_match, prefix) => `${prefix}600x600bb`);
+    try {
+      const url = new URL(expanded);
+      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function artworkFromTrack(track) {
+    const album = Array.isArray(track?.albums) ? track.albums[0] : track?.album;
+    const release = track?.release;
+    const candidates = [
+      track?.artworkUrl, track?.artwork?.url, track?.artwork?.src,
+      track?.coverUrl, track?.coverUri, track?.cover?.url, track?.cover,
+      track?.imageUrl, track?.image?.url, track?.image,
+      album?.artwork?.url, album?.coverUri, album?.coverUrl, album?.cover?.url, album?.cover,
+      album?.imageUrl, album?.image?.url, album?.image,
+      release?.artwork?.url, release?.coverUri, release?.coverUrl, release?.cover?.url, release?.cover,
+      release?.imageUrl, release?.image?.url, release?.image,
+    ];
+    for (const candidate of candidates) {
+      const url = normalizeArtworkUrl(typeof candidate === 'object' ? candidate?.url || candidate?.src || candidate?.uri : candidate);
+      if (url) return url;
+    }
+    return '';
+  }
+
+  function formatDuration(value) {
+    const milliseconds = Number(value) || 0;
+    if (milliseconds <= 0) return '';
+    const seconds = Math.floor(milliseconds / 1000);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  }
+
   function toast(message) {
     const element = $('#toast');
     element.textContent = message;
@@ -176,8 +216,20 @@
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
       const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.accountLibraryMatch ? `Уже в библиотеке аккаунта · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Из локального кэша · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
-      return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">♫</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${collection}${track.album ? `<div class="track-artist">${escapeHTML(track.album)}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
+      const album = track.album || track.match?.collectionName || track.matches[0]?.collectionName || '';
+      const duration = formatDuration(track.durationMs || track.match?.trackTimeMillis || track.matches[0]?.trackTimeMillis);
+      const releaseYear = String(track.releaseDate || track.match?.releaseDate || '').match(/\b(19|20)\d{2}\b/)?.[0] || '';
+      const artworkUrl = normalizeArtworkUrl(track.artworkUrl || track.match?.artworkUrl || track.matches.find((match) => match.artworkUrl)?.artworkUrl);
+      const cover = artworkUrl ? `<img class="cover-image" src="${escapeHTML(artworkUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span aria-hidden="true">♫</span>';
+      return `<div class="track" data-index="${index}"><div class="cover" aria-hidden="true">${cover}</div><div><div class="track-name">${title}</div><div class="track-artist">${artist}</div>${collection}${album ? `<div class="track-artist">${escapeHTML(album)}${releaseYear ? ` · ${releaseYear}` : ''}</div>` : ''}${duration ? `<div class="track-artist">${duration}</div>` : ''}</div><div class="match">${matchControl}</div><span class="badge ${badgeClass}">${status}</span><input class="include" type="checkbox" aria-label="Включить ${title}" data-index="${index}" ${track.selected && track.match ? 'checked' : ''} ${track.match ? '' : 'disabled'}></div>`;
     }).join('');
+
+    $$('.cover-image').forEach((image) => image.addEventListener('error', () => {
+      const fallback = document.createElement('span');
+      fallback.textContent = '♫';
+      fallback.setAttribute('aria-hidden', 'true');
+      image.replaceWith(fallback);
+    }, { once: true }));
 
     $$('.track-match').forEach((select) => select.addEventListener('change', () => {
       const track = state.tracks[Number(select.dataset.index)];
@@ -420,6 +472,8 @@
         title: String(track?.title || track?.name || track?.trackName || track?.track_name || ''),
         artist: Array.isArray(artist) ? artist.map((item) => typeof item === 'string' ? item : item?.name || item?.title).filter(Boolean).join(', ') : String(artist || ''),
         album: String((typeof track?.album === 'object' ? track.album?.name || track.album?.title : track?.album) || track?.albumName || track?.album_name || track?.release?.title || ''),
+        artworkUrl: artworkFromTrack(track),
+        releaseDate: String(track?.releaseDate || track?.release_date || track?.album?.releaseDate || track?.release?.releaseDate || ''),
         isrc: String(track?.isrc || track?.ISRC || track?.externalIds?.isrc || track?.external_ids?.isrc || ''),
         durationMs: normalizeDuration(track?.durationMs || track?.duration_ms || track?.duration),
         sourceId: String(track?.id || track?.trackId || track?.track_id || track?.uri || ''),
@@ -590,7 +644,11 @@
           const response = await fetch(`https://itunes.apple.com/search?${params}`);
           if (!response.ok) throw targetCommandError({ status: response.status, retryAfter: response.headers.get('retry-after') }, `Каталог Apple ответил ${response.status}`);
           const payload = await response.json();
-          return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15);
+          return (payload.results || []).filter((item) => item.trackId && item.trackViewUrl).slice(0, 15).map((item) => ({
+            ...item,
+            artworkUrl: item.artworkUrl || item.artworkUrl100 || '',
+            releaseDate: item.releaseDate || '',
+          }));
         });
       }
       return searchWithExactIsrc(track, 'apple-music', async (query) => {

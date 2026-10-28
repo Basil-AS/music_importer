@@ -227,6 +227,7 @@
     if (!uri.startsWith('spotify:track:')) return null;
     const artists = data?.artists?.items || data?.artists || [];
     const album = data?.albumOfTrack || data?.album || {};
+    const albumImages = album?.images || album?.coverArt?.sources || [];
     const artistNames = artists.map((artist) => ({ id: String(artist?.uri || ''), name: String(artist?.profile?.name || artist?.name || '') })).filter((artist) => artist.name);
     const duration = Number(data?.duration?.totalMilliseconds || data?.trackDuration?.totalMilliseconds || data?.duration_ms || 0);
     return {
@@ -234,6 +235,8 @@
       title: String(data?.name || ''),
       artists: artistNames,
       album: { name: String(album?.name || '') },
+      artworkUrl: String(albumImages.slice().sort((left, right) => (Number(right?.width) || 0) - (Number(left?.width) || 0))[0]?.url || ''),
+      releaseDate: String(album?.releaseDate || album?.date?.isoString || ''),
       isrc: String(data?.externalIds?.isrc || data?.external_ids?.isrc || ''),
       durationMs: Number.isFinite(duration) ? duration : 0,
     };
@@ -327,6 +330,8 @@
       artists: artists.map((artist) => ({ id: artist?.id || '', name: artist?.name || '' })).filter((artist) => artist.name),
       collectionName: String(track.album?.name || ''),
       album: { name: String(track.album?.name || '') },
+      artworkUrl: String(track.album?.images?.slice().sort((left, right) => (Number(right?.width) || 0) - (Number(left?.width) || 0))[0]?.url || ''),
+      releaseDate: String(track.album?.release_date || ''),
       isrc: String(track.external_ids?.isrc || ''),
       durationMs: Number(track.duration_ms) || 0,
     };

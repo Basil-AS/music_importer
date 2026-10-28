@@ -112,9 +112,15 @@
   }
 
   function sanitizeTrack(track) {
+    const release = track.release || {};
+    const artwork = release.artwork?.url || release.coverUri || release.coverUrl || release.cover?.url || release.cover
+      || release.image?.url || release.imageUrl || release.picture?.url || track.artwork?.url || track.coverUri || track.coverUrl
+      || track.cover?.url || track.cover || track.image?.url || track.imageUrl || '';
     return {
       id: String(track.id || ''),
       title: String(track.title || ''),
+      artworkUrl: String(typeof artwork === 'object' ? artwork.url || artwork.src || '' : artwork),
+      releaseDate: String(release.releaseDate || release.year || ''),
       isrc: String(track.isrc || track.ISRC || track.externalIds?.isrc || track.external_ids?.isrc || ''),
       duration: Number(track.duration || 0),
       explicit: Boolean(track.explicit),
@@ -126,6 +132,8 @@
       release: track.release ? {
         id: String(track.release.id || ''),
         title: String(track.release.title || ''),
+        artworkUrl: String(typeof artwork === 'object' ? artwork.url || artwork.src || '' : artwork),
+        releaseDate: String(release.releaseDate || release.year || ''),
       } : null,
     };
   }

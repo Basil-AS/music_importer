@@ -97,6 +97,8 @@
       trackName: title,
       artistName: artists.join(', '),
       collectionName: String(release.title || ''),
+      artworkUrl: String(release.artwork?.url || release.coverUri || release.coverUrl || release.cover?.url || release.cover || release.image?.url || release.imageUrl || item?.artwork?.url || item?.coverUrl || item?.imageUrl || ''),
+      releaseDate: String(release.releaseDate || release.year || ''),
       trackTimeMillis: Number.isFinite(duration) ? duration : null,
       isrc: String(item?.isrc || item?.ISRC || item?.externalIds?.isrc || item?.external_ids?.isrc || item?.recording?.isrc || ''),
       trackViewUrl: `https://zvuk.com/track/${encodeURIComponent(id)}`,

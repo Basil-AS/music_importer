@@ -17,6 +17,8 @@
       title: String(track.title || '').trim(),
       artists,
       album: String(track.album || '').trim() || null,
+      artworkUrl: String(track.artworkUrl || track.artwork?.url || '') || null,
+      releaseDate: String(track.releaseDate || '') || null,
       durationMs: Number(track.durationMs) || null,
       collectionType: track.sourceCollectionType || track.collectionType || (track.sourceCollectionId || track.collectionId ? 'playlists' : 'favorites'),
       collectionId: track.sourceCollectionId || track.collectionId ? String(track.sourceCollectionId || track.collectionId) : null,
