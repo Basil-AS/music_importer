@@ -163,6 +163,15 @@ test('first install opens the extension-hosted importer automatically', async ()
   assert.equal(worker.createdTabs[0].url, 'chrome-extension://fixture-extension/app/index.html');
 });
 
+test('first install repairs already-open provider tabs without a current bridge', async () => {
+  const worker = bootWorker({}, [
+    { id: 40, url: 'https://music.apple.com/us/home', status: 'complete' },
+  ], { healthFailureTabIds: [40] });
+  await worker.install('install');
+  assert.deepEqual(worker.reloads, [40]);
+  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 40 && message.type === 'music-importer:bridge-health-check'));
+});
+
 test('extension update opens the importer app when it is not already open', async () => {
   const worker = bootWorker({});
   await worker.install('update');

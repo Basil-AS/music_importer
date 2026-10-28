@@ -251,7 +251,7 @@
     if (album !== null) { total += album * 0.04; weight += 0.04; }
     if (duration !== null) { total += duration * 0.04; weight += 0.04; }
     const score = Math.max(0, Math.min(0.98, total / weight - (versionConflict ? 0.2 : 0)));
-    return { score, exactISRC: false, isrcConflict, versionConflict, featuredConflict, titleScore: title, artistScore: artist, durationScore: duration };
+    return { score, exactISRC: false, isrcConflict, versionConflict, featuredConflict, titleScore: title, artistScore: artist, albumScore: album, durationScore: duration };
   }
 
   function candidateISRC(candidate) {
@@ -293,8 +293,10 @@
     const metadataDuplicates = Boolean(!bestISRC && closeRivals.length > 1
       && closeRivals.every((candidate) => !candidateISRC(candidate.candidate) && sameMetadataRecording(source, candidate.candidate)));
     const sameRecordingDuplicates = sameISRCDuplicates || metadataDuplicates;
+    const corroboratedMetadata = Boolean(best && best.titleScore >= 0.98 && best.artistScore >= 0.95
+      && ((best.albumScore ?? 0) >= 0.92 || (best.durationScore ?? 0) >= 0.9));
     const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && !best.featuredConflict && (best.exactISRC
-      || (best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
+      || ((corroboratedMetadata || sameRecordingDuplicates) && best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
     return {
       best: best?.candidate || null,
       confidence: best?.score || 0,

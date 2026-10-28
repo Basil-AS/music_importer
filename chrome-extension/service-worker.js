@@ -98,7 +98,9 @@ async function openImporterApp() {
 
 chrome.runtime.onInstalled?.addListener(async (details) => {
   if (!['install', 'update'].includes(details?.reason) || !extensionAppUrl) return;
-  if (details.reason === 'update') await repairStaleProviderTabs();
+  // Existing provider pages do not receive newly installed content scripts
+  // until they navigate. Repair them on first install as well as updates.
+  await repairStaleProviderTabs();
   await openImporterApp().catch(() => {});
 });
 

@@ -1,5 +1,12 @@
 # Live validation log
 
+## 2026-10-28 — repair existing service tabs on install
+
+- Version `0.13.39` runs the bridge health check on both first install and update. It reloads only already-open supported provider tabs that do not answer with the current bridge protocol. This covers tabs opened before the extension was installed; previously that repair ran only on update or browser startup.
+- The reported Apple stack trace calls `chrome.runtime.sendMessage(...).then(...)` directly, which is absent from current bridge source. That injected script cannot recover after its extension context is invalidated; the tab must navigate to receive the current script. The extension now performs that navigation automatically during install/update and before commands.
+- Covered by service-worker fixture tests. This does not establish a live Chrome retest; load extension `0.13.39` to verify that the historical error stops recurring.
+- Verification: the full suite passes **231/231 tests**, the extension app bundle check passes, and `git diff --check` passes. Still fixture-verified only; no live account scan or transfer was run.
+
 This log records connector behavior observed with an unpacked extension and the user's already signed-in Chrome tabs. It intentionally omits account-specific collection sizes, track names, IDs, session data, and request credentials.
 
 ## 2026-10-28 — first Chrome scan

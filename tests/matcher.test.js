@@ -48,6 +48,27 @@ test('matching handles Cyrillic-to-Latin transliteration without relaxing confid
   assert.equal(result.confidence, 0.98);
 });
 
+test('matching keeps title-and-artist-only candidates for review without recording evidence', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist' },
+    [{ trackId: 'unknown-edition', trackName: 'Song', artistName: 'Artist' }],
+  );
+  assert.equal(result.confidence, 0.98);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'manual_review');
+});
+
+test('matching can auto-select title-and-artist candidates corroborated by album metadata', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist', album: 'Album' },
+    [{ trackId: 'album-confirmed', trackName: 'Song', artistName: 'Artist', collectionName: 'Album' }],
+  );
+  assert.equal(result.automatic, true);
+  assert.equal(result.reason, 'high_confidence_metadata');
+});
+
 test('matching ignores featured-title decoration but keeps recording-version checks', () => {
   const matcher = loadMatcher();
   const sameRecording = matcher.suggestBestMatch(
