@@ -52,6 +52,11 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   const appBridge = manifest.content_scripts.find((script) => script.js.includes('local-app-bridge.js'));
   assert.ok(appBridge.matches.includes('https://basil-as.github.io/music_importer/*'));
   assert.ok(manifest.host_permissions.includes('https://basil-as.github.io/*'));
+  assert.deepEqual(manifest.icons, { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' });
+  assert.deepEqual(manifest.action.default_icon, manifest.icons);
+  for (const iconPath of Object.values(manifest.icons)) {
+    assert.ok(fs.existsSync(require.resolve(`../chrome-extension/${iconPath}`)), `missing extension icon ${iconPath}`);
+  }
   assert.equal(manifest.version, '0.13.0');
 
   const workflow = fs.readFileSync(require.resolve('../.github/workflows/deploy-pages.yml'), 'utf8');
