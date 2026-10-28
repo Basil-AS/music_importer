@@ -57,15 +57,28 @@
     };
   }
 
-  const versionMarkers = [
-    'live', 'remix', 'remaster', 'remastered', 'acoustic', 'instrumental',
-    'karaoke', 'radio edit', 'extended mix', 'sped up', 'slowed', 'mono',
-    'stereo', 'demo', 'edit', 'deluxe', 'anniversary edition',
-  ];
+  const versionGroups = {
+    live: ['live'],
+    remix: ['remix', 'remixed'],
+    remaster: ['remaster', 'remastered'],
+    acoustic: ['acoustic'],
+    instrumental: ['instrumental'],
+    karaoke: ['karaoke'],
+    radio_edit: ['radio edit'],
+    extended_mix: ['extended mix', 'extended version'],
+    sped_up: ['sped up', 'speed up'],
+    slowed: ['slowed', 'slowed down'],
+    mono: ['mono'],
+    stereo: ['stereo'],
+    demo: ['demo'],
+    edit: ['edit'],
+  };
 
   function versions(value) {
     const text = normalizeText(value);
-    return new Set(versionMarkers.filter((marker) => (` ${text} `).includes(` ${marker} `)));
+    return new Set(Object.entries(versionGroups)
+      .filter(([, markers]) => markers.some((marker) => (` ${text} `).includes(` ${marker} `)))
+      .map(([group]) => group));
   }
 
   function similarityNormalized(a, b) {
