@@ -9,7 +9,7 @@
     "128": "icons/icon128.png"
   },
   "minimum_chrome_version": "111",
-  "permissions": ["activeTab", "storage", "unlimitedStorage"],
+  "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": ["https://zvuk.com/*", "https://open.spotify.com/*", "https://music.yandex.ru/*", "https://api.music.yandex.ru/*", "https://music.apple.com/*", "https://itunes.apple.com/*", "https://basil-as.github.io/*"],
   "optional_host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "action": {
