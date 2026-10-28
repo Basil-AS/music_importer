@@ -105,6 +105,45 @@ test('Spotify source reader imports liked tracks and every playlist with item or
   assert.ok(!emitted.includes('fixture-secret'));
   assert.ok(!emitted.includes('fixture-client-secret'));
   assert.ok(page.requests.filter((request) => request.url === endpoint).every((request) => request.init.headers.authorization === 'Bearer fixture-secret'));
+  const diagnostics = page.messages.filter((message) => message.diagnostic).map((message) => message.diagnostic);
+  assert.ok(diagnostics.some((diagnostic) => diagnostic.operation === 'fetchLibraryTracks'
+    && diagnostic.offset === 0 && diagnostic.limit === 1000
+    && Number.isInteger(diagnostic.elapsedMs) && diagnostic.elapsedMs >= 0
+    && diagnostic.result.status === 200));
+  assert.ok(diagnostics.some((diagnostic) => diagnostic.operation === 'libraryV3'
+    && diagnostic.offset === 0 && diagnostic.limit === 50 && diagnostic.result.status === 200));
+  const diagnosticText = JSON.stringify(diagnostics);
+  for (const privateValue of ['fixture-secret', 'fixture-client-secret', 'spotify:track:like1', 'spotify:playlist:road', 'Liked', 'Road']) {
+    assert.ok(!diagnosticText.includes(privateValue), `diagnostics must not include ${privateValue}`);
+  }
+});
+
+test('Spotify scan diagnostics sanitize provider errors and include page coordinates and elapsed time', async () => {
+  const privateProviderMessage = 'private provider detail with spotify:track:private-id and a session value';
+  const page = makePage(({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') return { payload: { errors: [{ message: privateProviderMessage }] } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  });
+
+  await page.startScan();
+
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.ok(error);
+  assert.equal(error.diagnostic.operation, 'fetchLibraryTracks');
+  assert.equal(error.diagnostic.offset, 0);
+  assert.equal(error.diagnostic.limit, 1000);
+  assert.ok(Number.isInteger(error.diagnostic.elapsedMs) && error.diagnostic.elapsedMs >= 0);
+  assert.deepEqual({ ...error.diagnostic.result }, { code: 'provider_error' });
+  assert.match(error.error, /Диагностика: fetchLibraryTracks 0\/1000 · \d+ мс · provider_error\./);
+  const diagnosticText = JSON.stringify(page.messages.filter((message) => message.diagnostic));
+  assert.ok(!diagnosticText.includes(privateProviderMessage));
+  assert.ok(!diagnosticText.includes('spotify:track:private-id'));
+  assert.ok(!diagnosticText.includes('fixture-secret'));
+  assert.ok(!diagnosticText.includes('fixture-client-secret'));
+  assert.ok(!error.error.includes(privateProviderMessage));
+  assert.ok(!error.error.includes('spotify:track:private-id'));
+  assert.ok(!error.error.includes('session value'));
 });
 
 test('Spotify source reader skips downloading the web-player bundle when seeded query hashes are available', async () => {
@@ -177,6 +216,12 @@ test('Spotify source reader refuses a truncated liked-track page', async () => {
 
   await page.startScan();
   assert.ok(page.messages.some((message) => message.type === 'scan-error' && /пустую страницу/i.test(message.error)));
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.equal(error.diagnostic.operation, 'fetchLibraryTracks');
+  assert.equal(error.diagnostic.offset, 0);
+  assert.equal(error.diagnostic.limit, 1000);
+  assert.equal(error.diagnostic.result.code, 'empty_page');
+  assert.match(error.error, /empty_page/);
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 

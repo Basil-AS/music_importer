@@ -10,7 +10,7 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
+  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
   const extensionApp = location.protocol === 'chrome-extension:' && typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
@@ -329,32 +329,32 @@
           button.title = '';
         }
         label.classList.add('connected');
-        button.disabled = false;
-        button.textContent = card.classList.contains('selected') ? '✓ Источник' : 'Выбрать источник';
       } else if (status?.status === 'scanning') {
         label.textContent = status.message || 'Сканируем открытую сессию…';
         label.classList.remove('connected');
-        button.disabled = true;
-        button.textContent = 'Сканируем…';
       } else if (status?.status === 'unavailable') {
-        label.textContent = status.message || 'Войдите и откройте сервис в Chrome';
+        label.textContent = status.message || 'Войдите в аккаунт и вернитесь сюда';
         label.classList.remove('connected');
-        button.disabled = true;
-        button.textContent = 'Не подключено';
-        button.title = status.message || 'Войдите и откройте сервис в Chrome';
       } else if (status?.status === 'failed') {
         label.textContent = status.message || 'Не удалось прочитать библиотеку';
         label.classList.remove('connected');
-        button.disabled = true;
-        button.textContent = 'Ошибка чтения';
       } else {
         label.textContent = state.extensionAvailable
-          ? 'Откройте сервис и войдите в аккаунт'
+          ? 'Войдите в аккаунт, чтобы загрузить библиотеку'
           : 'Подключите расширение для проверки открытой вкладки';
         label.classList.remove('connected');
-        button.disabled = true;
-        button.textContent = state.extensionAvailable ? 'Нет библиотеки' : 'Нет соединения';
       }
+      const action = window.MusicProviderConnectionFlow.sourceAction({
+        extensionAvailable: state.extensionAvailable,
+        snapshot,
+        status,
+        providerName: sourceLabels[provider],
+        selected: card.classList.contains('selected'),
+        opening: state.openingProviderTabs.has(provider),
+      });
+      button.disabled = action.disabled;
+      button.textContent = action.label;
+      button.title = action.title;
     });
     updateSourceCount();
     updateTargetLabel();
@@ -1254,7 +1254,7 @@
       selectProviderSnapshot(provider);
       return;
     }
-    toast(`Сначала откройте ${sourceLabels[provider] || provider} в Chrome и подключите его библиотеку`);
+    void openProviderLogin(provider);
   }));
 
   $('#loadBtn').addEventListener('click', () => loadTracks(demoTracks, 'Демо-данные', { provider: 'file' }));
@@ -1342,6 +1342,33 @@
     });
   }
 
+  async function openProviderLogin(provider) {
+    if (!state.extensionAvailable || !sourceLabels[provider]) return;
+    if (state.searching || state.tracks.some((track) => track.searching)) {
+      toast('Остановите поиск перед подключением аккаунта.');
+      return;
+    }
+    state.pendingLoginProviders.add(provider);
+    state.openingProviderTabs.add(provider);
+    renderSourceAvailability();
+    try {
+      const response = await requestOpenProviderTabs([provider]);
+      if (!response?.ok) throw new Error(response?.error || `Не удалось открыть ${sourceLabels[provider]}.`);
+      const opened = (response.opened || []).includes(provider);
+      $('#extensionStatus').textContent = opened
+        ? `Открыл ${sourceLabels[provider]}. Войдите в аккаунт на этой вкладке, затем вернитесь сюда — библиотека загрузится автоматически.`
+        : `${sourceLabels[provider]} уже открыт. Войдите в аккаунт на его вкладке, затем вернитесь сюда — библиотека загрузится автоматически.`;
+      toast(opened ? `Открыт ${sourceLabels[provider]} для входа` : `${sourceLabels[provider]} уже открыт`);
+    } catch (error) {
+      state.pendingLoginProviders.delete(provider);
+      $('#extensionStatus').textContent = error.message || `Не удалось открыть ${sourceLabels[provider]}.`;
+      toast(error.message || `Не удалось открыть ${sourceLabels[provider]}.`);
+    } finally {
+      state.openingProviderTabs.delete(provider);
+      renderSourceAvailability();
+    }
+  }
+
   async function openMissingServices() {
     const button = $('#openServicesBtn');
     if (!state.extensionAvailable) return;
@@ -1400,6 +1427,11 @@
       if (response.error) throw new Error(response.error);
       state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
       renderSourceAvailability(response.statuses || {});
+      for (const provider of state.pendingLoginProviders) {
+        if (response.statuses?.[provider]?.status === 'ready' && state.librarySnapshots[provider]) {
+          state.pendingLoginProviders.delete(provider);
+        }
+      }
       const connected = Object.keys(state.librarySnapshots).filter((provider) => response.libraries?.[provider] || ['ready', 'stale'].includes(response.statuses?.[provider]?.status));
       if (!connected.length) {
         const details = Object.entries(response.statuses || {}).map(([provider, status]) => `${sourceLabels[provider]}: ${status.message || 'недоступен'}`).join(' · ');
@@ -1430,17 +1462,14 @@
     }
   }
 
-  function missingAccountProviders() {
-    const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
-    return providers.filter((provider) => {
-      const status = state.libraryStatuses[provider]?.status;
-      return !state.librarySnapshots[provider] || status === 'unavailable' || status === 'stale';
-    });
-  }
-
   function scheduleFocusRefresh() {
-    if (!extensionApp || !state.extensionAvailable || document.visibilityState !== 'visible') return;
-    const providers = missingAccountProviders();
+    if (!state.extensionAvailable || document.visibilityState !== 'visible') return;
+    const providers = window.MusicProviderConnectionFlow.providersForFocusRefresh(
+      ['zvuk', 'spotify', 'yandex-music', 'apple-music'],
+      state.librarySnapshots,
+      state.libraryStatuses,
+      state.pendingLoginProviders,
+    );
     if (!providers.length) return;
     if (accountScanInProgress) {
       focusScanQueued = true;
@@ -1452,7 +1481,7 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!extensionApp || !state.extensionAvailable || document.visibilityState !== 'visible') return;
+    if (!state.extensionAvailable || document.visibilityState !== 'visible') return;
     if (focusScanTimer) clearTimeout(focusScanTimer);
     focusScanTimer = setTimeout(() => {
       focusScanTimer = null;

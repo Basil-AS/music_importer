@@ -13,6 +13,8 @@
   ]);
   let sessionHeaders = null;
   let scanPromise = null;
+  let lastScanDiagnostic = null;
+  const scanQueryDiagnostics = new WeakMap();
   let lastQueryAt = 0;
   let queryStartQueue = Promise.resolve();
   let activeCommandId = '';
@@ -21,6 +23,45 @@
 
   function post(type, detail = {}) {
     window.postMessage({ source: marker, type, ...detail }, location.origin);
+  }
+
+  function scanPageCoordinates(variables) {
+    const page = {};
+    if (Number.isInteger(variables?.offset) && variables.offset >= 0) page.offset = variables.offset;
+    if (Number.isInteger(variables?.limit) && variables.limit >= 0) page.limit = variables.limit;
+    return page;
+  }
+
+  function emitScanDiagnostic(operation, variables, startedAt, result) {
+    if (!scanPromise || activeCommandId) return;
+    const diagnostic = {
+      operation,
+      ...scanPageCoordinates(variables),
+      elapsedMs: Math.max(0, Date.now() - startedAt),
+      result,
+    };
+    lastScanDiagnostic = diagnostic;
+    const page = [diagnostic.offset, diagnostic.limit].filter(Number.isInteger).join('/');
+    post('scan-progress', {
+      phase: 'diagnostic',
+      message: `Spotify scan: ${operation}${page ? ` ${page}` : ''} · ${diagnostic.elapsedMs} мс · ${result.code || `HTTP ${result.status}`}`,
+      diagnostic,
+    });
+    return diagnostic;
+  }
+
+  function failScanShape(operation, variables, code, message, responseData) {
+    const request = responseData && typeof responseData === 'object' ? scanQueryDiagnostics.get(responseData) : null;
+    const startedAt = request?.operation === operation ? request.startedAt : Date.now();
+    emitScanDiagnostic(operation, variables, startedAt, { code });
+    throw new Error(message);
+  }
+
+  function scanDiagnosticSummary(diagnostic) {
+    if (!diagnostic || typeof diagnostic.operation !== 'string') return '';
+    const page = [diagnostic.offset, diagnostic.limit].filter(Number.isInteger).join('/');
+    const result = diagnostic.result?.code || (Number.isInteger(diagnostic.result?.status) ? `HTTP ${diagnostic.result.status}` : 'unknown');
+    return `Диагностика: ${diagnostic.operation}${page ? ` ${page}` : ''} · ${diagnostic.elapsedMs} мс · ${result}.`;
   }
 
   function awaitCheckpoint(requestId, progress) {
@@ -184,6 +225,7 @@
   }
 
   async function query(operationName, variables) {
+    const startedAt = Date.now();
     const headers = await waitForSession();
     let hash = queryHashes.get(operationName);
     if (!hash) throw new Error(`В bundle Spotify не найден query hash для ${operationName}.`);
@@ -191,11 +233,19 @@
     let hashRefreshes = 0;
     while (true) {
       await reserveQueryStart();
-      const response = await fetchWithTimeout(endpoint, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ variables, operationName, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
-      }, apiTimeoutMs);
+      let response;
+      try {
+        response = await fetchWithTimeout(endpoint, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ variables, operationName, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
+        }, apiTimeoutMs);
+      } catch (error) {
+        const code = /не ответил за/i.test(error?.message || '') ? 'request_timeout' : 'network_error';
+        emitScanDiagnostic(operationName, variables, startedAt, { code });
+        if (code === 'request_timeout') throw error;
+        throw new Error('Не удалось выполнить запрос Spotify. Повторите сканирование.');
+      }
       if (response.status === 429 && retries < 4) {
         const retryAfter = retryAfterDelay(response.headers.get('retry-after'));
         const waitMs = retryAfter === null ? 1000 * (2 ** retries) : retryAfter;
@@ -203,11 +253,19 @@
         await waitForRateLimit(waitMs, operationName);
         continue;
       }
-      if (!response.ok) throw Object.assign(new Error(`${operationName}: HTTP ${response.status}`), {
+      if (!response.ok) {
+        emitScanDiagnostic(operationName, variables, startedAt, { status: response.status });
+        throw Object.assign(new Error(`${operationName}: HTTP ${response.status}`), {
         status: response.status,
         retryAfter: response.headers.get('retry-after') || null,
-      });
-      const payload = await response.json();
+        });
+      }
+      let payload;
+      try { payload = await response.json(); }
+      catch {
+        emitScanDiagnostic(operationName, variables, startedAt, { code: 'invalid_json' });
+        throw new Error(`${operationName}: Spotify returned invalid JSON.`);
+      }
       if (payload.errors?.length) {
         const errorMessage = String(payload.errors[0]?.message || 'ошибка GraphQL');
         if (/persisted.?query.?not.?found/i.test(errorMessage) && hashRefreshes < 1) {
@@ -218,9 +276,17 @@
           hashRefreshes += 1;
           if (hash && hash !== previousHash) continue;
         }
-        throw new Error(`${operationName}: ${errorMessage}`);
+        emitScanDiagnostic(operationName, variables, startedAt, { code: 'provider_error' });
+        throw new Error(`${operationName}: Spotify returned a provider error.`);
       }
-      if (!payload.data) throw new Error(`${operationName}: пустой ответ Spotify.`);
+      if (!payload.data) {
+        emitScanDiagnostic(operationName, variables, startedAt, { code: 'missing_data' });
+        throw new Error(`${operationName}: Spotify returned no data.`);
+      }
+      const diagnostic = emitScanDiagnostic(operationName, variables, startedAt, { status: response.status });
+      if (diagnostic && payload.data && typeof payload.data === 'object') {
+        scanQueryDiagnostics.set(payload.data, { operation: operationName, startedAt });
+      }
       return payload.data;
     }
   }
@@ -248,26 +314,31 @@
   async function readFavorites() {
     const tracksData = [];
     let total = null;
+    let lastPageData = null;
     for (let offset = 0; total === null || offset < total; offset += pageSize) {
       post('scan-progress', { phase: 'favorites', message: `Читаем Spotify Liked Songs: страница с ${offset + 1}…` });
       const data = await query('fetchLibraryTracks', { offset, limit: pageSize });
+      lastPageData = data;
       const library = data?.me?.library?.tracks;
-      if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) throw new Error('Неожиданный ответ Spotify с любимыми треками.');
-      if (total !== null && total !== library.totalCount) throw new Error('Spotify изменил число любимых треков во время чтения.');
+      if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'invalid_page_shape', 'Неожиданный ответ Spotify с любимыми треками.', data);
+      if (total !== null && total !== library.totalCount) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'total_changed', 'Spotify изменил число любимых треков во время чтения.', data);
       total = library.totalCount;
       tracksData.push(...library.items);
       post('scan-progress', { phase: 'favorites', message: `Собираем Spotify Liked Songs: ${Math.min(tracksData.length, total)} из ${total}.` });
-      if (library.items.length === 0 && offset < total) throw new Error('Spotify вернул пустую страницу до конца библиотеки.');
+      if (library.items.length === 0 && offset < total) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'empty_page', 'Spotify вернул пустую страницу до конца библиотеки.', data);
     }
     const tracks = tracksData.map((row) => trackFrom(row?.track?.data, row?.track?._uri)).filter(Boolean);
     const unique = new Set(tracks.map((track) => track.id));
-    if (tracks.length !== total || unique.size !== tracks.length) throw new Error('Число любимых треков Spotify не сошлось с totalCount.');
+    if (tracks.length !== total || unique.size !== tracks.length) {
+      failScanShape('fetchLibraryTracks', { offset: Math.max(0, tracksData.length - pageSize), limit: pageSize }, 'track_count_mismatch', 'Число любимых треков Spotify не сошлось с totalCount.', lastPageData);
+    }
     return { tracks, total };
   }
 
   async function readPlaylists() {
     const playlists = [];
     let total = null;
+    let lastPageData = null;
     for (let offset = 0; total === null || offset < total; offset += 50) {
       post('scan-progress', { phase: 'playlists', message: `Читаем каталог плейлистов Spotify: страница с ${offset + 1}…` });
       const data = await query('libraryV3', {
@@ -276,9 +347,10 @@
         limit: 50, offset, flatten: true, expandedFolders: [], folderUri: null,
         includeFoldersWhenFlattening: false,
       });
+      lastPageData = data;
       const library = data?.me?.libraryV3;
-      if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) throw new Error('Неожиданный ответ Spotify с каталогом плейлистов.');
-      if (total !== null && total !== library.totalCount) throw new Error('Spotify изменил число плейлистов во время чтения.');
+      if (!Array.isArray(library?.items) || !Number.isInteger(library.totalCount)) failScanShape('libraryV3', { offset, limit: 50 }, 'invalid_page_shape', 'Неожиданный ответ Spotify с каталогом плейлистов.', data);
+      if (total !== null && total !== library.totalCount) failScanShape('libraryV3', { offset, limit: 50 }, 'total_changed', 'Spotify изменил число плейлистов во время чтения.', data);
       total = library.totalCount;
       for (const row of library.items) {
         const wrapper = row?.item;
@@ -288,10 +360,10 @@
         playlists.push({ id: uri, title: String(data.name || ''), trackCount: Number.isInteger(data.totalLength) ? data.totalLength : null });
       }
       post('scan-progress', { phase: 'playlists', message: `Найдено плейлистов Spotify: ${playlists.length} из ${total}.` });
-      if (library.items.length === 0 && offset < total) throw new Error('Spotify вернул пустую страницу каталога до конца.');
+      if (library.items.length === 0 && offset < total) failScanShape('libraryV3', { offset, limit: 50 }, 'empty_page', 'Spotify вернул пустую страницу каталога до конца.', data);
     }
     if (playlists.length !== total || new Set(playlists.map((playlist) => playlist.id)).size !== playlists.length) {
-      throw new Error('Число или уникальность плейлистов Spotify не сошлись с totalCount.');
+      failScanShape('libraryV3', { offset: Math.max(0, playlists.length - 50), limit: 50 }, 'catalog_count_mismatch', 'Число или уникальность плейлистов Spotify не сошлись с totalCount.', lastPageData);
     }
     return playlists;
   }
@@ -299,22 +371,24 @@
   async function readPlaylist(playlist) {
     const rows = [];
     let total = null;
+    let lastPageData = null;
     for (let offset = 0; total === null || offset < total; offset += pageSize) {
       post('scan-progress', { phase: 'playlist-items', message: `Запрашиваем треки плейлиста «${playlist.title}» с позиции ${offset + 1}…` });
       const data = await query('fetchPlaylistContents', { uri: playlist.id, offset, limit: pageSize, includeEpisodeContentRatingsV2: true });
+      lastPageData = data;
       const page = data?.playlistV2?.content;
-      if (!Array.isArray(page?.items) || !Number.isInteger(page.totalCount)) throw new Error(`Неожиданный ответ плейлиста «${playlist.title}».`);
-      if (total !== null && total !== page.totalCount) throw new Error(`Spotify изменил число треков плейлиста «${playlist.title}» во время чтения.`);
+      if (!Array.isArray(page?.items) || !Number.isInteger(page.totalCount)) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'invalid_page_shape', 'Неожиданный ответ плейлиста Spotify.', data);
+      if (total !== null && total !== page.totalCount) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'total_changed', 'Spotify изменил число элементов плейлиста во время чтения.', data);
       total = page.totalCount;
       const pageOffset = Number(page?.pagingInfo?.offset ?? offset);
-      if (pageOffset !== offset) throw new Error(`Spotify вернул неверный offset для «${playlist.title}».`);
+      if (pageOffset !== offset) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'unexpected_offset', 'Spotify вернул неверное смещение страницы плейлиста.', data);
       rows.push(...page.items);
       post('scan-progress', { phase: 'playlist-items', message: `Читаем «${playlist.title}»: ${Math.min(rows.length, total)} из ${total}.` });
-      if (page.items.length === 0 && offset < total) throw new Error(`Spotify вернул пустую страницу плейлиста «${playlist.title}».`);
+      if (page.items.length === 0 && offset < total) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'empty_page', 'Spotify вернул пустую страницу плейлиста.', data);
     }
     const tracks = rows.map((row) => trackFrom(row?.itemV2?.data)).filter(Boolean).map((track, position) => ({ ...track, position }));
     const playlistTotal = total ?? 0;
-    if (rows.length !== playlistTotal || tracks.length !== rows.length) throw new Error(`Не все элементы плейлиста «${playlist.title}» удалось прочитать.`);
+    if (rows.length !== playlistTotal || tracks.length !== rows.length) failScanShape('fetchPlaylistContents', { offset: Math.max(0, rows.length - pageSize), limit: pageSize }, 'item_count_mismatch', 'Не все элементы плейлиста удалось прочитать.', lastPageData);
     return { ...playlist, trackCount: playlistTotal, complete: true, tracks };
   }
 
@@ -614,6 +688,7 @@
   async function scanLibrary() {
     if (scanPromise) return scanPromise;
     scanPromise = (async () => {
+      lastScanDiagnostic = null;
       await waitForSession();
       await discoverHashes(['fetchLibraryTracks', 'libraryV3', 'fetchPlaylistContents']);
       const [favorites, playlistCatalog] = await Promise.all([readFavorites(), readPlaylists()]);
@@ -654,7 +729,10 @@
       const payload = await scanLibrary();
       post('library-snapshot', { payload });
     } catch (error) {
-      post('scan-error', { error: error instanceof Error ? error.message : 'Не удалось прочитать библиотеку Spotify.' });
+      post('scan-error', {
+        error: [error instanceof Error ? error.message : 'Не удалось прочитать библиотеку Spotify.', scanDiagnosticSummary(lastScanDiagnostic)].filter(Boolean).join(' '),
+        diagnostic: lastScanDiagnostic,
+      });
     }
   });
 })();

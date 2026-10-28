@@ -26,6 +26,16 @@ This log records connector behavior observed with an unpacked extension and the 
 
 Fixture coverage remains separate from this live observation. None of the 12 source-to-target routes has yet completed a live write and read-back.
 
+## 2026-10-28 — local app read-only scan and bridge error follow-up
+
+- Confirmed `127.0.0.1:8001` is Python's static `http.server` serving the `demo/` directory; the running process is PID 20084. It has no project backend. The localhost page successfully connected to the installed extension.
+- A read-only scan returned selectable snapshots from Apple Music and Yandex Music. Provider names and the ready/selected states are recorded; account-specific library sizes, track/playlist titles, IDs, and session data are omitted.
+- Spotify and Zvuk did not have a newly loaded library snapshot at the end of this check. No target search, write, or read-back was run.
+- The repeated `Extension context invalidated` report came from an old injected Apple bridge calling `chrome.runtime.sendMessage(...).then(...)` directly. Current Apple, Spotify, Yandex, and Zvuk bridges guard synchronous runtime invalidation and rejected message promises. Reloading the extension does not replace scripts already injected into open service pages; reload Music Importer in `chrome://extensions`, then refresh each service tab.
+- Added provider-specific login/open actions to the local app and safe Spotify scan diagnostics that include only operation, page offset/limit, elapsed time, and a sanitized HTTP/error code. The diagnostic intentionally excludes request headers, tokens, collection IDs, titles, and raw provider error text. These changes are fixture-tested; Spotify's new diagnostic has not yet been exercised in the user's page session.
+- Snapshot reading uses a content script injected into each provider page. The extension asks an already-open service tab to start a scan, then the provider's page code fetches the signed-in user's likes and playlist pages and sends normalized metadata to the extension for local storage. Spotify, Apple Music, and Yandex need an open signed-in tab during the read. Zvuk also currently needs its service page open for collection capture. This is metadata collection, not audio downloading.
+- Fixture coverage remains separate from this live observation. No source-to-target route has completed a live target write and read-back.
+
 ## 2026-10-28 — parallel scan state audit
 
 - Code review found that simultaneous Spotify, Apple Music, and Yandex progress/snapshot messages each performed an independent read-modify-write of the same Chrome storage record. A later write could therefore erase another provider's just-written progress or completed snapshot.
