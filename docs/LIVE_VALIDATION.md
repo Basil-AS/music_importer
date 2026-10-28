@@ -32,3 +32,11 @@ Fixture coverage remains separate from this live observation. None of the 12 sou
 - Provider-state mutations are now serialized, including scan start, stale-scan failure, scan errors, progress, and completed snapshots. A concurrent three-provider snapshot fixture confirms that all three results survive.
 - The same read-modify-write race existed in Zvuk's favorites and playlist crawler state. Collection messages, library refresh/state reads, and snapshot clearing are now serialized separately from catalog commands and transfer progress, so a concurrent favorite page and independent total cannot erase one another.
 - This is a confirmed storage race in the implementation, but it is not yet proven to be the cause of the observed Spotify stall. The changed extension still needs a live reload and another read-only multi-service scan; no account writes were made.
+
+## 2026-10-28 — scan after unpacked extension installation
+
+- Reloading the localhost MVP reconnected the unpacked extension and started another read-only scan across the open service tabs. Apple Music returned a complete selectable snapshot with playlists; account-specific counts and track metadata are omitted.
+- Yandex Music advanced through nearly the entire likes collection, then produced no complete snapshot. The UI showed the incomplete-like-cards error. The exact response batch was not captured, so whether the remaining IDs were omitted by `/tracks` or another shape issue caused the failure is not established.
+- Spotify did not return a new complete snapshot during this run; its visible card reported that the previous scan stopped without a response. Zvuk also did not return a complete snapshot, despite its page visibly showing the signed-in favorites library. No API credentials or cookie values were inspected.
+- Fixture-driven follow-up now preserves authoritative Yandex collection IDs when hydration omits metadata rows and marks those rows incomplete. Temporary network errors, HTTP 408, 429 and 5xx also receive bounded retries; `Retry-After` is honored and visible progress continues during waits. This change is not yet verified against the live scan.
+- No catalog search, account write, or read-back was run. All twelve live transfer directions remain unverified.

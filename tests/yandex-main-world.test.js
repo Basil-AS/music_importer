@@ -138,6 +138,81 @@ test('Yandex source reader preserves liked IDs when a track card has no usable m
   assert.equal(snapshot.tracks[1].title, '');
 });
 
+test('Yandex source reader preserves collection IDs omitted from track hydration', async () => {
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') {
+      return { result: { library: { revision: 9, tracks: [{ id: 'known-1' }, { id: 'known-2' }] } } };
+    }
+    if (parsed.pathname === '/tracks' && init.method === 'POST') return { result: [song('known-1', 'Known track')] };
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [] };
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.equal(snapshot.completeness.confirmed, true);
+  assert.equal(snapshot.completeness.favoritesCount, 2);
+  assert.equal(snapshot.completeness.metadataComplete, false);
+  assert.equal(snapshot.completeness.metadataIncompleteCount, 1);
+  assert.deepEqual(Array.from(snapshot.tracks, (track) => track.id), ['known-1', 'known-2']);
+  assert.equal(snapshot.tracks[1].metadataComplete, false);
+  assert.equal(snapshot.tracks[1].title, '');
+});
+
+test('Yandex library reads retry HTTP 429 using Retry-After before confirming the snapshot', async () => {
+  let hydrationAttempts = 0;
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') {
+      return { result: { library: { revision: 10, tracks: [{ id: 'liked-1' }] } } };
+    }
+    if (parsed.pathname === '/tracks' && init.method === 'POST') {
+      hydrationAttempts += 1;
+      if (hydrationAttempts === 1) return { status: 429, headers: { 'retry-after': '0' }, payload: {} };
+      return { result: [song('liked-1', 'Favorite')] };
+    }
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [] };
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.equal(hydrationAttempts, 2);
+  assert.equal(snapshot.completeness.confirmed, true);
+});
+
+test('Yandex library reads retry temporary network failures', async () => {
+  let hydrationAttempts = 0;
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') {
+      return { result: { library: { revision: 11, tracks: [{ id: 'liked-1' }] } } };
+    }
+    if (parsed.pathname === '/tracks' && init.method === 'POST') {
+      hydrationAttempts += 1;
+      if (hydrationAttempts === 1) throw Object.assign(new Error('temporary network failure'), { name: 'TypeError' });
+      return { result: [song('liked-1', 'Favorite')] };
+    }
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [] };
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.equal(hydrationAttempts, 2);
+  assert.equal(snapshot.completeness.confirmed, true);
+});
+
 test('Yandex catalog search normalizes candidate IDs, album, ISRC, and URL', async () => {
   const page = makePage(async ({ url }) => {
     const parsed = new URL(url);

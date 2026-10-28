@@ -51,6 +51,45 @@
     return payload?.result ?? payload;
   }
 
+  function retryAfterDelay(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  }
+
+  async function libraryRequest(path, init = {}) {
+    const label = path.split('?')[0];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await request(path, init);
+      } catch (error) {
+        const status = Number(error?.status);
+        const retryable = (error?.name === 'TypeError' || error?.name === 'AbortError')
+          || status === 408 || status === 429 || status >= 500;
+        if (!retryable || attempt >= 3) throw error;
+        const retryAfter = status === 429 ? retryAfterDelay(error.retryAfter) : null;
+        let remaining = retryAfter ?? 500 * (2 ** attempt);
+        while (remaining > 0) {
+          const interval = Math.min(remaining, 15000);
+          await new Promise((resolve) => setTimeout(resolve, interval));
+          remaining -= interval;
+          if (scanPromise) {
+            const seconds = Math.ceil(remaining / 1000);
+            post('scan-progress', {
+              phase: 'retry',
+              message: seconds
+                ? `Яндекс Музыка временно ограничила запросы; повторим через ${seconds} с (${label}).`
+                : `Повторяем временно неудачный запрос Яндекс Музыки (${label}).`,
+            });
+          }
+        }
+      }
+    }
+  }
+
   function asArray(value) {
     if (Array.isArray(value)) return value;
     if (Array.isArray(value?.tracks)) return value.tracks;
@@ -105,7 +144,7 @@
     for (let offset = 0; offset < ids.length; offset += batchSize) {
       const batch = ids.slice(offset, offset + batchSize);
       const form = new URLSearchParams({ 'track-ids': batch.join(','), 'with-positions': 'false' });
-      const result = await request('/tracks', {
+      const result = await libraryRequest('/tracks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: form.toString(),
@@ -113,8 +152,7 @@
       const rows = asArray(result);
       if (!rows) throw new Error(`Неизвестный ответ Яндекс Музыки при чтении ${label}.`);
       const byId = new Map(rows.map((row) => [trackId(row), row]).filter(([id]) => id));
-      if (batch.some((id) => !byId.has(String(id)))) throw new Error(`Яндекс Музыка вернула не все карточки: ${label}, batch ${offset + 1}–${offset + batch.length}.`);
-      for (const id of batch) hydrated.push(byId.get(String(id)));
+      for (const id of batch) hydrated.push(byId.get(String(id)) || { id: String(id) });
       post('scan-progress', { phase: 'metadata', message: `${label}: загружено ${hydrated.length} из ${ids.length}.` });
       if (offset + batchSize < ids.length) await new Promise((resolve) => setTimeout(resolve, 300));
     }
@@ -122,7 +160,7 @@
   }
 
   async function readFavorites(uid) {
-    const result = await request(`/users/${encodeURIComponent(uid)}/likes/tracks?if-modified-since-revision=0`);
+    const result = await libraryRequest(`/users/${encodeURIComponent(uid)}/likes/tracks?if-modified-since-revision=0`);
     const library = result?.library || result;
     const refs = asArray(library);
     if (!refs || library?.revision === null || library?.revision === undefined || !Number.isInteger(Number(library.revision))) throw new Error('Не удалось подтвердить список лайков Яндекс Музыки.');
@@ -146,7 +184,7 @@
     const ownerId = String(playlist.uid ?? playlist.owner?.uid ?? uid);
     const kind = String(playlist.kind ?? playlist.id ?? '');
     if (!kind) throw new Error('В каталоге Яндекс Музыки есть playlist без kind.');
-    const result = await request(`/users/${encodeURIComponent(ownerId)}/playlists/${encodeURIComponent(kind)}`);
+    const result = await libraryRequest(`/users/${encodeURIComponent(ownerId)}/playlists/${encodeURIComponent(kind)}`);
     const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
     const refs = asArray(detail);
     const total = Number(detail?.trackCount ?? detail?.track_count ?? playlist.trackCount ?? playlist.track_count);
@@ -416,17 +454,17 @@
   async function scanLibrary() {
     if (scanPromise) return scanPromise;
     scanPromise = (async () => {
-      const accountResult = await request('/account/status');
+      const accountResult = await libraryRequest('/account/status');
       const uidValue = accountResult?.account?.uid ?? accountResult?.uid;
       if (uidValue === null || uidValue === undefined) throw new Error('Яндекс Музыка не вернула UID текущего аккаунта. Войдите в сервис и повторите.');
       const uid = String(uidValue);
       post('scan-progress', { phase: 'favorites', message: 'Читаем лайки Яндекс Музыки…' });
       const favorites = await readFavorites(uid);
       post('scan-progress', { phase: 'playlists', message: 'Читаем каталог плейлистов Яндекс Музыки…' });
-      const playlistResult = await request(`/users/${encodeURIComponent(uid)}/playlists/list`);
+      const playlistResult = await libraryRequest(`/users/${encodeURIComponent(uid)}/playlists/list`);
       const playlistRows = playlistListFrom(playlistResult);
       if (!playlistRows) throw new Error('Яндекс Музыка вернула неизвестный формат списка плейлистов.');
-      const kindsResult = await request(`/users/${encodeURIComponent(uid)}/playlists/list/kinds`);
+      const kindsResult = await libraryRequest(`/users/${encodeURIComponent(uid)}/playlists/list/kinds`);
       if (!Array.isArray(kindsResult)) throw new Error('Яндекс Музыка не вернула независимый список playlist kinds.');
       const expectedKinds = kindsResult.map((kind) => String(kind));
       const listedKinds = playlistRows.map((playlist) => String(playlist.kind ?? playlist.id ?? ''));
