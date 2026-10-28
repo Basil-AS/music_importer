@@ -57,7 +57,7 @@
       if (answered) return;
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
-      status.textContent = 'Расширение Music Importer не ответило. Откройте его popup на этой вкладке и нажмите «Разрешить доступ и подключить». Если этой кнопки нет, обновите расширение из текущей папки chrome-extension.';
+      status.textContent = 'Расширение не подключено к этой странице. Для обычного запуска нажмите значок Music Importer в панели Chrome — откроется приложение внутри расширения. Эта localhost-страница работает только как запасной режим.';
       button.textContent = 'Повторить проверку';
       button.disabled = false;
       $('#extensionHelp').open = true;
