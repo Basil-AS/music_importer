@@ -29,6 +29,8 @@
   function checkLocalExtension() {
     const button = $('#extensionImportBtn');
     const status = $('#extensionStatus');
+    const appOriginValue = $('#appOriginValue');
+    if (appOriginValue) appOriginValue.textContent = location.origin;
     if (extensionCheckInProgress || state.extensionAvailable) return;
     if (!window.crypto?.randomUUID) {
       status.textContent = 'Этот браузер не поддерживает проверку локального расширения. Используйте Chrome.';
@@ -39,16 +41,17 @@
     extensionCheckInProgress = true;
     button.disabled = true;
     button.textContent = 'Проверяем расширение…';
-    status.textContent = 'Проверяем связь с Music Importer в Chrome…';
+    status.textContent = 'Проверяем связь с расширением Music Importer…';
     const requestId = window.crypto.randomUUID();
     let answered = false;
     const timeout = setTimeout(() => {
       if (answered) return;
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
-      status.textContent = 'Chrome открыт, но Music Importer не ответил. Включите или обновите расширение, проверьте доступ к этому локальному адресу и нажмите «Повторить проверку».';
+      status.textContent = 'Расширение Music Importer не ответило. Откройте эту страницу в Chrome, включите или обновите расширение, проверьте доступ к локальному адресу и нажмите «Повторить проверку».';
       button.textContent = 'Повторить проверку';
       button.disabled = false;
+      $('#extensionHelp').open = true;
     }, 1200);
     const onMessage = (event) => {
       if (event.source !== window || event.origin !== location.origin

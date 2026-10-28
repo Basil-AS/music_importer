@@ -96,7 +96,7 @@ $('#openAppBtn').addEventListener('click', async () => {
   const appTab = tabs.find((candidate) => {
     try {
       const url = new URL(candidate.url || '');
-      return url.origin === 'http://127.0.0.1:8001' && url.pathname === '/';
+      return ['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://localhost:8000', 'http://localhost:8001'].includes(url.origin) && url.pathname === '/';
     } catch { return false; }
   });
   if (appTab?.id) await chrome.tabs.update(appTab.id, { active: true });
