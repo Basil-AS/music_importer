@@ -1,0 +1,108 @@
+# Вход пользователя и хранение доступа
+
+Дата сверки: 28.10.2026. Этот документ отвечает на практический вопрос: можно ли дать пользователю кнопку «Войти» без передачи пароля импортёру и без зависимости от учётной записи разработчика проекта.
+
+Практическая схема локального браузерного коннектора и сравнительная матрица сервисов вынесена в [LOGIN_MECHANISMS.md](LOGIN_MECHANISMS.md).
+
+## Короткий вывод
+
+Вход через страницу самого сервиса возможен, но у всех сервисов после входа есть свой способ выдать приложению доступ. Официальные API обычно связывают разрешение с зарегистрированным приложением. Использование уже открытой веб-сессии уменьшает видимые шаги для пользователя, но переводит интеграцию на частный контракт сайта и может требовать безопасного доступа к сессии браузера.
+
+Самый реалистичный UX без учётных данных автора — локальное приложение, которое открывает страницы входа самих сервисов и хранит разрешения только на устройстве. При этом «без привязки к автору» не достигается автоматически: Spotify и Apple требуют app/developer credentials для своих официальных API; у Яндекса официальный OAuth требует app ID, а музыкальный доступ в изученном flow не имел проверенной least-privilege конфигурации. Звук предоставляет пользовательскую веб-сессию, но документированного публичного API нет.
+
+| Сервис | Что делает пользователь | Что использует интеграция | Нужны ли credentials приложения | Практическая оценка |
+|---|---|---|---|---|
+| Spotify | Войти и согласиться на `user-library-read` в Spotify | Официальный OAuth Authorization Code + PKCE; локальные access/refresh tokens | **Да.** Нужен Client ID из Developer Dashboard; секрет для PKCE не нужен. Development Mode требует Premium у владельца, allowlist до 5 пользователей на app; с 23.07.2026 разрешено до 25 Client IDs на developer account, но их request quota общая | Удобно для личного/малого теста, но shared app автора создаёт зависимость от его Premium, allowlist и общего quota pool. Extended Quota для массового сервиса требует одобрения организации и опубликованный порог 250k MAU. Без app — ручный экспорт `YourLibrary.json`; private Web Player API наблюдался, но нестабилен |
+| Apple Music | Разрешить доступ MusicKit на устройстве/в веб-приложении | MusicKit автоматически управляет Music User Token; REST API также требует developer token | **Да для собственного MusicKit/API клиента.** Developer token требует Media Services private key и членство Apple Developer Program — 99 USD в год (или локальная цена). Бесплатная регистрация Apple Developer не выдаёт ключ для этого API. Встроенный перенос Apple — отдельный готовый пользовательский сценарий, которому не нужен наш developer token | Для проекта без расходов сначала проверить системный Apple Transfer и локальный Music.app write path. Не строить бесплатный веб-MVP на официальном Apple REST API без developer membership |
+| Яндекс Музыка | Локально использовать уже открытую Chrome-сессию; альтернативно — OAuth consent page | Cookie session с локальными `Session_id`, `sessionid2`, `i` или OAuth access token | **Нет для подтверждённого read-only cookie пути.** Официальный OAuth всё равно требует app ID; private API доступен по пользовательской web session | Terminal cookie-only `account/status` и likes прошли с 200 после выборочного чтения cookies из Chrome. Это самый прямой no-app вариант сейчас, но контракт частный; OAuth extension-клиент просит чрезмерные права и пересылает токен в Telegram |
+| Звук | Войти на домене zvuk.com либо подтвердить QR/device sign-in в сервисной странице | Web session; private device flow (`/api/tiny/login/qr/session` → poll `/token` → access token), затем GraphQL/Tiny | В исходнике `zvuk/kithara` app Client ID/secret не требуется; публичной third-party OAuth документации нет | Live QR-start из Chrome вернул `200` и `expires_in=300`; чистый terminal POST получил `418`. Authorization URL открыл отдельный `id.zvuk.com` вход по телефону/SMS; сессия `zvuk.com` не подтвердила устройство автоматически. До входа пользователя/проверки условий поток незавершён, access token не выдавался. См. [live probe](providers/zvuk-api-inventory.md#live-qr-start-probe-из-chrome-28102026). |
+
+## Сервисные потоки
+
+### Spotify
+
+Предпочтительный официальный поток — Authorization Code + PKCE. Клиент создаёт verifier/state, открывает `accounts.spotify.com/authorize`, получает code в loopback callback и обменивает его на токен с тем же Client ID. Пароль и MFA остаются у Spotify. Для чтения лайков нужен `user-library-read`; импорт в Spotify потребовал бы отдельный modify scope. Для Development Mode нужны Premium у app owner и allowlist до пяти пользователей на приложение. Июльский update 2026 разрешает 25 Client IDs на developer account, но объединяет их request quota; это не лимит песен, однако всё равно создаёт зависимость от app owner и не подходит как общий auth для широкой бесплатной аудитории.
+
+Если не заводить Developer App, экспорт пользователем архива Spotify — единственный уже известный поддерживаемый обход с меньшей технической связностью: пользователь запрашивает свой архив и импортёр локально читает нужный JSON. Это не моментальный вход, а ручной шаг. Private Web Player API может работать с активной сессией, но не является документированным контрактом; не считать его равноценным официальному OAuth.
+
+Практический UX-референс — [Spotify2Yt](https://github.com/OleksandrS23/Spotify2Yt), MIT, проверенный commit `03225fc` от 01.10.2026. Он запускает отдельный persistent Chrome/Edge профиль через Playwright, ждёт входа, получает web-player Bearer из сетевого запроса и читает `GET /v1/me/tracks`; при отказе API пытается собрать строки из видимой Liked Songs страницы. Это показывает, что единый flow «войти на сайте → локально прочитать лайки» практически реализуем без чтения обычного профиля Chrome и без Spotify app credentials. Но полученный Bearer остаётся секретом сессии, API/DOM-схема зависит от частного поведения web player, а README/source подтверждают сохранение browser profile и пользовательского CSV/progress на диске. Проект переносит только в YouTube Music. В его исходниках также есть флаги сокрытия Playwright automation; они не нужны для нашего connector и не являются частью рекомендуемого auth design.
+
+### Apple Music
+
+Apple различает developer token приложения и Music User Token пользователя. MusicKit на Apple-платформах и в веб-приложении автоматически управляет пользовательским токеном после явного разрешения; это убирает ручное копирование user token, но не устраняет app credential. Каждый Apple Music API REST запрос требует подписанный ES256 developer token. Его `kid`/Team ID и Media Services private key создаются в developer account, а срок такого токена не может превышать шесть месяцев. Apple указывает годовую цену Developer Program 99 USD (локальная цена может отличаться). Поэтому официальный собственный REST-коннектор не соответствует требованию «не платить и не зависеть от автора» даже при обычной кнопке входа MusicKit.
+
+Исключение для пользовательского пути — встроенный Apple `Transfer Music`: Apple требует подписку Apple Music и Sync Library, а доступные source services определяет сам provider и регион. Это не API и не гарантирует поддержку Звука/Яндекса для каждого аккаунта. На macOS можно отдельно исследовать локальную запись через Music.app/AppleScript, которая не выдаёт приложению API developer token, но её ещё нужно проверить на настоящем Favorite Songs и облачной синхронизации.
+
+На macOS отдельный нативный путь — управлять локальной медиатекой через Music.app, если её API/автоматизация позволяют изменять именно Favorite Songs. Новый статически проверенный reference [`Skalas/music-sync`](https://github.com/Skalas/music-sync/tree/9f961d9e439885eaff6dff6da125e238f278da6e) реализует `favorited=true` с fallback на legacy `loved` и read-back после Shortcut import; это подтверждает наличие такого code path, но не live write/read-back на нашем Mac и не облачную синхронизацию. Старые поля «Loved» нельзя автоматически считать теми же Favorites.
+
+### Яндекс Музыка
+
+Официальная документация Яндекс OAuth описывает app ID, scopes, authorization code, PKCE и device confirmation. При device flow пользователь вводит выданный код на странице Яндекс OAuth, после чего клиент обменивает device code; права должны быть разрешены для конкретного приложения. Это нормальная модель «войти и дать согласие», но не анонимный вход без приложения.
+
+Новый статически проверенный кандидат [jrfrigat/YandexMusic](https://github.com/jrfrigat/YandexMusic) добавляет QR-вход через Yandex Passport: пользователь подтверждает magic-link/QR, библиотека опрашивает результат и обменивает сессионные cookies на Music OAuth token. В отличие от Device Flow, source code не требует вводить app credentials пользователя, но применяет shared Music client ID и implicit exchange; реализация помечена best-effort/undocumented. Это потенциальный local sign-in UX, не подтверждённый и не официальный для сторонних интеграций. Login/password implementation из библиотеки использовать не следует.
+
+Текущая community-библиотека для Music API использует OAuth credentials публичного Android-клиента. Практический запрос code был выполнен, а consent screen показал профиль, платежи и другие права, не нужные для чтения музыкальных лайков. Согласие отменено до выпуска токена. Независимо от OAuth, на этом Mac мы теперь подтвердили clean-terminal cookie-only `GET /account/status` и `GET /users/{uid}/likes/tracks` HTTP 200, используя только три выбранных Chrome auth cookies в памяти процесса. Это позволяет локальному read-only adapter обходиться без OAuth app ID, но остаётся private API и зависит от Chrome/macOS cookie decryption.
+
+Обнаруженное расширение [MarshalX/yandex-music-token](https://github.com/MarshalX/yandex-music-token) не копирует уже существующую cookie-сессию: оно запускает OAuth implicit flow, перехватывает `access_token` из URL fragment и далее передаёт его Telegram bot URL. Владелец его shared app разрешил широкий список из 19 scopes, включая профиль, платежи, Disk и smart-home, вместе с `music:read`/`music:write`. Поэтому расширение не используем как есть. Не переносить extension storage/token-copy в импортёр; сессию Chrome можно читать локально для конкретного запроса, а OAuth с таким client ID не считать минимально привилегированным входом.
+
+Для входа через уже залогиненную страницу есть открытый пример в [vladimir120307-droid/yandex-music-downloader](https://github.com/vladimir120307-droid/yandex-music-downloader): injected script перехватывает Authorization-заголовок запросов самой страницы к `api.music.yandex.net`. Это подтверждает техническую возможность без нового consent screen. В нашем варианте предпочтительно не извлекать и не сохранять сам bearer token: локальный extension adapter должен читать список лайков через текущую сессию и отдавать приложению только данные треков. Это приватный API сайта, поэтому зависимость от реализации страницы и возможные изменения остаются.
+
+#### Можно ли сделать такой же вход для импортёра?
+
+Технически — да. Здесь есть два разных примера: `MarshalX/yandex-music-token` получает новый OAuth-токен через redirect, а `vladimir120307-droid/yandex-music-downloader` перехватывает `Authorization` из уже работающих запросов страницы. Второй механизм ближе к сценарию «я уже вошёл в аккаунт»; исходник хранит токен в extension storage для downloader-а, но наш импортёр может не сохранять его и отдавать приложению только результат чтения.
+
+Для нашего local-first приложения можно сделать собственный узкий browser connector: пользователь нажимает «Подключить» на странице сервиса, расширение обращается только к API этого сервиса в активной сессии и передаёт локальному приложению список треков/метаданные через Native Messaging или loopback localhost. Предпочтительнее передавать результат чтения, а не экспортировать общий bearer token или Chrome cookies. Для OAuth-провайдера connector должен использовать собственный минимально-разрешённый flow; для закрытого web API это останется хрупкой интеграцией, меняющейся вместе с сайтом.
+
+Текущая применимость по провайдерам:
+
+- **Яндекс:** уже подтверждены два локальных варианта чтения лайков: API с выбранными Chrome cookies и пользовательский OAuth token. Для поставляемого приложения безопаснее начать с узкого чтения коллекции через активную сессию; token extension не нужен. OAuth-вариант можно добавить, если удастся обосновать scopes и способ выдачи credentials без зависимости от автора.
+- **Звук:** собственный connector может использовать активную страницу/сессию, получить профильный session token и читать cursor-страницы. Полный read-only проход browser и terminal уже практически проверен; потребуется дедупликация ID и повторная проверка перед выпуском. Секреты не должны уходить на сервер.
+- **Spotify:** похожий browser connector возможен на основе web-player сессии и private GraphQL, но это не официальный API, может сломаться и несёт отдельные policy/maintenance риски. Официальный PKCE остаётся предпочтительным при доступных app credentials; архив пользователя — более переносимый fallback.
+- **Apple Music:** такой же универсальный token grabber не решает официальную авторизацию REST API: для неё нужен developer token приложения. Для целевого Favorite Songs отдельно исследуем локальную запись через Music.app, чтобы не делать web-token extraction основой Apple connector.
+
+Итого: пользовательский вход можно сделать единообразным в интерфейсе, но под кнопкой будут разные адаптеры. Наиболее практичный общий интерфейс — локальное расширение или companion, которое открывает/использует авторизованный сайт и возвращает только нужный набор лайков; общий сбор cookies и универсальный перехват токенов не является архитектурой продукта.
+
+### Звук
+
+Текущий браузерный путь: пользователь сам проходит вход на `zvuk.com`; сайт использует cookie-сессию. Наблюдаемые `/api/v1/graphql`, `/api/tiny/profile` и `/api/v2/tiny/profile` доступны в контексте авторизованной сессии. Профильные ответы содержат session token (`result.profile.token` у v2); его нельзя включать в отчёт или лог. Сообщественные клиенты отправляют токен как `X-Auth-Token`, а сайт использует cookie. Аналогичный browser extension можно реализовать без чтения Chrome cookie database: действовать только в origin `zvuk.com`, получить профиль через активную cookie-сессию и выполнить read-only cursor-запросы к коллекции. Лучше передать приложению страницы нормализованных лайков, оставив токен внутри расширения и только в памяти.
+
+Дополнительный кодовый источник [`zvuk/kithara`](https://github.com/zvuk/kithara/tree/1e49fd342bcb614dba31db8c8a6d675b9dbeaf42) показывает service-style QR/device flow: `POST /api/tiny/login/qr/session` выдаёт device code/URL, приложение открывает URL в системном браузере, затем раз в 2 секунды poll-ит `/api/tiny/login/qr/token` до подтверждения/истечения. Access token используется в `/api/v2/tiny/profile` и GraphQL `X-Auth-Token`, локально хранится через secret-store abstraction; logout вызывает `/api/tiny/logout`. В Chrome QR-start ответил `200`, но URL перенаправил к форме входа по телефону/SMS на `id.zvuk.com`; автоматически существующая web session устройство не подтвердила. Требуется пользовательский вход; доступ ещё не выдан и consent не завершён. Источник под GitHub org `Zvuk LLC` не отмечен verified, публичного API-контракта нет; детали [live probe](providers/zvuk-api-inventory.md#live-qr-start-probe-из-chrome-28102026).
+
+Для локальной реализации следует завершить QR flow только после того, как пользователь сам пройдёт форму входа/подтверждения, затем проверить выдачу token и работу OS secret store; активную web-session держать fallback. Не читать профиль Chrome и не сохранять копии cookies. Сначала проверить подписочные ограничения чтения лайков и воспроизводимость cursor pagination; мутации не делать без отдельного явного подтверждения.
+
+### Реализованный local-first пример: Songport
+
+Актуальный на 27.10.2026 [Songport](https://github.com/xlollx/Songport) — Android-приложение GPL-3.0-only; учётные данные хранятся на устройстве, проектный сервер не нужен. Для Spotify авторы поддерживают два независимых пути: официальный OAuth PKCE с Client ID пользователя и встроенный `Spotify (web)` connector, который использует web-player session, `client-token` и GraphQL/playlist backend сайта. В README этот Web Player путь помечен как неофициальный, противоречащий Spotify terms и нестабильный. Это показывает, что локальный вход через сайт технически реализуем, но он опирается на частный контракт сайта.
+
+Для Apple Music в приложении есть MusicKit user-token flow, но официальный REST connector требует Developer Token. Отдельный встроенный `Apple Music (web)` connector в GitHub/F-Droid build получает токены web player через Bridge и также помечен авторами как неофициальный. По README Apple поддерживает чтение/добавление в Library/playlists; native liked-song source/target заявлен у Spotify и ряда других providers, но Apple Favorite Songs как destination не указан. Яндекс Музыки и Звука в Songport нет. Это полезный reference для UX входа, локального хранения и matcher, но не готовый импортер лайков в Apple Favorites. Мы статически проверили HEAD `5aba73a` и README/provider/auth code; APK не устанавливали и аккаунты не подключали.
+
+## Рекомендуемая модель входа
+
+1. Приложение запускается локально; музыкальные данные и токены не проходят через сервер проекта.
+2. Для официальных OAuth интеграций показывать настоящее имя приложения/организации и только минимальные scopes. Пользователь входит на домене провайдера; импортёр никогда не принимает пароль или одноразовый код.
+3. Хранить refresh/access tokens через системное защищённое хранилище, а не в `.env`, исходниках или отчётах. Дать кнопку отключения/удаления локального доступа.
+4. Для private web-session интеграций изолировать browser profile приложения. Не читать произвольные cookies из основного Chrome-профиля; не копировать токены в документацию и не включать заголовки в crash logs.
+5. Если официальный flow требует личный app ID разработчика, ясно показать это как предварительное требование. Не маскировать shared credentials автора под «вход пользователя».
+6. Сначала экспортировать список лайков read-only и показать проверяемый отчёт. Запись в целевой аккаунт — отдельный этап с preview, дедупликацией и проверкой результата.
+
+### Что можно обещать пользователю
+
+- **Сейчас:** Звук — вход в веб-аккаунт + экспериментальный локальный read-only адаптер; Spotify — официальный OAuth только при доступном Client ID и выполнении ограничений режима, либо ручной архив; Яндекс — OAuth consent требует app ID и требует решения по scopes; Apple — официальные персональные API требуют developer token.
+- **Не обещать пока:** одну универсальную кнопку без app credentials, полный импорт без лимита на стороне провайдера, автоматическое обновление всех частных сессий или поддержку API, которые сервисы не публиковали.
+
+## Официальные источники
+
+- [Apple MusicKit](https://developer.apple.com/musickit/) (MusicKit на web и пользовательские Favorites)
+- [Apple developer-token authentication](https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens) (Media Services key, ES256, максимум 6 месяцев)
+- [Apple MusicKit user authentication](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit) (MusicKit автоматически управляет Music User Token)
+- [Apple Developer Program enrollment](https://developer.apple.com/help/account/membership/program-enrollment) (годовая стоимость)
+- [Apple Transfer Music support](https://support.apple.com/en-ae/118249) (источники выбирает music service/provider)
+- [Spotify Authorization Code with PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow)
+- [Spotify quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes)
+- [Spotify February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)
+- [Apple MusicKit user authentication](https://developer.apple.com/documentation/applemusicapi/user-authentication-for-musickit)
+- [Apple Music developer tokens](https://developer.apple.com/documentation/AppleMusicAPI/generating-developer-tokens)
+- [Yandex OAuth device authorization](https://yandex.com/dev/id/doc/en/codes/screen-code-oauth)
+- [Yandex OAuth authorization code and PKCE](https://yandex.com/dev/id/doc/en/codes/code-url)
+
+Состояния OAuth и private API в этом документе отражают исследование проекта на указанную дату; provider policy и интерфейсы могут меняться.

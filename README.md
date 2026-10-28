@@ -46,6 +46,28 @@ node scripts/build-extension-app.mjs
 
 Архитектура входа и сессий, различия между официальными API и внутренними browser-session запросами: [`docs/AUTH_AND_SESSION_ARCHITECTURE.md`](docs/AUTH_AND_SESSION_ARCHITECTURE.md).
 
-Подробное исследование API и входа по каждому сервису, включая инвентаризацию endpoint-ов и проверенные open-source проекты, ведётся отдельно в [PR #1 — исследование API и авторизации](https://github.com/Basil-AS/music_importer/pull/1). Там же фиксируются наблюдения и источники; это исследовательская ветка, а не подтверждение live-переносов.
+Подробное исследование API, авторизации, endpoint-ов и готовых проектов собрано в разделах ниже и в [`docs/API_MATRIX.md`](docs/API_MATRIX.md), [`docs/RESEARCH.md`](docs/RESEARCH.md) и [`docs/providers/`](docs/providers/). Результаты исследований описывают подтверждённые источники отдельно от ещё не проверенных live-маршрутов.
 
 Локальное расширение находится в [`chrome-extension/`](chrome-extension/). Коннекторы и ограничения: [Zvuk source](docs/ZVUK_CONNECTOR.md), [Zvuk target](docs/ZVUK_TRANSFER.md), [Spotify](docs/SPOTIFY_CONNECTOR.md), [Apple Music source](docs/APPLE_CONNECTOR.md), [Apple Music target](docs/APPLE_TRANSFER.md), [Яндекс source](docs/YANDEX_CONNECTOR.md), [Яндекс target](docs/YANDEX_TRANSFER.md). Ни один из 12 маршрутов ещё не прошёл end-to-end live transfer.
+
+---
+
+## API и авторизация
+
+- [Сводная таблица API-маршрутов, авторизации и проверок](docs/API_MATRIX.md)
+- [Обзор API, авторизации и ограничений сервисов](docs/RESEARCH.md)
+- [Целевой опыт и архитектурные ограничения продукта](docs/PRODUCT_DIRECTION.md)
+- [Способы входа через пользовательские аккаунты и локальное расширение](docs/LOGIN_MECHANISMS.md)
+- [Сравнение auth flow и локального хранения токенов](docs/AUTHENTICATION.md)
+- [Сопоставление треков, ISRC и ручная проверка кандидатов](docs/MATCHING.md)
+- [API-заметки: SberZvuk / Звук](docs/providers/zvuk.md)
+- [API-заметки: Spotify](docs/providers/spotify.md)
+- [Полный индекс 96 официальных Spotify OpenAPI операций](docs/providers/spotify-openapi-inventory.md)
+- [API-заметки: Apple Music](docs/providers/apple-music.md)
+- [Полный индекс 138 официальных Apple Music REST endpoint-операций](docs/providers/apple-openapi-inventory.md)
+- [API-заметки: Яндекс Музыка](docs/providers/yandex-music.md)
+- [Полный индекс 150 community OpenAPI операций Яндекс Музыки](docs/providers/yandex-openapi-inventory.md)
+- [Готовые проекты и библиотеки](docs/PROJECTS.md)
+- [GitFlow и правила коммитов](docs/WORKFLOW.md)
+
+Исследование ведётся по официальной документации, когда она есть, и сверяется с открытым исходным кодом для неофициальных API. В каждой заметке отмечено, что проверено в источнике, а что ещё предстоит проверить на живом аккаунте.
