@@ -222,6 +222,20 @@
     return normalizeISRC(candidate?.isrc || candidate?.ISRC || candidate?.externalIds?.isrc);
   }
 
+  function sameMetadataRecording(source, candidate) {
+    const evidence = scoreCandidate(source, candidate);
+    const sourceAlbum = normalizeText(source.album || source.collectionName || '');
+    const candidateAlbum = normalizeText(candidate.collectionName || candidate.album || '');
+    const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
+    const targetISRC = candidateISRC(candidate);
+    if (sourceISRC && targetISRC && sourceISRC !== targetISRC) return false;
+    return !evidence.versionConflict
+      && evidence.titleScore === 1
+      && evidence.artistScore === 1
+      && Boolean(sourceAlbum && candidateAlbum && sourceAlbum === candidateAlbum)
+      && evidence.durationScore === 1;
+  }
+
   function suggestBestMatch(source, candidates) {
     const ranked = candidates.map((candidate) => ({ candidate, ...scoreCandidate(source, candidate) }))
       .sort((left, right) => right.score - left.score);
@@ -230,15 +244,21 @@
     const margin = best ? best.score - (runnerUp?.score ?? 0) : 0;
     const bestISRC = candidateISRC(best?.candidate);
     const closeRivals = best ? ranked.filter((candidate) => best.score - candidate.score < 0.035) : [];
-    const sameRecordingDuplicates = Boolean(bestISRC && closeRivals.length > 1
+    const sameISRCDuplicates = Boolean(bestISRC && closeRivals.length > 1
       && closeRivals.every((candidate) => candidateISRC(candidate.candidate) === bestISRC && !candidate.versionConflict));
+    const metadataDuplicates = Boolean(!bestISRC && closeRivals.length > 1
+      && closeRivals.every((candidate) => !candidateISRC(candidate.candidate) && sameMetadataRecording(source, candidate.candidate)));
+    const sameRecordingDuplicates = sameISRCDuplicates || metadataDuplicates;
     const automatic = Boolean(best && !best.versionConflict && (best.exactISRC
       || (best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
     return {
       best: best?.candidate || null,
       confidence: best?.score || 0,
       automatic,
-      reason: !best ? 'no_candidates' : best.exactISRC ? 'exact_isrc' : sameRecordingDuplicates && automatic ? 'catalog_duplicates_same_isrc' : automatic ? 'high_confidence_metadata' : 'manual_review',
+      reason: !best ? 'no_candidates' : best.exactISRC ? 'exact_isrc'
+        : sameISRCDuplicates && automatic ? 'catalog_duplicates_same_isrc'
+          : metadataDuplicates && automatic ? 'catalog_duplicates_same_metadata'
+            : automatic ? 'high_confidence_metadata' : 'manual_review',
       ranked,
       margin,
     };

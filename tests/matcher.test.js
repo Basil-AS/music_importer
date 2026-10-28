@@ -62,7 +62,7 @@ test('matching ignores featured-title decoration but keeps recording-version che
   assert.equal(differentVersion.automatic, false);
 });
 
-test('matching auto-selects tied catalog editions only when they share the same ISRC', () => {
+test('matching auto-selects tied catalog editions only when ISRC or metadata confirms the same recording', () => {
   const matcher = loadMatcher();
   const sameRecording = matcher.suggestBestMatch(
     { title: 'Blinding Lights', artist: 'The Weeknd' },
@@ -82,6 +82,40 @@ test('matching auto-selects tied catalog editions only when they share the same 
     ],
   );
   assert.equal(distinctRecordings.automatic, false);
+});
+
+test('matching auto-selects duplicate no-ISRC editions with exact title, artist, album, and duration', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist', album: 'Album', durationMs: 180000 },
+    [
+      { trackId: 'edition-a', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 180000 },
+      { trackId: 'edition-b', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 180100 },
+    ],
+  );
+  assert.equal(result.automatic, true);
+  assert.equal(result.reason, 'catalog_duplicates_same_metadata');
+});
+
+test('matching keeps no-ISRC duplicates for review when duration or ISRCs conflict', () => {
+  const matcher = loadMatcher();
+  const durationConflict = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist', album: 'Album', durationMs: 180000 },
+    [
+      { trackId: 'edition-a', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 185000 },
+      { trackId: 'edition-b', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 185100 },
+    ],
+  );
+  assert.equal(durationConflict.automatic, false);
+
+  const isrcConflict = matcher.suggestBestMatch(
+    { title: 'Song', artist: 'Artist', album: 'Album', durationMs: 180000 },
+    [
+      { trackId: 'recording-a', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 180000, isrc: 'USAAA0000001' },
+      { trackId: 'recording-b', trackName: 'Song', artistName: 'Artist', collectionName: 'Album', trackTimeMillis: 180000, isrc: 'USAAA0000002' },
+    ],
+  );
+  assert.equal(isrcConflict.automatic, false);
 });
 
 test('source recording identity groups repeated library items by ISRC or stable provider ID', () => {
