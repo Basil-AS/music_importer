@@ -62,6 +62,19 @@ test('matching ignores featured-title decoration but keeps recording-version che
   assert.equal(differentVersion.automatic, false);
 });
 
+test('an exact ISRC does not auto-select a conflicting recording version', () => {
+  const matcher = loadMatcher();
+  const result = matcher.suggestBestMatch(
+    { title: 'Song (Live)', artist: 'Artist', isrc: 'USAAA0000001' },
+    [{ trackId: 'studio', trackName: 'Song', artistName: 'Artist', isrc: 'USAAA0000001' }],
+  );
+  assert.equal(result.best.trackId, 'studio');
+  assert.equal(result.ranked[0].exactISRC, true);
+  assert.equal(result.ranked[0].versionConflict, true);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'manual_review');
+});
+
 test('matching never auto-selects an exact metadata candidate with a conflicting ISRC', () => {
   const matcher = loadMatcher();
   const result = matcher.suggestBestMatch(

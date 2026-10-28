@@ -189,11 +189,18 @@
     return 0;
   }
 
+  function hasVersionConflict(source, candidate) {
+    const sourceVersions = versions(`${source.title || ''} ${source.album || source.collectionName || ''}`);
+    const candidateVersions = versions(`${candidate.trackName || candidate.title || candidate.name || ''} ${candidate.collectionName || candidate.album || ''}`);
+    return [...sourceVersions].some((marker) => !candidateVersions.has(marker))
+      || [...candidateVersions].some((marker) => !sourceVersions.has(marker));
+  }
+
   function scoreCandidate(source, candidate) {
     const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
     const candidateISRC = normalizeISRC(candidate.isrc || candidate.ISRC || candidate.externalIds?.isrc);
     if (sourceISRC && candidateISRC && sourceISRC === candidateISRC) {
-      return { score: 1, exactISRC: true, isrcConflict: false, versionConflict: false };
+      return { score: 1, exactISRC: true, isrcConflict: false, versionConflict: hasVersionConflict(source, candidate) };
     }
     const isrcConflict = Boolean(sourceISRC && candidateISRC && sourceISRC !== candidateISRC);
 
@@ -206,10 +213,7 @@
     const candidateAlbum = candidate.collectionName || candidate.album || '';
     const album = sourceAlbum && candidateAlbum ? similarity(sourceAlbum, candidateAlbum) : null;
     const duration = durationScore(source, candidate);
-    const sourceVersions = versions(`${source.title} ${source.album || ''}`);
-    const candidateVersions = versions(`${candidate.trackName || candidate.title || candidate.name || ''} ${candidate.collectionName || candidate.album || ''}`);
-    const versionConflict = [...sourceVersions].some((marker) => !candidateVersions.has(marker))
-      || [...candidateVersions].some((marker) => !sourceVersions.has(marker));
+    const versionConflict = hasVersionConflict(source, candidate);
 
     let total = title * 0.53 + artist * 0.39;
     let weight = 0.92;
@@ -256,7 +260,8 @@
       best: best?.candidate || null,
       confidence: best?.score || 0,
       automatic,
-      reason: !best ? 'no_candidates' : best.exactISRC ? 'exact_isrc'
+      reason: !best ? 'no_candidates' : (best.versionConflict || best.isrcConflict) ? 'manual_review'
+        : best.exactISRC ? 'exact_isrc'
         : sameISRCDuplicates && automatic ? 'catalog_duplicates_same_isrc'
           : metadataDuplicates && automatic ? 'catalog_duplicates_same_metadata'
             : automatic ? 'high_confidence_metadata' : 'manual_review',
