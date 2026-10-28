@@ -41,3 +41,7 @@ Version `0.13.38` waits up to eight seconds for the Spotify page to issue a newe
 ## Локальный запуск
 
 Установите unpacked extension из `chrome-extension/` в Chrome Developer Mode. После изменения extension нажмите Reload на странице `chrome://extensions`, затем снова откройте Spotify Web Player и нажмите кнопку Music Importer в панели Chrome. Основной интерфейс открывается внутри расширения и не требует localhost-разрешения. Данные остаются локально; если пользовательский snapshot не подтверждён, его не передаём в matcher.
+
+## Saved albums (fixture-only, not live-verified)
+
+The scan also reads saved albums with `GET https://api.spotify.com/v1/me/albums` (limit 50) using the page's session headers, with the same rate-limit, 401 recovery and timeout handling as Pathfinder calls. The snapshot gets `collections: [{ type: 'albums', completeness: { confirmed, total, count }, items }]`, where each item has `providerId` (`spotify:album:{id}`), `title`, `artists`, `upc`, `trackCount`, `releaseDate` and `artworkUrl`. Completeness requires `count === total`, unique IDs and page offsets that advance by the returned rows. If the album route fails, the rest of the scan still succeeds and `completeness.albumsConfirmed` is `false` with `albumsError`. Only fixture tests cover this; the route has not been run against a live account.
