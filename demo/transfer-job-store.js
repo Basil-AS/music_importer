@@ -90,6 +90,7 @@
       targetProvider: String(job.targetProvider),
       operationCount: Math.max(0, Number(job.operationCount) || 0),
       playlistCount: Math.max(0, Number(job.playlistCount) || 0),
+      albumCount: Math.max(0, Number(job.albumCount) || 0),
       startedAt: String(job.startedAt || new Date().toISOString()),
       updatedAt: new Date().toISOString(),
       status: String(job.status || 'in-progress'),

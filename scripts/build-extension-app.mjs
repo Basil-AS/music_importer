@@ -11,6 +11,7 @@ const assets = [
   'privacy.html',
   'app.js',
   'matcher.js',
+  'album-matcher.js',
   'account-catalog.js',
   'match-cache.js',
   'transfer-core.js',

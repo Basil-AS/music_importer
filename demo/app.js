@@ -10,10 +10,11 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, sourceCollectionScope: 'all', collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
+  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, sourceCollectionScope: 'all', collectionType: 'library', tracks: [], albums: [], albumsSkipped: false, loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
   const extensionApp = location.protocol === 'chrome-extension:' && typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
+  let albumPage = 0;
   let extensionCheckInProgress = false;
   let accountScanInProgress = false;
   let focusScanQueued = false;
@@ -155,30 +156,40 @@
   }
 
   function updateCounts() {
-    const searchBusy = state.searching || state.tracks.some((track) => track.searching);
+    const searchBusy = state.searching || state.tracks.some((track) => track.searching) || state.albums.some((album) => album.searching);
     const selected = state.tracks.filter((track) => track.selected && track.match).length;
     const reviewed = state.tracks.filter((track) => (track.metadataComplete === false && !track.match)
       || (track.searched && track.matches.length && !track.match && !track.userExcluded)).length;
     const missing = state.tracks.filter((track) => track.searched && !track.matches.length).length;
+    const albumsBusy = state.albums.some((album) => album.searching);
+    const albumsSelected = state.albums.filter((album) => album.selected && album.match).length;
+    const albumsReviewed = state.albums.filter((album) => album.searchError || (album.searched && album.matches.length && !album.match && !album.userExcluded)).length;
     $('#readyStat').textContent = state.loaded ? selected : '—';
     $('#reviewStat').textContent = state.loaded ? reviewed : '—';
     $('#missingStat').textContent = state.loaded ? missing : '—';
-    $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков` : 'ожидает список';
-    $('#selectedCount').textContent = `${selected} выбрано`;
+    $('#albumReadyStat').textContent = state.loaded && state.albums.length ? albumsSelected : '—';
+    $('#albumReviewStat').textContent = state.loaded && state.albums.length ? albumsReviewed : '—';
+    $('#matchCount').textContent = state.loaded ? `${state.tracks.length} треков${state.albums.length ? ` · ${state.albums.length} альбомов` : ''}` : 'ожидает список';
+    $('#selectedCount').textContent = `${selected + albumsSelected} выбрано`;
     const hasPlaylistMappings = ['playlists', 'library'].includes(state.collectionType) && state.sourceSnapshot?.collections?.some((collection) => collection.type === 'playlists');
-    $('#importBtn').disabled = !state.targetProvider || (selected === 0 && !hasPlaylistMappings) || searchBusy || Boolean(state.unresolvedTransferJob);
-    $('#searchBtn').disabled = !state.loaded || !state.targetProvider || searchBusy;
+    $('#importBtn').disabled = !state.targetProvider || (selected === 0 && albumsSelected === 0 && !hasPlaylistMappings) || searchBusy || albumsBusy || Boolean(state.unresolvedTransferJob);
+    $('#searchBtn').disabled = !state.loaded || !state.targetProvider || searchBusy || albumsBusy;
     $('#targetProvider').disabled = searchBusy;
     $('#storefront').disabled = searchBusy;
     $('#loadBtn').disabled = searchBusy;
     $('#fileInput').disabled = searchBusy;
     $('#clearMatchCache').disabled = searchBusy;
     $('#cancelSearchBtn').hidden = !state.searching;
-    $('#toggleAll').textContent = selected ? 'Снять выбор со всех' : 'Выбрать совпадения';
+    $('#toggleAll').textContent = selected + albumsSelected ? 'Снять выбор со всех' : 'Выбрать совпадения';
     updatePrivacyControls();
   }
 
   function renderTracks() {
+    renderTrackRows();
+    renderAlbums();
+  }
+
+  function renderTrackRows() {
     const needsReviewOnly = $('#needsReviewOnly').checked;
     const reviewable = state.tracks.some((track) => track.searched || track.searchError || track.metadataComplete === false);
     const needsReview = (track) => track.searchError || track.metadataComplete === false || (track.searched && !track.match && !track.userExcluded);
@@ -203,7 +214,8 @@
       $('#trackList').innerHTML = needsReviewOnly && state.tracks.length
         ? '<div class="empty">Все записи имеют совпадения; проверка не требуется.</div>'
         : playlistCount && !state.tracks.length ? `<div class="empty">Загружено плейлистов: ${playlistCount}. Треки для сопоставления не найдены.</div>`
-          : '<div class="empty">Загрузите пример или свой список треков</div>';
+          : state.albums.length && !state.tracks.length ? '<div class="empty">Треки не выбраны для переноса; альбомы для сверки ниже.</div>'
+            : '<div class="empty">Загрузите пример или свой список треков</div>';
       updateCounts();
       return;
     }
@@ -270,6 +282,20 @@
 
   function loadTracks(list, label, metadata = {}) {
     trackPage = 0;
+    albumPage = 0;
+    const sourceAlbums = metadata.albums || null;
+    state.albumsSkipped = metadata.albumsSkipped === true;
+    state.albums = (sourceAlbums?.rows || []).map((album) => ({
+      ...album,
+      query: [album.title, album.artist].filter(Boolean).join(' ').trim(),
+      matches: [],
+      match: null,
+      selected: false,
+      userExcluded: false,
+      searched: false,
+      searching: false,
+      searchError: false,
+    }));
     state.tracks = list.map((track) => ({
       ...track,
       query: [track.title, track.artist, track.album].filter(Boolean).join(' ').trim(),
@@ -291,6 +317,7 @@
       collectionName: metadata.collectionName,
       tracks: list,
       playlists: metadata.playlists || [],
+      albums: sourceAlbums ? { items: sourceAlbums.rows, completeness: { confirmed: sourceAlbums.confirmed, totalCount: sourceAlbums.rows.length } } : null,
       completeness: metadata.completeness || { confirmed: false, reason: 'file_import' },
     });
     state.loaded = true;
@@ -298,17 +325,18 @@
     $('#report').classList.remove('show');
     const playlistCount = state.sourceSnapshot.collections.filter((collection) => collection.type === 'playlists').length;
     const missingMetadataCount = list.filter((track) => track.metadataComplete === false && !track.title && !track.artist).length;
-    $('#reviewSub').textContent = `${label} · ${list.length} треков${playlistCount ? ` · ${playlistCount} плейлистов` : ''}${missingMetadataCount ? ` · без метаданных: ${missingMetadataCount}` : ''} готовы к поиску`;
+    $('#reviewSub').textContent = `${label} · ${list.length} треков${state.albums.length ? ` · ${state.albums.length} альбомов` : ''}${state.albumsSkipped ? ' · альбомы не подтверждены и не переносятся' : ''}${playlistCount ? ` · ${playlistCount} плейлистов` : ''}${missingMetadataCount ? ` · без метаданных: ${missingMetadataCount}` : ''} готовы к поиску`;
     updateTargetLabel();
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#searchStatus').classList.remove('search-error');
     renderTracks();
     setStep(2);
     $('#reviewCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    toast(`Загружено треков: ${list.length}`);
+    toast(`Загружено треков: ${list.length}${state.albums.length ? `, альбомов: ${state.albums.length}` : ''}`);
   }
 
   const sourceLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
+  const providerLabels = sourceLabels;
 
   function renderSourceAvailability(statuses = {}) {
     if (Object.keys(statuses).length) state.libraryStatuses = { ...statuses };
@@ -369,8 +397,10 @@
     const canScope = Boolean(payload && (playlists.length || Array.isArray(payload.tracks)));
     tools.hidden = !canScope;
     if (!canScope) return;
-    const options = [new Option('Лайки и все плейлисты', 'all')];
+    const albumInfo = window.MusicAlbumMatcher.extractSourceAlbums(payload);
+    const options = [new Option(albumInfo?.confirmed ? 'Лайки, альбомы и все плейлисты' : 'Лайки и все плейлисты', 'all')];
     if (Array.isArray(payload.tracks)) options.push(new Option(`Только лайки (${payload.tracks.length})`, 'favorites'));
+    if (albumInfo) options.push(new Option(albumInfo.confirmed ? `Только альбомы (${albumInfo.rows.length})` : 'Только альбомы (не подтверждены)', 'albums'));
     for (const playlist of playlists) {
       const id = String(playlist.id || playlist.title || playlist.name || '');
       const title = String(playlist.title || playlist.name || 'Плейлист');
@@ -397,6 +427,13 @@
     state.sourceCollectionScope = $('#sourceCollectionSelect').value || 'all';
     if (state.sourceCollectionScope === 'favorites') {
       payload = { ...payload, playlists: [], completeness: { ...payload.completeness, playlists: [], playlistCount: 0 } };
+    } else if (state.sourceCollectionScope === 'albums') {
+      payload = {
+        ...payload,
+        tracks: [],
+        playlists: [],
+        completeness: { ...payload.completeness, favoritesCount: 0, favoritesConfirmed: true, playlistCount: 0, playlists: [] },
+      };
     } else if (state.sourceCollectionScope.startsWith('playlist:')) {
       const selectedId = state.sourceCollectionScope.slice('playlist:'.length);
       const playlist = (originalPayload.playlists || []).find((item) => String(item.id || item.title || item.name || '') === selectedId);
@@ -422,12 +459,15 @@
       button.textContent = active ? '✓ Источник' : 'Выбрать источник';
     });
     const tracks = normalizeJSON(payload);
+    const albumScope = window.MusicAlbumMatcher.albumsForScope(originalPayload, state.sourceCollectionScope);
     loadTracks(tracks, `${state.source} · библиотека из расширения`, {
       provider,
       collectionName: payload.collection?.name,
       collectionType: payload.collection?.type,
       completeness: payload.completeness,
       playlists: payload.playlists,
+      albums: albumScope.albums,
+      albumsSkipped: albumScope.skipped,
     });
     $('#targetPlaylistName').value = '';
     $('#targetPlaylistName').hidden = !state.sourceCollectionScope.startsWith('playlist:');
@@ -437,7 +477,7 @@
 
   $('#sourceCollectionSelect').addEventListener('change', () => {
     if (!state.sourceProvider) return;
-    if (state.searching || state.tracks.some((track) => track.searching)) {
+    if (state.searching || state.tracks.some((track) => track.searching) || state.albums.some((album) => album.searching)) {
       toast('Остановите поиск перед сменой коллекции.');
       $('#sourceCollectionSelect').value = state.sourceCollectionScope;
       return;
@@ -665,6 +705,7 @@
     if (response?.retryAfter !== undefined && response?.retryAfter !== null) error.retryAfter = String(response.retryAfter);
     const retryAfterMs = Number(response?.retryAfterMs);
     if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) error.retryAfterMs = retryAfterMs;
+    if (response?.report) error.report = response.report;
     return error;
   }
 
@@ -863,6 +904,19 @@
     });
   }
 
+  // The catalog adapters expose the album part of the engine contract next to searchTracks().
+  for (const adapter of [appleCatalogAdapter, yandexCatalogAdapter, zvukCatalogAdapter, spotifyCatalogAdapter]) {
+    const albumTarget = () => window.MusicAlbumMatcher.createAlbumTarget(adapter.id, requestExtensionCommand);
+    adapter.searchAlbums = (album, context = {}) => albumTarget().searchAlbums(album, { storefront: context.storefront || $('#storefront').value });
+    adapter.writeAlbums = (targets, options = {}) => albumTarget().writeAlbums(targets, options);
+    adapter.readDestination = (query = {}) => query.collectionType === 'albums'
+      ? albumTarget().readDestination()
+      : Promise.reject(new Error('Чтение этой коллекции назначения не подключено.'));
+    adapter.readBack = (request) => request?.type === 'albums'
+      ? albumTarget().readBack(request)
+      : Promise.reject(new Error('Сверка этой коллекции не подключена.'));
+  }
+
   function updateTargetLabel() {
     const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', spotify: 'Spotify', zvuk: 'Сбер.Звук' };
     const logoPaths = {
@@ -1059,8 +1113,166 @@
     }
   }
 
+  const albumPageSize = 50;
+
+  function applyAlbumSuggestion(album) {
+    const suggestion = window.MusicAlbumMatcher.suggestAlbumMatch(album, album.matches);
+    album.match = suggestion.automatic ? suggestion.best : null;
+    album.matchConfidence = suggestion.confidence;
+    album.matchReason = suggestion.reason;
+    album.autoMatched = suggestion.automatic;
+    album.userExcluded = false;
+    album.selected = suggestion.automatic;
+  }
+
+  function resetAlbumMatches() {
+    albumPage = 0;
+    state.albums.forEach((album) => {
+      album.searched = false; album.searchError = false; album.matches = []; album.match = null; album.selected = false;
+      album.userExcluded = false; album.autoMatched = false;
+    });
+  }
+
+  function albumLabel(candidate) {
+    const artists = Array.isArray(candidate.artists) && candidate.artists.length ? candidate.artists.join(', ') : candidate.artistName || '';
+    const year = String(candidate.releaseDate || '').match(/\b(19|20)\d{2}\b/)?.[0] || '';
+    return `${artists ? `${artists} — ` : ''}${candidate.title || candidate.name || ''}${candidate.trackCount ? ` · ${candidate.trackCount} тр.` : ''}${year ? ` · ${year}` : ''}`;
+  }
+
+  function renderAlbums() {
+    const section = $('#albumSection');
+    if (!section) return;
+    section.hidden = !state.albums.length && !state.albumsSkipped;
+    if (section.hidden) return;
+    $('#albumNotice').hidden = !state.albumsSkipped;
+    const pageCount = Math.max(1, Math.ceil(state.albums.length / albumPageSize));
+    albumPage = Math.min(albumPage, pageCount - 1);
+    const first = albumPage * albumPageSize;
+    $('#albumCount').textContent = `${state.albums.length} альбомов`;
+    $('#albumPageStatus').textContent = state.albums.length ? `Показаны ${first + 1}–${Math.min(first + albumPageSize, state.albums.length)} из ${state.albums.length}` : '';
+    $('#albumPages').hidden = state.albums.length <= albumPageSize;
+    $('#previousAlbumPage').disabled = albumPage === 0;
+    $('#nextAlbumPage').disabled = albumPage >= pageCount - 1;
+    const targetName = providerLabels[state.targetProvider] || state.targetProvider;
+    const candidateId = window.MusicAlbumMatcher.candidateId;
+    $('#albumList').innerHTML = state.albums.slice(first, first + albumPageSize).map((album, offset) => {
+      const index = first + offset;
+      const title = escapeHTML(album.title || 'Метаданные недоступны');
+      const missingMetadata = !album.title || !(album.artist || album.upc);
+      const status = album.searching ? 'Ищем…' : album.searchError ? 'Ошибка поиска' : album.userExcluded ? 'Исключено вами' : missingMetadata ? 'Нужны данные' : album.searched && !album.matches.length ? 'Не найдено' : album.match ? (album.autoMatched ? `${album.matchReason === 'upc_exact' ? 'UPC' : 'Автоматически'} · ${Math.round(album.matchConfidence * 100)}%` : 'Выбрано вручную') : album.searched ? 'Проверьте' : 'Не искали';
+      const badgeClass = album.searchError ? 'error' : album.match ? '' : !album.userExcluded && album.searched && album.matches.length ? 'review' : 'pending';
+      const options = album.matches.map((match) => `<option value="${escapeHTML(candidateId(match))}" ${album.match && candidateId(album.match) === candidateId(match) ? 'selected' : ''}>${escapeHTML(albumLabel(match))}</option>`).join('');
+      const control = album.matches.length
+        ? `<select class="album-match" data-album-index="${index}" aria-label="Совпадение ${escapeHTML(targetName)} для альбома ${title}"><option value="">${album.match && album.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите издание…'}</option>${options}</select>${album.match ? `<div class="confidence ${album.autoMatched ? '' : 'review'}">${album.autoMatched ? `Автосопоставление · ${Math.round(album.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}`
+        : `<div class="quiet ${album.searchError ? 'search-error' : ''}">${album.searchError ? escapeHTML(album.errorMessage || 'Повторите поиск') : album.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`;
+      const year = String(album.releaseDate || '').match(/\b(19|20)\d{2}\b/)?.[0] || '';
+      const details = [album.trackCount ? `${album.trackCount} тр.` : '', year, album.upc ? `UPC ${album.upc}` : ''].filter(Boolean).map(escapeHTML).join(' · ');
+      const artworkUrl = normalizeArtworkUrl(album.artworkUrl);
+      const cover = artworkUrl ? `<img class="cover-image" src="${escapeHTML(artworkUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span aria-hidden="true">◉</span>';
+      return `<div class="track album" data-album-index="${index}"><div class="cover" aria-hidden="true">${cover}</div><div><div class="track-name">${title}</div><div class="track-artist">${escapeHTML(album.artist)}</div>${details ? `<div class="track-artist">${details}</div>` : ''}</div><div class="match">${control}<button class="track-search album-search" type="button" data-album-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button></div><span class="badge ${badgeClass}">${status}</span><input class="album-include" type="checkbox" aria-label="Включить альбом ${title}" data-album-index="${index}" ${album.selected && album.match ? 'checked' : ''} ${album.match ? '' : 'disabled'}></div>`;
+    }).join('');
+    $$('#albumList .cover-image').forEach((image) => image.addEventListener('error', () => {
+      const fallback = document.createElement('span');
+      fallback.textContent = '◉';
+      fallback.setAttribute('aria-hidden', 'true');
+      image.replaceWith(fallback);
+    }, { once: true }));
+  }
+
+  $('#albumList').addEventListener('change', (event) => {
+    const element = event.target;
+    const album = state.albums[Number(element.dataset.albumIndex)];
+    if (!album) return;
+    if (element.classList.contains('album-match')) {
+      album.match = album.matches.find((match) => window.MusicAlbumMatcher.candidateId(match) === element.value) || null;
+      album.selected = Boolean(album.match);
+      album.userExcluded = !album.match;
+      album.autoMatched = false;
+      album.matchReason = album.match ? 'manual_review' : null;
+      album.matchConfidence = album.match ? window.MusicAlbumMatcher.scoreAlbum(album, album.match).score : 0;
+    } else if (element.classList.contains('album-include')) {
+      album.selected = element.checked;
+    } else return;
+    state.report = null;
+    $('#report').classList.remove('show');
+    renderTracks();
+  });
+  $('#albumList').addEventListener('click', (event) => {
+    const button = event.target.closest?.('.album-search');
+    if (!button || state.searching) return;
+    void searchOneAlbum(state.albums[Number(button.dataset.albumIndex)]);
+  });
+  $('#previousAlbumPage').addEventListener('click', () => { albumPage = Math.max(0, albumPage - 1); renderAlbums(); $('#albumSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+  $('#nextAlbumPage').addEventListener('click', () => { albumPage += 1; renderAlbums(); $('#albumSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+
+  async function requestAlbumMatches(album, signal = null) {
+    album.searching = true;
+    album.searchError = false;
+    album.matches = [];
+    album.match = null;
+    album.selected = false;
+    album.userExcluded = false;
+    try {
+      let candidates;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          candidates = await targetAdapter().searchAlbums(album, { storefront: $('#storefront').value });
+          break;
+        } catch (error) {
+          const retriable = error?.status === 429 || error?.status >= 500;
+          if (!retriable || attempt >= 3 || signal?.aborted) throw error;
+          const retryAfter = Number(error.retryAfter);
+          await new Promise((resolve) => setTimeout(resolve, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 60) * 1000 : 1500 * (attempt + 1)));
+        }
+      }
+      album.matches = candidates;
+      album.searched = true;
+      applyAlbumSuggestion(album);
+    } catch (error) {
+      album.searched = false;
+      album.searchError = true;
+      album.matches = [];
+      album.errorMessage = error instanceof TypeError ? 'Каталог недоступен. Проверьте соединение и повторите поиск.' : error.message;
+    } finally {
+      album.searching = false;
+    }
+  }
+
+  async function searchOneAlbum(album) {
+    if (!album || state.searching) return;
+    state.searching = true;
+    state.report = null;
+    $('#report').classList.remove('show');
+    $('#searchStatus').textContent = `Ищем альбом: ${album.title}`;
+    renderTracks();
+    await requestAlbumMatches(album);
+    state.searching = false;
+    $('#searchStatus').textContent = album.searchError ? 'Поиск альбома не удался — повторите' : album.matches.length ? `Изданий найдено: ${album.matches.length}` : 'Альбом в каталоге не найден';
+    renderTracks();
+  }
+
+  async function searchAlbumsCatalog(controller) {
+    const pending = state.albums.filter((album) => (!album.searched || album.searchError) && album.title && (album.artist || album.upc));
+    if (!pending.length) return;
+    let done = 0;
+    let cursor = 0;
+    const label = providerLabels[state.targetProvider] || state.targetProvider;
+    const worker = async () => {
+      while (cursor < pending.length && !controller.signal.aborted) {
+        const album = pending[cursor];
+        cursor += 1;
+        await requestAlbumMatches(album, controller.signal);
+        done += 1;
+        $('#searchStatus').textContent = `Альбомы в каталоге ${label}: ${done} из ${pending.length}`;
+        if (done % 10 === 0 || done === pending.length) renderTracks();
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    if (controller.signal.aborted) throw new DOMException('Поиск отменён', 'AbortError');
+  }
+
   async function searchCatalog() {
-    if (!state.loaded || !state.targetProvider || state.searching || state.tracks.some((track) => track.searching)) return;
+    if (!state.loaded || !state.targetProvider || state.searching || state.tracks.some((track) => track.searching) || state.albums.some((album) => album.searching)) return;
     const controller = new AbortController();
     activeSearchController = controller;
     state.searching = true;
@@ -1184,11 +1396,13 @@
           if (completed % (trackPageSize * 2) < group.tracks.length || completed >= state.tracks.length) renderTracks();
         },
       });
+      await searchAlbumsCatalog(controller);
       const withResults = state.tracks.filter((track) => track.searched && track.matches.length).length;
-      const failed = state.tracks.filter((track) => track.searchError).length;
+      const failed = state.tracks.filter((track) => track.searchError).length + state.albums.filter((album) => album.searchError).length;
+      const albumsFound = state.albums.filter((album) => album.searched && album.matches.length).length;
       const missingMetadataCount = state.tracks.filter((track) => track.metadataComplete === false && !track.title && !track.artist).length;
       const resultStatus = failed ? `Найдено: ${withResults} · ошибок: ${failed}` : `Найдено: ${withResults} из ${state.tracks.length}`;
-      $('#searchStatus').textContent = `${resultStatus}${missingMetadataCount ? ` · без метаданных: ${missingMetadataCount}` : ''}${accountLibraryCount ? ` · уже в аккаунте: ${accountLibraryCount}` : ''}${cachedCount ? ` · из локального кэша: ${cachedCount}` : ''}`;
+      $('#searchStatus').textContent = `${resultStatus}${state.albums.length ? ` · альбомы: ${albumsFound} из ${state.albums.length}` : ''}${missingMetadataCount ? ` · без метаданных: ${missingMetadataCount}` : ''}${accountLibraryCount ? ` · уже в аккаунте: ${accountLibraryCount}` : ''}${cachedCount ? ` · из локального кэша: ${cachedCount}` : ''}`;
       $('#searchStatus').classList.toggle('search-error', failed > 0);
       setStep(4);
       toast(failed ? 'Часть запросов не прошла — можно повторить' : `Совпадений в каталоге: ${withResults}`);
@@ -1198,7 +1412,7 @@
       const message = aborted
         ? 'Поиск остановлен. Завершённые результаты сохранены; следующий запуск продолжит с оставшихся треков.'
         : error?.message || 'Массовый поиск прервался. Повторите поиск для оставшихся треков.';
-      for (const track of state.tracks) {
+      for (const track of [...state.tracks, ...state.albums]) {
         if (!track.searching) continue;
         track.searching = false;
         if (!aborted) {
@@ -1226,10 +1440,11 @@
     const plan = window.MusicTransferCore.createTransferPlan({
       sourceSnapshot: state.sourceSnapshot,
       targetProvider: state.targetProvider,
-      targetCollectionType: state.collectionType,
-      targetCollectionName: state.collectionType === 'library' ? 'Любимое и плейлисты' : state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
+      targetCollectionType: state.sourceCollectionScope === 'albums' ? 'albums' : state.collectionType,
+      targetCollectionName: state.sourceCollectionScope === 'albums' ? 'Альбомы' : state.collectionType === 'library' ? 'Любимое, альбомы и плейлисты' : state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
       storefront: state.targetProvider === 'apple-music' ? $('#storefront').value : null,
       tracks: state.tracks,
+      albums: state.albums,
     });
     const nameOverride = $('#targetPlaylistName').value.trim();
     if (nameOverride && state.sourceCollectionScope.startsWith('playlist:')) {
@@ -1238,8 +1453,6 @@
     }
     return plan;
   }
-
-  const providerLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
 
   function renderUnresolvedTransferJob() {
     const job = state.unresolvedTransferJob;
@@ -1256,7 +1469,7 @@
     const target = providerLabels[job.targetProvider] || job.targetProvider;
     const progress = job.progress?.phase ? ` Этап: ${job.progress.phase}${job.progress.total != null ? ` (${job.progress.completed ?? 0}/${job.progress.total})` : ''}.` : '';
     const outcome = job.outcome ? ` ${job.outcome}` : '';
-    $('#transferJobDetails').textContent = `${source} → ${target} · ${job.operationCount} треков · ${job.playlistCount} плейлистов.${progress}${outcome}`;
+    $('#transferJobDetails').textContent = `${source} → ${target} · ${job.operationCount} записей${job.albumCount ? ` (альбомов: ${job.albumCount})` : ''} · ${job.playlistCount} плейлистов.${progress}${outcome}`;
   }
 
   async function refreshUnresolvedTransferJob() {
@@ -1284,9 +1497,8 @@
         ...job.recoveryPlan,
         recovery: { playlistTargets: job.playlistTargets || {}, progress: job.progress || null },
       };
-      const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk', spotify: 'spotify' })[job.targetProvider];
-      if (!commandProvider) throw new Error('Сервис назначения сохранённой операции неизвестен.');
-      const response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider, (progress) => window.MusicTransferJobStore.updateProgress(job.id, progress));
+      if (!['apple-music', 'yandex-music', 'zvuk', 'spotify'].includes(job.targetProvider)) throw new Error('Сервис назначения сохранённой операции неизвестен.');
+      const response = await window.MusicAlbumMatcher.executePlanOnTarget(job.targetProvider, plan, requestExtensionCommand, (progress) => window.MusicTransferJobStore.updateProgress(job.id, progress));
       if (!response?.ok) {
         const status = response?.report?.status === 'partial_failure' ? 'partial_failure' : 'failed';
         await window.MusicTransferJobStore.finish(job.id, status, response?.error || 'Продолжение не прошло проверку целевого аккаунта.');
@@ -1374,6 +1586,7 @@
         collectionType: payload?.collection?.type,
         completeness: payload?.completeness,
         playlists: payload?.playlists,
+        ...(() => { const scope = window.MusicAlbumMatcher.albumsForScope(payload, 'all'); return { albums: scope.albums, albumsSkipped: scope.skipped }; })(),
       });
     } catch (error) {
       toast(error.message || 'Не удалось прочитать файл');
@@ -1605,10 +1818,11 @@
 
   $('#searchBtn').addEventListener('click', searchCatalog);
   $('#targetProvider').addEventListener('change', () => {
-    if (state.searching || state.tracks.some((track) => track.searching)) return;
+    if (state.searching || state.tracks.some((track) => track.searching) || state.albums.some((album) => album.searching)) return;
     state.targetProvider = $('#targetProvider').value;
     trackPage = 0;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
+    resetAlbumMatches();
     state.report = null;
     $('#report').classList.remove('show');
     updateTargetLabel();
@@ -1621,6 +1835,7 @@
     if (!state.loaded || state.searching || state.tracks.some((track) => track.searching)) return;
     trackPage = 0;
     state.tracks.forEach((track) => { track.searched = false; track.searchError = false; track.matches = []; track.match = null; track.selected = false; });
+    resetAlbumMatches();
     state.report = null;
     $('#report').classList.remove('show');
     $('#searchStatus').textContent = 'Страна каталога изменена; обновляю совпадения…';
@@ -1629,8 +1844,9 @@
   });
 
   $('#toggleAll').addEventListener('click', () => {
-    const shouldSelect = !state.tracks.some((track) => track.selected && track.match);
+    const shouldSelect = !state.tracks.some((track) => track.selected && track.match) && !state.albums.some((album) => album.selected && album.match);
     state.tracks.forEach((track) => { track.selected = shouldSelect && Boolean(track.match); });
+    state.albums.forEach((album) => { album.selected = shouldSelect && Boolean(album.match); });
     const context = matchCacheContext();
     void window.MusicMatchCache?.putDecisions(state.tracks.filter((track) => track.match), context.targetProvider, (track) => ({
       selected: Boolean(shouldSelect && track.match),
@@ -1658,6 +1874,9 @@
 
   $('#resetBtn').addEventListener('click', () => {
     state.tracks = [];
+    state.albums = [];
+    state.albumsSkipped = false;
+    albumPage = 0;
     trackPage = 0;
     state.loaded = false;
     state.report = null;
@@ -1682,9 +1901,10 @@
           throw new Error('Для записи нужен полный snapshot. Пример и ручной CSV остаются в preview-only режиме.');
         }
         const playlistCount = plan.collectionMappings.length;
+        const summary = window.MusicAlbumMatcher.albumPlanSummary(plan);
         const providerName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', zvuk: 'Сбер.Звук', spotify: 'Spotify' })[state.targetProvider] || state.targetProvider;
         const playlistNames = plan.collectionMappings.map((mapping) => `«${mapping.targetName}»`).join(', ');
-        if (!window.confirm(`Записать ${plan.operations.length} совпавших треков и создать ${playlistCount} плейлистов${playlistNames ? ` ${playlistNames}` : ''} в ${providerName}? Это изменит аккаунт. После записи приложение сверит лайки, треки и порядок.`)) return;
+        if (!window.confirm(`Записать в ${providerName}: лайки — ${summary.likes}, альбомы — ${summary.albums} (целыми альбомами, без разворачивания в треки), плейлисты — ${playlistCount}${playlistNames ? ` ${playlistNames}` : ''} (треков в них: ${summary.playlistItems})? Это изменит аккаунт. После записи приложение сверит лайки, альбомы, треки и порядок.`)) return;
         state.transferInProgress = true;
         $('#importBtn').disabled = true;
         $('#importBtn').textContent = 'Подготавливаем журнал переноса…';
@@ -1700,15 +1920,15 @@
           sourceProvider: state.sourceProvider,
           targetProvider: state.targetProvider,
           operationCount: plan.operations.length,
+          albumCount: summary.albums,
           playlistCount,
           recoveryPlan: plan,
         });
         if (!jobStarted) throw new Error('Не удалось надёжно сохранить начало переноса на этом устройстве. Запись в музыкальный аккаунт не запускалась.');
         $('#importBtn').textContent = 'Записываем и сверяем…';
-        const commandProvider = ({ 'apple-music': 'apple', 'yandex-music': 'yandex', zvuk: 'zvuk', spotify: 'spotify' })[state.targetProvider];
         let response;
         try {
-          response = await requestExtensionCommand('execute-transfer', { plan }, commandProvider, (progress) => window.MusicTransferJobStore.updateProgress(transferJobId, progress));
+          response = await window.MusicAlbumMatcher.executePlanOnTarget(state.targetProvider, plan, requestExtensionCommand, (progress) => window.MusicTransferJobStore.updateProgress(transferJobId, progress));
         } catch (error) {
           await window.MusicTransferJobStore.finish(transferJobId, 'unknown', 'Связь прервалась; проверьте целевой аккаунт.');
           await refreshUnresolvedTransferJob();
@@ -1729,13 +1949,15 @@
           if (response?.report) {
             state.report = { ...plan, mode: 'account-write', execution: response.report };
             const partialFavorites = Number(response.report?.favorites?.verified || 0);
+            const partialAlbums = Number(response.report?.albums?.verified || 0);
             const partialPlaylists = (response.report?.playlists || []).reduce((sum, playlist) => sum + Number(playlist.verified || 0), 0);
-            $('#addedMetric').textContent = String(partialFavorites + partialPlaylists);
+            showReportBreakdown(partialFavorites, partialAlbums, partialPlaylists);
+            $('#addedMetric').textContent = String(partialFavorites + partialAlbums + partialPlaylists);
             $('#skippedMetric').textContent = String(plan.skipped.length);
             $('#report').querySelector('h3').textContent = response.report.status === 'partial_failure'
               ? 'Перенос остановлен · нужна сверка'
               : 'Перенос не выполнен';
-            $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(partialFavorites + partialPlaylists);
+            $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(partialFavorites + partialAlbums + partialPlaylists);
             $('#report').querySelector('.report-grid .metric:last-child span').textContent = `проверено в ${providerName}`;
             $('#report').classList.add('show');
             setStep(5);
@@ -1744,17 +1966,21 @@
         }
         state.report = { ...plan, mode: 'account-write', execution: response.report || { status: 'complete' } };
         const verifiedFavorites = Number(response.report?.favorites?.verified || 0);
+        const verifiedAlbums = Number(response.report?.albums?.verified || 0);
         const verifiedPlaylists = (response.report?.playlists || []).reduce((sum, playlist) => sum + Number(playlist.verified || 0), 0);
-        $('#addedMetric').textContent = verifiedFavorites + verifiedPlaylists;
+        showReportBreakdown(verifiedFavorites, verifiedAlbums, verifiedPlaylists);
+        $('#addedMetric').textContent = verifiedFavorites + verifiedAlbums + verifiedPlaylists;
         $('#skippedMetric').textContent = plan.skipped.length;
         $('#report').querySelector('h3').textContent = 'Перенос завершён и сверен';
-        $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(verifiedFavorites + verifiedPlaylists);
+        $('#report').querySelector('.report-grid .metric:last-child b').textContent = String(verifiedFavorites + verifiedAlbums + verifiedPlaylists);
         $('#report').querySelector('.report-grid .metric:last-child span').textContent = `подтверждено в ${providerName}`;
         $('#report').classList.add('show');
         setStep(5);
         toast(`${providerName} подтвердила запись`);
       } else {
         state.report = plan;
+        const planSummary = window.MusicAlbumMatcher.albumPlanSummary(plan);
+        $('#reportBreakdown').textContent = `Лайки: ${planSummary.likes} · Альбомы: ${planSummary.albums} · Плейлисты: ${planSummary.playlists} (треков: ${planSummary.playlistItems})`;
         $('#addedMetric').textContent = state.report.operations.length;
         $('#skippedMetric').textContent = state.report.skipped.length;
         $('#report').querySelector('h3').textContent = 'План готов · без записи';
@@ -1771,6 +1997,11 @@
       updateTargetLabel();
     }
   });
+
+  // Likes, albums and playlists are reported separately so album writes never read as tracks.
+  function showReportBreakdown(likes, albums, playlistItems) {
+    $('#reportBreakdown').textContent = `Лайки: ${likes} · Альбомы: ${albums} · Плейлисты (треков): ${playlistItems}`;
+  }
 
   $('#downloadReport').addEventListener('click', () => {
     if (!state.report) return;
@@ -1816,6 +2047,8 @@
       state.sourceProvider = '';
       state.source = '';
       state.tracks = [];
+      state.albums = [];
+      state.albumsSkipped = false;
       state.loaded = false;
       state.report = null;
       $$('.source').forEach((card) => card.classList.remove('selected'));
