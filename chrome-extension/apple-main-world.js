@@ -215,6 +215,37 @@
     };
   }
 
+  // Library albums carry l.* ids; the catalog id (and UPC) comes from include=catalog when Apple provides it.
+  function normalizeLibraryAlbum(row, position) {
+    const attributes = row?.attributes || {};
+    const libraryId = String(row?.id || '').trim();
+    const title = String(attributes.name || '').trim();
+    const artist = String(attributes.artistName || '').trim();
+    if (!libraryId || !title) throw new Error('В библиотеке Apple Music найден альбом без ID или названия.');
+    const related = Array.isArray(row?.relationships?.catalog?.data) ? row.relationships.catalog.data[0] : null;
+    const catalogId = String(related?.id || attributes.playParams?.catalogId || '').trim();
+    const upc = String(related?.attributes?.upc || attributes.upc || '').replace(/[^0-9]/g, '');
+    const trackCount = Number.isInteger(attributes.trackCount) ? attributes.trackCount : Number.isInteger(related?.attributes?.trackCount) ? related.attributes.trackCount : null;
+    return {
+      providerId: catalogId || libraryId,
+      libraryId,
+      catalogId,
+      title,
+      artists: artist ? [artist] : [],
+      upc: upc || null,
+      trackCount,
+      releaseDate: String(attributes.releaseDate || related?.attributes?.releaseDate || ''),
+      artworkUrl: String(attributes.artwork?.url || related?.attributes?.artwork?.url || ''),
+      position,
+    };
+  }
+
+  async function readLibraryAlbums() {
+    const result = await readPages(`/v1/me/library/albums?limit=${pageSize}&include=catalog`, 'Альбомы Apple Music');
+    requireUniqueResourceIds(result.rows, 'альбомов');
+    return { total: result.total, rows: result.rows, items: result.rows.map((row, position) => normalizeLibraryAlbum(row, position)) };
+  }
+
   async function readPlaylist(playlist, playlistIndex, playlistTotal) {
     const id = String(playlist?.id || '');
     const name = String(playlist?.attributes?.name || '');
@@ -228,9 +259,11 @@
     if (scanPromise) return scanPromise;
     scanPromise = (async () => {
       await waitForSession();
-      const [librarySongs, playlistCatalog] = await Promise.all([
+      const [librarySongs, playlistCatalog, albumRead] = await Promise.all([
         readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Песни Apple Music'),
         readPages(`/v1/me/library/playlists?limit=${pageSize}`, 'Каталог плейлистов Apple Music'),
+        // Albums are optional: a failure leaves the albums collection unconfirmed without blocking songs/playlists.
+        readLibraryAlbums().catch((error) => ({ error: error instanceof Error ? error.message : 'Не удалось прочитать альбомы Apple Music.' })),
       ]);
       requireUniqueResourceIds(librarySongs.rows, 'песен');
       requireUniqueResourceIds(playlistCatalog.rows, 'плейлистов');
@@ -257,6 +290,17 @@
           librarySongsCount: librarySongs.total,
           playlistItemsConfirmed,
           playlistItemsTotal: playlists.length,
+          albumsConfirmed: !albumRead.error,
+          albumsCount: albumRead.items ? albumRead.items.length : 0,
+        },
+        albumsCollection: {
+          type: 'albums',
+          name: 'Альбомы',
+          itemCount: albumRead.items ? albumRead.items.length : 0,
+          completeness: albumRead.error
+            ? { confirmed: false, error: albumRead.error }
+            : { confirmed: true, totalCount: albumRead.total },
+          items: albumRead.items || [],
         },
         tracks: tracks.map((track) => ({ ...track, collectionType: 'favorites' })),
         playlists,
@@ -312,6 +356,52 @@
     const songs = isrcQuery ? result?.data : result?.results?.songs?.data;
     if (!Array.isArray(songs)) throw new Error('Каталог Apple Music вернул неожиданный формат поиска.');
     return songs.map(normalizeCatalogSong);
+  }
+
+  function normalizeCatalogAlbum(row, matchReason) {
+    const attributes = row?.attributes || {};
+    const id = String(row?.id || '').trim();
+    const title = String(attributes.name || '').trim();
+    if (!id || !title) throw new Error('Каталог Apple Music вернул альбом без ID или названия.');
+    return {
+      providerId: id,
+      albumId: id,
+      title,
+      name: title,
+      artists: attributes.artistName ? [String(attributes.artistName)] : [],
+      artistName: String(attributes.artistName || ''),
+      upc: String(attributes.upc || '').replace(/[^0-9]/g, '') || null,
+      trackCount: Number.isInteger(attributes.trackCount) ? attributes.trackCount : null,
+      releaseDate: String(attributes.releaseDate || ''),
+      artworkUrl: String(attributes.artwork?.url || ''),
+      url: String(attributes.url || ''),
+      matchReason,
+    };
+  }
+
+  // UPC lookup first (exact), then a title+artist album search; each candidate says which route found it.
+  async function searchCatalogAlbums(title, artistName, upc, storefront) {
+    const country = String(storefront || '').toLowerCase();
+    const name = String(title || '').trim().slice(0, 200);
+    const artist = String(artistName || '').trim().slice(0, 200);
+    const code = String(upc || '').replace(/[^0-9]/g, '');
+    if (!/^[a-z]{2}$/.test(country)) throw new Error('Укажите двухбуквенный storefront Apple Music.');
+    if (!code && !name) throw new Error('Для поиска альбома нужен UPC или название.');
+    const candidates = new Map();
+    if (code) {
+      const exact = await request(`/v1/catalog/${country}/albums?${new URLSearchParams({ 'filter[upc]': code })}`, { allowCatalog: true, retry: false });
+      if (!Array.isArray(exact?.data)) throw new Error('Каталог Apple Music вернул неожиданный формат поиска по UPC.');
+      for (const row of exact.data) candidates.set(String(row?.id), normalizeCatalogAlbum(row, 'upc'));
+      if (candidates.size) return [...candidates.values()];
+    }
+    if (!name) return [];
+    const params = new URLSearchParams({ term: `${name} ${artist}`.trim(), types: 'albums', limit: '10' });
+    const search = await request(`/v1/catalog/${country}/search?${params}`, { allowCatalog: true, retry: false });
+    const albums = search?.results?.albums?.data;
+    if (albums === undefined && search?.results && !Object.keys(search.results).length) return [];
+    if (!Array.isArray(albums)) throw new Error('Apple Music вернул неизвестную выдачу альбомов.');
+    for (const row of albums) if (!candidates.has(String(row?.id))) candidates.set(String(row?.id), normalizeCatalogAlbum(row, 'search'));
+    return [...candidates.values()];
   }
 
   async function searchAlbumTracks(albumName, artistName, storefront) {
@@ -380,6 +470,36 @@
     return { wanted, written, alreadyPresent: wanted.length - missing.length };
   }
 
+  function albumTargetIds(operations) {
+    return [...new Set(operations.map((operation) => String(operation?.target?.providerId || '')).filter(Boolean))];
+  }
+
+  // Albums go to the library as albums only: POST /v1/me/library?ids[albums]=…, never favorites or songs.
+  async function addAppleAlbums(operations, progress) {
+    const wanted = albumTargetIds(operations);
+    if (wanted.some((id) => !/^[0-9]+$/.test(id))) throw new Error('Для добавления альбома нужен ID каталога Apple Music, а не ID библиотеки.');
+    const current = await readLibraryAlbums();
+    const currentIds = new Set(current.rows.flatMap(resourceIds));
+    const missing = wanted.filter((id) => !currentIds.has(id));
+    let written = 0;
+    for (let offset = 0; offset < missing.length; offset += 25) {
+      const batch = missing.slice(offset, offset + 25);
+      const params = new URLSearchParams();
+      params.set('ids[albums]', batch.join(','));
+      await request(`/v1/me/library?${params}`, { method: 'POST' });
+      written += batch.length;
+      progress({ phase: 'albums', completed: written, total: missing.length, message: `Добавляем альбомы Apple Music: ${written} из ${missing.length}` });
+    }
+    return { wanted, written, alreadyPresent: wanted.length - missing.length };
+  }
+
+  async function verifyAlbums(operations) {
+    const current = await readLibraryAlbums();
+    const actual = new Set(current.rows.flatMap(resourceIds));
+    const expected = albumTargetIds(operations);
+    return { complete: current.total === current.rows.length, verifiedCount: expected.filter((id) => actual.has(id)).length, expectedCount: expected.length, ids: actual };
+  }
+
   async function createApplePlaylist(name) {
     const safeName = String(name || 'Перенесённый плейлист').trim().slice(0, 100) || 'Перенесённый плейлист';
     const response = await request('/v1/me/library/playlists', {
@@ -433,20 +553,22 @@
 
   async function executeTransfer(plan, requestId) {
     if (!plan || plan.type !== 'music-transfer-plan' || plan.target?.provider !== 'apple-music') throw new Error('Нужен план переноса с целью Apple Music.');
-    if (!['favorites', 'playlists', 'library'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
+    if (!['favorites', 'playlists', 'library', 'albums'].includes(plan.target.collectionType)) throw new Error('Неизвестный тип коллекции назначения.');
     if (!Array.isArray(plan.completeness?.source) || !plan.completeness.source.length || plan.completeness.source.some((status) => status?.confirmed !== true)) {
       throw new Error('Запись остановлена: полнота исходной библиотеки не подтверждена.');
     }
     if (!Array.isArray(plan.operations) || plan.operations.some((operation) => !operation?.target?.providerId)) throw new Error('В плане есть песня без ID Apple Music.');
     if (!plan.operations.length && !plan.collectionMappings?.length) throw new Error('В плане нет выбранных песен или плейлистов.');
-    const favorites = plan.operations.filter((operation) => operation.operation === 'add_to_favorites' || plan.target.collectionType === 'favorites');
-    const playlistItems = plan.operations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
-    const mappings = plan.target.collectionType === 'favorites' ? [] : (plan.collectionMappings || []);
+    const albumItems = plan.operations.filter((operation) => operation.operation === 'add_album');
+    const songOperations = plan.operations.filter((operation) => operation.operation !== 'add_album');
+    const favorites = songOperations.filter((operation) => operation.operation === 'add_to_favorites' || plan.target.collectionType === 'favorites');
+    const playlistItems = songOperations.filter((operation) => operation.operation === 'add_to_playlist' || plan.target.collectionType === 'playlists');
+    const mappings = ['favorites', 'albums'].includes(plan.target.collectionType) ? [] : (plan.collectionMappings || []);
     const recovery = plan.recovery && typeof plan.recovery === 'object' ? plan.recovery : {};
     const recoveryProgress = recovery.progress && typeof recovery.progress === 'object' ? recovery.progress : {};
     const playlistTargets = recovery.playlistTargets && typeof recovery.playlistTargets === 'object' ? recovery.playlistTargets : {};
     const completedPlaylistCount = recoveryProgress.phase === 'playlists' ? Math.max(0, Number(recoveryProgress.completed) || 0) : 0;
-    const report = { status: 'writing', targetProvider: 'apple-music', startedAt: new Date().toISOString(), favorites: null, playlists: [], failures: [] };
+    const report = { status: 'writing', targetProvider: 'apple-music', startedAt: new Date().toISOString(), favorites: null, albums: null, playlists: [], failures: [] };
     let writesStarted = false;
     const progress = (value) => post('transfer-progress', {
       requestId,
@@ -464,6 +586,18 @@
         }
         report.favorites = { written: queued.written, alreadyPresent: queued.alreadyPresent, verified: verified.verifiedCount, expected: queued.wanted.length };
         if (verified.verifiedCount !== queued.wanted.length) throw new Error(`Apple Music принял запрос, но обратная сверка подтвердила ${verified.verifiedCount} из ${queued.wanted.length} лайков.`);
+      }
+      if (albumItems.length) {
+        writesStarted = true;
+        const queued = await addAppleAlbums(albumItems, progress);
+        let verified = { complete: false, verifiedCount: 0 };
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          verified = await verifyAlbums(albumItems);
+          if (verified.complete && verified.verifiedCount === queued.wanted.length) break;
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        report.albums = { written: queued.written, alreadyPresent: queued.alreadyPresent, verified: verified.verifiedCount, expected: queued.wanted.length };
+        if (verified.verifiedCount !== queued.wanted.length) throw new Error(`Apple Music принял запрос, но обратная сверка подтвердила ${verified.verifiedCount} из ${queued.wanted.length} альбомов.`);
       }
       for (const [index, mapping] of mappings.entries()) {
         const key = String(mapping.sourceId || mapping.sourceName || '');
@@ -519,7 +653,7 @@
       report.finishedAt = new Date().toISOString();
       return report;
     } catch (error) {
-      report.status = writesStarted || report.favorites?.verified || report.playlists.length ? 'partial_failure' : 'failed';
+      report.status = writesStarted || report.favorites?.verified || report.albums?.verified || report.playlists.length ? 'partial_failure' : 'failed';
       report.error = error instanceof Error ? error.message : 'Apple Music не завершил перенос.';
       report.finishedAt = new Date().toISOString();
       throw Object.assign(new Error(report.error), { transferReport: report });
@@ -534,7 +668,11 @@
         let result;
         if (event.data.action === 'search-tracks') result = await searchCatalog(event.data.query, event.data.storefront);
         else if (event.data.action === 'search-album-tracks') result = await searchAlbumTracks(event.data.album, event.data.artist, event.data.storefront);
-        else if (event.data.action === 'execute-transfer') result = await executeTransfer(event.data.plan, requestId);
+        else if (event.data.action === 'search-albums') result = await searchCatalogAlbums(event.data.album, event.data.artist, event.data.upc, event.data.storefront);
+        else if (event.data.action === 'read-library-albums') {
+          const read = await readLibraryAlbums();
+          result = { complete: true, total: read.total, items: read.items };
+        } else if (event.data.action === 'execute-transfer') result = await executeTransfer(event.data.plan, requestId);
         else throw new Error('Неизвестная команда Apple Music.');
         post('command-result', { requestId, ok: true, result });
       } catch (error) {

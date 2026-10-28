@@ -74,7 +74,7 @@
       return false;
     }
     if (message?.type !== 'apple:command' || !/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || ''))) return false;
-    if (!['search-tracks', 'search-album-tracks', 'execute-transfer'].includes(message.action)) return false;
+    if (!['search-tracks', 'search-album-tracks', 'search-albums', 'read-library-albums', 'execute-transfer'].includes(message.action)) return false;
     const requestId = String(message.requestId);
     const timer = setTimeout(() => {
       pendingCommands.delete(requestId);
@@ -92,6 +92,7 @@
       query: String(message.query || '').slice(0, 400),
       album: String(message.album || '').slice(0, 200),
       artist: String(message.artist || '').slice(0, 200),
+      upc: String(message.upc || '').replace(/[^0-9]/g, '').slice(0, 20),
       storefront: String(message.storefront || '').slice(0, 2),
       plan: message.action === 'execute-transfer' ? message.plan : undefined,
     }, location.origin);
