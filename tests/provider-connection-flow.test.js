@@ -70,6 +70,7 @@ test('account cards call the selected-provider opener and focus refresh includes
 
 test('failed provider cards retry only that provider instead of reopening its login page', () => {
   const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
+  assert.match(app, /const status = state\.libraryStatuses\[provider\]/);
   assert.match(app, /action\.action === 'retry'[\s\S]*?scanOpenAccounts\(false, \[provider\]\)/);
 });
 

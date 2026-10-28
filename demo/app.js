@@ -314,7 +314,7 @@
     $$('.source').forEach((card) => {
       const provider = card.dataset.provider;
       const snapshot = state.librarySnapshots[provider];
-      const status = statuses[provider];
+      const status = state.libraryStatuses[provider];
       const label = card.querySelector('.source-status');
       const button = card.querySelector('.connect');
       if (snapshot) {
