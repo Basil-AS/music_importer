@@ -78,6 +78,14 @@ Code review of the live `HTTP 429` observed in the importer showed that the `0.1
 
 Static review found that source scanning fetched and buffered a Spotify CDN bundle even when all required persisted-query hashes were already available in the reader. It also found that a `PersistedQueryNotFound` response could rediscover the cached old hash instead of refreshing it. Version `0.13.20` skips the unnecessary preflight fetch and removes the stale hash before discovery. Fixtures prove the no-download path and successful retry with a refreshed query hash. The prior live Liked Songs stall remains unexplained and this fix has not been retested in the user's account.
 
+## 2026-10-28 — cross-route regression and matching cache
+
+- Version `0.13.34` adds confirmed page-by-page reads for long Yandex playlists. The reader requests 100 tracks per page, validates `pager.total/page/per_page` against the catalog count, and refuses incomplete or inconsistent responses. A two-page fixture verifies order; a truncated response without pager data must fail the whole snapshot. The endpoint contract is inferred from reverse-engineered community clients and remains unverified against the live account.
+- Search-cache entries now rank candidates before the 12-item storage limit and keep an explicitly selected candidate. The cache format was bumped so older truncated entries are ignored. This avoids silently replacing a good match after a reload; unit fixtures cover both the best-ranked and a manually chosen candidate beyond the old limit.
+- A full local run passed **215/215 tests**. The twelve route scenarios exercise each provider reader/writer and read-back against simulated service APIs; a separate Apple Music → Spotify test also checks an exact fake-account read-back. These are fixtures and do not establish live endpoint compatibility or a live account transfer.
+- Two issues surfaced during the first full run and were fixed before the passing run: the bridge recovery fixture did not distinguish an old bridge protocol from a healthy one, and the Yandex route fixture did not model paginated playlist reads or direct writes to the newly created target playlist. The integration harness now verifies protocol-version recovery and all twelve mixed like/playlist paths.
+- The extension app bundle check passed and both GitHub Actions checks for PR #2 passed. No target account was modified in this validation. The current Chrome installation still needs the updated unpacked extension reloaded before its live session can validate version `0.13.34`; no live route has yet completed a destination write plus read-back.
+
 ## 2026-10-28 — Spotify short-page pagination correction
 
 - Code review confirmed a likely failure mode in the Spotify source reader: it requested 1,000 Liked Songs / playlist rows, then advanced offsets by the requested page size even when the response contained fewer rows. A capped response could skip rows and prevent a complete snapshot.
