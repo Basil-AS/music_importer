@@ -14,6 +14,13 @@
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important}}
   </style>
   <style>
+    .provider-icon{width:32px;height:32px;border-radius:9px;background:#28232f;display:grid;place-items:center;font-size:17px;color:#e7b7ff}
+    .provider-icon[data-provider="spotify"]{color:#65d981}
+    .provider-icon[data-provider="yandex-music"]{color:#ff6868}
+    .provider-icon[data-provider="zvuk"]{color:#ff675f}
+    #targetAccountStatus{margin-top:-7px;margin-bottom:12px;line-height:1.45}
+  </style>
+  <style>
     .track-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 0}
     .track-tools[hidden]{display:none}
     .track-tools label{font-size:11px;color:var(--muted)}
@@ -82,7 +89,7 @@
         <section class="card side-card">
           <div class="card-head"><div><h2>Куда переносим</h2><p class="card-sub">Целевая библиотека</p></div></div>
           <label class="quiet" for="targetProvider">Музыкальный сервис</label><select id="targetProvider" aria-label="Сервис назначения" style="width:100%;margin-top:6px;background:#222329;border:1px solid #3a3b43;color:#dedde2;border-radius:8px;padding:9px"><option value="">Выберите сервис назначения</option><option value="apple-music">Apple Music · экспериментально</option><option value="yandex-music">Яндекс Музыка · экспериментально</option><option value="spotify">Spotify · экспериментально</option><option value="zvuk">Звук · экспериментально</option></select>
-          <div class="destination"><div class="apple-icon" aria-hidden="true">♫</div><div><div class="dest-title" id="targetProviderName">Apple Music</div><div class="dest-sub" id="targetCollection">Избранные песни</div></div></div>
+          <div class="destination"><div class="provider-icon" id="targetProviderIcon" aria-hidden="true" data-provider="">♫</div><div><div class="dest-title" id="targetProviderName">Выберите сервис</div><div class="dest-sub" id="targetCollection">Лайки и плейлисты</div></div></div><p class="quiet" id="targetAccountStatus" role="status" aria-live="polite">Выберите целевой сервис после подключения нужных аккаунтов.</p>
           <div class="check-row"><span>Совпадения найдены</span><span id="readyStat">—</span></div><div class="check-row"><span>Нужно проверить</span><span id="reviewStat" style="color:var(--amber)">—</span></div><div class="check-row"><span>Без совпадения</span><span id="missingStat" style="color:var(--red)">—</span></div>
           <div class="transfer-job-warning" id="transferJobWarning" role="alert" aria-live="polite"><strong>Предыдущий перенос прервался или не был подтверждён.</strong><p id="transferJobDetails"></p><p>Проверьте целевой аккаунт вручную: часть записей могла уже добавиться. После сверки подтвердите ниже, чтобы продолжить.</p><button class="secondary" id="acknowledgeTransferJob" type="button">Я сверил целевой аккаунт</button></div>
           <button class="primary side-primary" id="importBtn" type="button" disabled>Сформировать план <span aria-hidden="true">→</span></button>

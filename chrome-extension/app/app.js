@@ -10,7 +10,7 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
+  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, collectionType: 'library', tracks: [], loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null };
   const extensionApp = location.protocol === 'chrome-extension:' && typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
@@ -230,6 +230,7 @@
   const sourceLabels = { zvuk: 'Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс Музыка', 'apple-music': 'Apple Music' };
 
   function renderSourceAvailability(statuses = {}) {
+    if (Object.keys(statuses).length) state.libraryStatuses = { ...statuses };
     $$('.source').forEach((card) => {
       const provider = card.dataset.provider;
       const snapshot = state.librarySnapshots[provider];
@@ -274,6 +275,7 @@
         button.textContent = 'Нет библиотеки';
       }
     });
+    updateTargetLabel();
   }
 
   function selectProviderSnapshot(provider) {
@@ -629,6 +631,7 @@
 
   function updateTargetLabel() {
     const labels = { 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс Музыка', spotify: 'Spotify', zvuk: 'Звук' };
+    const symbols = { 'apple-music': '♫', 'yandex-music': 'Я', spotify: '●', zvuk: 'з' };
     const sourceProvider = state.sourceSnapshot?.provider || (state.loaded ? state.sourceProvider : '');
     const targetSelect = $('#targetProvider');
     for (const option of targetSelect.options) {
@@ -639,6 +642,9 @@
       state.targetProvider = '';
     }
     const label = labels[state.targetProvider] || '';
+    const providerIcon = $('#targetProviderIcon');
+    providerIcon.textContent = symbols[state.targetProvider] || '♫';
+    providerIcon.dataset.provider = state.targetProvider || '';
     $('#targetProviderName').textContent = label;
     $('#review-heading').textContent = label ? `Сверка с каталогом ${label}` : 'Сверка с каталогом назначения';
     $('#searchBtn').textContent = label ? `Найти в ${label}` : 'Выберите сервис назначения';
@@ -653,6 +659,29 @@
     $('#targetCollection').textContent = state.collectionType === 'library'
       ? 'Лайки и плейлисты'
       : state.collectionType === 'playlists' ? 'Плейлисты' : 'Избранные песни';
+
+    const statusElement = $('#targetAccountStatus');
+    const targetStatus = state.libraryStatuses[state.targetProvider];
+    const targetSnapshot = state.librarySnapshots[state.targetProvider];
+    if (!state.targetProvider) {
+      statusElement.textContent = 'Выберите целевой сервис после подключения нужных аккаунтов.';
+    } else if (targetStatus?.status === 'ready' && targetSnapshot) {
+      statusElement.textContent = `Аккаунт ${label} доступен · ${targetStatus.trackCount ?? targetSnapshot.tracks?.length ?? 0} лайков · ${targetStatus.playlistCount ?? targetSnapshot.playlists?.length ?? 0} плейлистов.`;
+    } else if (targetStatus?.status === 'scanning') {
+      statusElement.textContent = targetStatus.message || `Проверяю аккаунт ${label}…`;
+    } else if (targetStatus?.status === 'stale') {
+      statusElement.textContent = `Снимок ${label} сохранён, но текущая сессия не обновилась. Проверьте вкладку и повторите сканирование.`;
+    } else if (targetStatus?.status === 'unavailable') {
+      statusElement.textContent = `${label}: ${targetStatus.message || 'аккаунт не подключён'}. Откройте сервис и войдите в Chrome.`;
+    } else if (targetSnapshot) {
+      statusElement.textContent = `Библиотека ${label} считана. Перед записью потребуется активная вкладка этого сервиса.`;
+    } else if (state.extensionAvailable) {
+      statusElement.textContent = `Аккаунт ${label} не найден среди открытых библиотек. Войдите в сервис и нажмите «Обновить открытые аккаунты».`;
+    } else if (state.loaded && state.sourceSnapshot?.completeness?.confirmed !== true) {
+      statusElement.textContent = 'Демо и CSV подходят для предпросмотра; для записи нужен полный снимок и открытый целевой аккаунт.';
+    } else {
+      statusElement.textContent = `Для поиска по аккаунту и записи откройте ${label} в Chrome и войдите в него.`;
+    }
   }
 
   function applySuggestion(track) {
