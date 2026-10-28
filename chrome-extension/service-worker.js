@@ -504,6 +504,10 @@ async function requestZvukLibrary(refresh) {
 
 async function requestAllLibraries(refresh, refreshProviders = null) {
   const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+  if (refresh === true) {
+    const providersToOpen = Array.isArray(refreshProviders) ? refreshProviders : providers;
+    await openMissingProviderTabs(providersToOpen, { activateFirst: false }).catch(() => {});
+  }
   const outcomes = await Promise.all(providers.map(async (provider) => {
     const refreshProvider = refresh === true && (!Array.isArray(refreshProviders) || refreshProviders.includes(provider));
     const result = provider === 'zvuk'
@@ -542,7 +546,7 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
   return { libraries, statuses, pending };
 }
 
-async function openMissingProviderTabs(providerIds = null) {
+async function openMissingProviderTabs(providerIds = null, { activateFirst = true, focusProviderId = null } = {}) {
   const allProviders = [
     { id: 'zvuk', pattern: 'https://zvuk.com/*', url: 'https://zvuk.com/favorites' },
     { id: 'spotify', pattern: 'https://open.spotify.com/*', url: 'https://open.spotify.com/collection/tracks' },
@@ -561,11 +565,13 @@ async function openMissingProviderTabs(providerIds = null) {
   const alreadyOpen = [];
   for (const provider of providers) {
     const tabs = await chrome.tabs.query({ url: provider.pattern });
-    if (tabs.some((tab) => tab.id)) {
+    const existingTab = tabs.find((tab) => tab.id);
+    if (existingTab) {
       alreadyOpen.push(provider.id);
+      if (provider.id === focusProviderId) await chrome.tabs.update(existingTab.id, { active: true });
       continue;
     }
-    await chrome.tabs.create({ url: provider.url, active: opened.length === 0 });
+    await chrome.tabs.create({ url: provider.url, active: activateFirst && opened.length === 0 });
     opened.push(provider.id);
   }
   return { ok: true, opened, alreadyOpen };
@@ -615,7 +621,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       try {
-        sendResponse(await openMissingProviderTabs(message.providerIds ?? null));
+        const focusProviderId = message.focusProviderId ?? null;
+        const allowedIds = new Set(['zvuk', 'spotify', 'yandex-music', 'apple-music']);
+        if (focusProviderId !== null
+          && (typeof focusProviderId !== 'string' || !allowedIds.has(focusProviderId)
+            || (Array.isArray(message.providerIds) && !message.providerIds.includes(focusProviderId)))) {
+          sendResponse({ ok: false, error: 'Некорректный сервис для входа.' });
+          return;
+        }
+        sendResponse(await openMissingProviderTabs(message.providerIds ?? null, { focusProviderId }));
       } catch {
         sendResponse({ ok: false, error: 'Не удалось открыть вкладки музыкальных сервисов.' });
       }

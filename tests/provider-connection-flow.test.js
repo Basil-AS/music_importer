@@ -41,6 +41,12 @@ test('unavailable account cards offer a login action only after the extension co
     label: 'Повторить сбор',
     title: 'Ошибка чтения',
   });
+  assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true, status: { status: 'failed', message: 'Apple Music не передал сессию API.' } }))), {
+    action: 'login',
+    disabled: false,
+    label: 'Войти / открыть',
+    title: 'Apple Music не передал сессию API.',
+  });
   assert.deepEqual(JSON.parse(JSON.stringify(sourceAction({ extensionAvailable: true, snapshot: {}, selected: true }))), {
     action: 'select',
     disabled: false,
@@ -61,7 +67,7 @@ test('a provider opened for login stays queued for refresh when the app regains 
 
 test('account cards call the selected-provider opener and focus refresh includes its pending queue', () => {
   const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
-  assert.match(app, /requestOpenProviderTabs\(\[provider\]\)/);
+  assert.match(app, /requestOpenProviderTabs\(\[provider\], provider\)/);
   assert.match(app, /state\.pendingLoginProviders\.add\(provider\)/);
   assert.match(app, /providersForFocusRefresh\([\s\S]*state\.pendingLoginProviders/);
   assert.match(app, /document\.addEventListener\('visibilitychange'/);

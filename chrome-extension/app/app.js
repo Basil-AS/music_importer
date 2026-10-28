@@ -1335,11 +1335,11 @@
     });
   }
 
-  function requestOpenProviderTabs(providerIds = null) {
+  function requestOpenProviderTabs(providerIds = null, focusProviderId = null) {
     if (!window.crypto?.randomUUID) return Promise.reject(new Error('Этот браузер не поддерживает запуск вкладок сервисов.'));
     const requestId = window.crypto.randomUUID();
     if (extensionApp) {
-      return chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs', providerIds })
+      return chrome.runtime.sendMessage({ type: 'music-importer:open-provider-tabs', providerIds, focusProviderId })
         .catch(() => ({ ok: false, error: 'Не удалось связаться с расширением Chrome.' }));
     }
     return new Promise((resolve, reject) => {
@@ -1357,7 +1357,7 @@
         resolve(event.data);
       };
       window.addEventListener('message', onMessage);
-      window.postMessage({ source: 'music-importer-local-app', type: 'open-provider-tabs', requestId, providerIds }, location.origin);
+      window.postMessage({ source: 'music-importer-local-app', type: 'open-provider-tabs', requestId, providerIds, focusProviderId }, location.origin);
     });
   }
 
@@ -1371,12 +1371,12 @@
     state.openingProviderTabs.add(provider);
     renderSourceAvailability();
     try {
-      const response = await requestOpenProviderTabs([provider]);
+      const response = await requestOpenProviderTabs([provider], provider);
       if (!response?.ok) throw new Error(response?.error || `Не удалось открыть ${sourceLabels[provider]}.`);
       const opened = (response.opened || []).includes(provider);
       $('#extensionStatus').textContent = opened
         ? `Открыл ${sourceLabels[provider]}. Войдите в аккаунт на этой вкладке, затем вернитесь сюда — библиотека загрузится автоматически.`
-        : `${sourceLabels[provider]} уже открыт. Войдите в аккаунт на его вкладке, затем вернитесь сюда — библиотека загрузится автоматически.`;
+        : `Переключился на вкладку ${sourceLabels[provider]}. Войдите в аккаунт, затем вернитесь сюда — библиотека загрузится автоматически.`;
       toast(opened ? `Открыт ${sourceLabels[provider]} для входа` : `${sourceLabels[provider]} уже открыт`);
     } catch (error) {
       state.pendingLoginProviders.delete(provider);
@@ -1428,8 +1428,8 @@
     button.disabled = true;
     button.textContent = 'Сканируем аккаунты…';
     $('#extensionStatus').textContent = automatic
-      ? 'Расширение подключено. Проверяю открытые вкладки сервисов и читаю библиотеки…'
-      : 'Проверяю открытые вкладки сервисов и читаю подтверждённые библиотеки…';
+      ? 'Расширение подключено. Проверяю сессии сервисов, открывая недостающие страницы в фоне, и читаю библиотеки…'
+      : 'Обновляю библиотеки; недостающие страницы сервисов откроются в фоне…';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
     try {
       let response = await requestAllLibraries(true, refreshProviders);
@@ -1438,7 +1438,7 @@
         renderSourceAvailability(response.statuses || {});
         const running = Object.values(response.statuses || {}).filter((status) => status.status === 'scanning').map((status) => status.message);
         button.textContent = running[0] || 'Сканируем библиотеки…';
-        $('#extensionStatus').textContent = running.length ? running.join(' · ') : 'Читаем оставшиеся открытые сессии…';
+        $('#extensionStatus').textContent = running.length ? running.join(' · ') : 'Читаем оставшиеся сессии сервисов…';
         await new Promise((resolve) => setTimeout(resolve, 2000));
         response = await requestAllLibraries(false);
       }

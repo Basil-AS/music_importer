@@ -1,6 +1,6 @@
 # Матрица переноса между сервисами
 
-Целевой сценарий — открыть штатные страницы музыкальных сервисов, войти в каждую свою учётную запись обычным способом, одним действием собрать доступные лайки и плейлисты и перенести их в выбранный сервис. Приложение не просит пароль, не требует OAuth-приложения владельца проекта и не загружает библиотеку на backend. Интерфейс включён в локальный Chrome extension и открывается значком; localhost-страница остаётся запасным путём.
+Целевой сценарий — обычный вход в свои аккаунты, автоматический сбор доступных лайков и плейлистов и перенос в выбранный сервис. Extension сам открывает недостающие страницы сервисов в фоне и переключается на них только при явном действии «Войти». Вкладки остаются технически необходимы текущим адаптерам из-за сессий страниц и приватных API, но пользователю не нужно открывать их вручную. Приложение не просит пароль, не требует OAuth-приложения владельца проекта и не загружает библиотеку на backend. Интерфейс включён в локальный Chrome extension и открывается значком; localhost-страница остаётся запасным путём.
 
 ## Направления
 
@@ -17,10 +17,10 @@
 
 | Сервис | Подключение | Чтение лайков/плейлистов | Поиск целевого каталога | Запись и сверка | Ограничение, требующее внимания |
 | --- | --- | --- | --- | --- | --- |
-| Apple Music | Существующая вкладка `music.apple.com` через extension | Live snapshot получен из пользовательской сессии; favorites и playlists, cursor pagination | Catalog API, metadata; до 25 ISRC за запрос | favorites, приватные playlists, read-back | Live catalog search и write propagation не проверены; API вызывает first-party page session. См. [Apple](APPLE_TRANSFER.md). |
-| Spotify | Существующая вкладка `open.spotify.com` через extension | liked tracks, playlists и порядок items | Search API Web Player; ISRC-first | favorites, playlists/root list, read-back | Используются частные Web Player endpoints; изменения сервиса могут сломать коннектор. См. [Spotify](SPOTIFY_TRANSFER.md). |
-| Яндекс Музыка | Существующая вкладка `music.yandex.ru` через extension | likes и playlists | Search из открытой вкладки | likes, приватные playlists, read-back | CORS, mutation limits и текущие формы ответов требуют live-проверки. См. [Яндекс](YANDEX_TRANSFER.md). |
-| Звук | Существующая вкладка `zvuk.com` через extension | favorites и playlists; crawler страниц | GraphQL search из открытой вкладки | favorites и playlists, read-back | Интеграция использует внутренние API; crawler меняет URL вкладки, write contract ещё не live-проверен. См. [Звук](ZVUK_TRANSFER.md). |
+| Apple Music | Extension автоматически открывает фоновую `music.apple.com` страницу, если её нет | Live snapshot получен из пользовательской сессии; favorites и playlists, cursor pagination | Catalog API, metadata; до 25 ISRC за запрос | favorites, приватные playlists, read-back | Live catalog search и write propagation не проверены; API вызывает first-party page session. См. [Apple](APPLE_TRANSFER.md). |
+| Spotify | Extension автоматически открывает фоновую `open.spotify.com` страницу, если её нет | liked tracks, playlists и порядок items | Search API Web Player; ISRC-first | favorites, playlists/root list, read-back | Используются частные Web Player endpoints; изменения сервиса могут сломать коннектор. См. [Spotify](SPOTIFY_TRANSFER.md). |
+| Яндекс Музыка | Extension автоматически открывает фоновую `music.yandex.ru` страницу, если её нет | likes и playlists | Search из страницы сервиса | likes, приватные playlists, read-back | CORS, mutation limits и текущие формы ответов требуют live-проверки. См. [Яндекс](YANDEX_TRANSFER.md). |
+| Звук | Extension автоматически открывает фоновую `zvuk.com` страницу, если её нет | favorites и playlists; crawler страниц | GraphQL search из страницы сервиса | favorites и playlists, read-back | Интеграция использует внутренние API; crawler меняет URL вкладки, write contract ещё не live-проверен. См. [Звук](ZVUK_TRANSFER.md). |
 
 ## Автоматический подбор для больших библиотек
 
@@ -32,7 +32,7 @@
 
 ## Остаток до пригодного к повседневному использованию продукта
 
-1. Загрузить/обновить unpacked extension в Chrome и открыть его значком. Live handshake и чтение пользовательских сессий ещё нужно подтвердить; localhost-разрешение для основного сценария не требуется. Если у открытой вкладки сервиса отсутствует content script, extension автоматически перезагрузит её один раз при запуске сканирования.
+1. Загрузить/обновить unpacked extension в Chrome и открыть его значком. Live handshake и чтение пользовательских сессий ещё нужно подтвердить; localhost-разрешение для основного сценария не требуется. При первом сканировании extension создаёт недостающие service tabs в фоне; если у открытой вкладки отсутствует content script, он перезагрузит её один раз.
 2. Снять read-only snapshots всех доступных аккаунтов и независимо подтвердить полноту каждой коллекции.
 3. Прогнать все 12 route combinations на реальных тестовых библиотеках; сначала поиск и preview plan, затем маленькая запись с read-back.
 4. Собрать labeled match decisions на разных языках, версиях, фичерингах и одинаковых названиях; настроить пороги на измеренную точность.

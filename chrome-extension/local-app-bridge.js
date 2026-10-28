@@ -198,6 +198,7 @@
         const response = await chrome.runtime.sendMessage({
           type: 'music-importer:open-provider-tabs',
           providerIds: Array.isArray(event.data.providerIds) ? event.data.providerIds : null,
+          ...(typeof event.data.focusProviderId === 'string' ? { focusProviderId: event.data.focusProviderId } : {}),
         });
         window.postMessage({
           source: marker,

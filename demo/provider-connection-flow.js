@@ -16,7 +16,12 @@
       title: status?.status === 'stale' || status?.status === 'unavailable' ? status.message || 'Аккаунт сейчас не обновлён.' : '',
     };
     if (!extensionAvailable) return { action: 'none', disabled: true, label: 'Нет соединения', title: 'Сначала запустите Music Importer в Chrome.' };
-    if (status?.status === 'failed') return { action: 'retry', disabled: false, label: 'Повторить сбор', title: status.message || '' };
+    if (status?.status === 'failed') {
+      if (/войд|авторизац|сесси|http\s*(401|403)|\b(401|403)\b/i.test(String(status.message || ''))) {
+        return { action: 'login', disabled: false, label: 'Войти / открыть', title: status.message || `Проверьте вход в ${providerName || 'музыкальный сервис'}.` };
+      }
+      return { action: 'retry', disabled: false, label: 'Повторить сбор', title: status.message || '' };
+    }
     return { action: 'login', disabled: false, label: 'Войти / открыть', title: `Откроется страница входа в ${providerName || 'музыкальный сервис'}.` };
   };
 

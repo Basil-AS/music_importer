@@ -83,7 +83,12 @@ function bootWorker(storageState, tabs = [], options = {}) {
         for (const listener of tabUpdatedListeners) listener(tabId, { status: 'complete' }, tab);
         reloadedTabs.add(tabId);
       },
-      async create(createProperties) { createdTabs.push(createProperties); return { id: 99, ...createProperties }; },
+      async create(createProperties) {
+        createdTabs.push(createProperties);
+        const tab = { id: 99 + createdTabs.length, ...createProperties };
+        tabs.push(tab);
+        return tab;
+      },
       async sendMessage(tabId, message) {
         messages.push({ tabId, message });
         if (message.type === 'music-importer:bridge-health-check'
@@ -107,6 +112,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
     reloads,
     createdTabs,
     storageState,
+    tabs,
     clickAction(tab) { return actionListener(tab); },
     install(reason = 'install') { return installedListener({ reason }); },
     startup() { return startupListener(); },
@@ -239,6 +245,42 @@ test('onboarding opens only the selected source and target service tabs', async 
   assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), [
     { url: 'https://open.spotify.com/collection/tracks', active: true },
   ]);
+});
+
+test('automatic library scan opens missing provider pages in the background', async () => {
+  const app = bootWorker({ [ZVUK_KEY]: makeZvukState() });
+  const response = await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  assert.equal(response.pending, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.createdTabs)), [
+    { url: 'https://zvuk.com/favorites', active: false },
+    { url: 'https://open.spotify.com/collection/tracks', active: false },
+    { url: 'https://music.yandex.ru/home', active: false },
+    { url: 'https://music.apple.com/library', active: false },
+  ]);
+  assert.equal(app.tabs.length, 4);
+});
+
+test('login action focuses the existing background service tab', async () => {
+  const app = bootWorker({}, [{ id: 72, url: 'https://music.apple.com/us/home', active: false }]);
+  const response = await app.callFrom({
+    type: 'music-importer:open-provider-tabs',
+    providerIds: ['apple-music'],
+    focusProviderId: 'apple-music',
+  }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.updates)), [{ tabId: 72, update: { active: true } }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(response.alreadyOpen)), ['apple-music']);
+});
+
+test('login action rejects a focus target outside the requested providers', async () => {
+  const app = bootWorker({});
+  const response = await app.callFrom({
+    type: 'music-importer:open-provider-tabs',
+    providerIds: ['apple-music'],
+    focusProviderId: 'spotify',
+  }, 'chrome-extension://fixture-extension/app/index.html');
+  assert.equal(response.ok, false);
+  assert.deepEqual(app.createdTabs, []);
 });
 
 test('onboarding rejects unknown provider IDs instead of opening every service', async () => {
@@ -402,7 +444,9 @@ test('a provider scan with no progress for two minutes stops blocking the other 
     [ZVUK_KEY]: makeZvukState(),
   }, tabs);
 
-  const response = await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  const response = await app.call({
+    type: 'music-importer:get-all-libraries', refresh: true, refreshProviders: ['spotify'],
+  });
 
   assert.equal(response.pending, false);
   assert.equal(response.statuses.spotify.status, 'failed');

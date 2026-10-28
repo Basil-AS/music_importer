@@ -52,6 +52,12 @@ Fixture coverage remains separate from this live observation. None of the 12 sou
 - `http://127.0.0.1:8001/` is Python's static server for `demo/`, not an application backend. The normal extension-hosted UI has no project server.
 - Fresh reads currently require open signed-in provider tabs. The extension sends a scan command to each tab; provider page code issues that site's authenticated library/API requests and sends normalized likes, playlists, and track metadata through a content-script bridge. The extension service worker saves complete snapshots locally. Provider tabs may remain in the background, but the Zvuk reader also scrolls/navigates its service page while collecting favorites and playlist pages. Transfer search and writes likewise need an open target-service tab. No audio is downloaded.
 
+## 2026-10-28 — background provider-tab onboarding
+
+- Based on the tabless-auth audit, the current connectors cannot move their authenticated reads/search/writes to the service worker without a separate per-service authentication prototype: Spotify and Apple need page-derived API headers, and Zvuk uses page-context requests plus collection navigation/scrolling. The extension therefore keeps page-context auth, but now opens any missing service page in a background tab during an all-service refresh. It does not steal focus from the importer.
+- If a user needs to sign in, the provider card's login action focuses the already-open background tab rather than opening a duplicate. Returning to the importer triggers the existing pending-login refresh flow. A retry scoped to one provider opens only that provider page.
+- Fixtures cover automatic background provisioning, focusing an existing service tab, rejecting a focus target outside the requested provider set, and existing provider scans. This improves setup flow but does not prove live auth or complete scans; the currently installed extension must load `0.13.36` before this behavior is available. No account write was performed.
+
 ## 2026-10-28 — parallel scan state audit
 
 - Code review found that simultaneous Spotify, Apple Music, and Yandex progress/snapshot messages each performed an independent read-modify-write of the same Chrome storage record. A later write could therefore erase another provider's just-written progress or completed snapshot.
