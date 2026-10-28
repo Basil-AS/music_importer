@@ -12,6 +12,25 @@
     ];
   }
 
+  function snapshotSummary(snapshot) {
+    const favoriteCount = Array.isArray(snapshot?.tracks) ? snapshot.tracks.length : 0;
+    const playlistCount = Array.isArray(snapshot?.playlists) ? snapshot.playlists.length : 0;
+    const librarySongCount = snapshot?.completeness?.librarySongsCount;
+    const countLabel = (count, forms) => {
+      const lastTwo = count % 100;
+      const last = count % 10;
+      const form = last === 1 && lastTwo !== 11 ? forms[0]
+        : last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? forms[1] : forms[2];
+      return `${count} ${form}`;
+    };
+    const parts = [countLabel(favoriteCount, ['лайк', 'лайка', 'лайков'])];
+    if (Number.isInteger(librarySongCount) && librarySongCount >= 0 && librarySongCount !== favoriteCount) {
+      parts.push(`${countLabel(librarySongCount, ['трек', 'трека', 'треков'])} в медиатеке`);
+    }
+    parts.push(countLabel(playlistCount, ['плейлист', 'плейлиста', 'плейлистов']));
+    return parts.join(' · ');
+  }
+
   function candidateFor(track, provider) {
     const trackId = String(provider === 'apple-music'
       ? track?.catalogId || ''
@@ -99,5 +118,5 @@
     return { matches, unresolved };
   }
 
-  window.MusicAccountCatalog = { buildIndex, findByISRC, resolveTracks };
+  window.MusicAccountCatalog = { buildIndex, findByISRC, resolveTracks, snapshotSummary };
 })();

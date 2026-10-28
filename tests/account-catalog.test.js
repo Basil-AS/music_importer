@@ -50,6 +50,21 @@ test('account catalog index refuses incomplete snapshots and never guesses witho
   assert.equal(accountCatalog.findByISRC(index, { title: 'Song', artist: 'Artist' }).length, 0);
 });
 
+test('source summary distinguishes favorites from the full Apple Music library', () => {
+  const accountCatalog = loadAccountCatalog();
+  assert.equal(accountCatalog.snapshotSummary({
+    tracks: [],
+    playlists: Array.from({ length: 12 }, () => ({})),
+    completeness: { librarySongsCount: 4956 },
+  }), '0 лайков · 4956 треков в медиатеке · 12 плейлистов');
+  assert.equal(accountCatalog.snapshotSummary({
+    tracks: [{ id: 'favorite-1' }],
+    playlists: [],
+    completeness: { librarySongsCount: 1 },
+  }), '1 лайк · 0 плейлистов');
+  assert.equal(accountCatalog.snapshotSummary({ tracks: [{ id: 'favorite-1' }], playlists: [{}] }), '1 лайк · 1 плейлист');
+});
+
 test('full target snapshot resolves a 10,000-track transfer without catalog searches, leaving misses and manual queries queued', () => {
   const accountCatalog = loadAccountCatalog();
   const targetTracks = Array.from({ length: 10_000 }, (_, index) => ({

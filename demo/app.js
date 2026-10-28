@@ -266,8 +266,7 @@
       const label = card.querySelector('.source-status');
       const button = card.querySelector('.connect');
       if (snapshot) {
-        const playlistCount = snapshot.playlists.length;
-        const count = `${snapshot.tracks.length} лайков · ${playlistCount} плейлистов`;
+        const count = window.MusicAccountCatalog.snapshotSummary(snapshot);
         if (status?.status === 'scanning' && status.cached) {
           label.textContent = `Обновляем · предыдущий снимок: ${count}`;
         } else if (status?.status === 'stale' || status?.status === 'unavailable') {
