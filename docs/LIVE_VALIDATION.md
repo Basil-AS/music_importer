@@ -18,6 +18,7 @@ This log records connector behavior observed with an unpacked extension and the 
 
 - Reloading the local app connected it to the enabled unpacked extension and started reads from the open service tabs.
 - Apple Music completed a snapshot containing playlists; the observed account currently returned no liked tracks. No write was attempted.
+- The completed Apple Music snapshot could be selected as the source while other provider scans were still pending; the app displayed its playlist tracks for matching. This confirms that a pending reader does not prevent selecting an already completed provider snapshot.
 - Yandex Music continued fetching likes page by page and then began playlist pagination. It was still progressing at the end of this observation, so no complete snapshot was available yet.
 - Spotify remained at the same displayed Liked Songs boundary for several minutes and did not complete a snapshot during this observation. This reproduces the stuck scan in the live UI; the underlying request or response that stopped progress has not been identified.
 - Zvuk did not yield a complete library snapshot. The app returned to “Войдите и откройте сервис в Chrome”; the reason is not established from the app UI.
