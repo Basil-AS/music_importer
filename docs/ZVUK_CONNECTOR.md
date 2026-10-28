@@ -27,6 +27,20 @@
 - Один запуск объединяет сбор избранного и playlist catalog. Перед переходом к следующему шагу проверяются независимые totals; при остановке, ошибке или расхождении scan получает статус `needs_review` и не объявляется полным.
 - Fallback выбора `zvuk.com` вкладки и переход с `/migrations` на `/favorites` проверен worker fixture; живое автоматическое переключение пока не подтверждено с установленным расширением.
 
+## Дополнительный REST API inventory из ZvukDownloader
+
+Upstream [`API_DOCUMENTATION.md`](https://github.com/Basil-AS/ZvukDownloader/blob/master/API_DOCUMENTATION.md) описывает ещё несколько маршрутов под `https://zvuk.com/api`:
+
+| Метод и путь | Назначение по upstream заметкам | Значение для importer-а |
+|---|---|---|
+| `GET /v2/tiny/profile` | профиль, подписка, регион и account feature flags | profile/status check; не возвращает библиотеку |
+| `GET /tiny/tracks?ids=…&include=track` | метаданные треков по известным ID | дополнить metadata после того, как collection scan нашёл ID |
+| `GET /tiny/releases?ids=…&include=track` | релизы и связанные `track_ids` | batch enrichment, не поиск пользовательских likes |
+| `GET /tiny/playlists?ids=…` | базовые данные плейлистов по известным ID | enrichment известных playlist ID; не даёт каталог коллекции пользователя |
+| `POST /v1/graphql` | в CLI примерах — artist/release lookup с `limit`/`offset` | ещё один пример GraphQL v1; формы favorites/playlist membership нужно брать из page connector и сверять отдельно |
+
+Это статическая документация стороннего downloader-проекта, не официальный API contract и не live-проверка актуального сервера. Она не показывает, как получить полный список пользовательских likes и playlists через REST v2, и не описывает перенос между сервисами. Методы `/tiny/track/stream` и `/tiny/lyrics` относятся к загрузке/аудио и в importer не нужны. В документации downloader-а указан cookie-based `auth` token; наш connector его не извлекает и не сохраняет. У репозитория не обнаружен опубликованный LICENSE, поэтому код оттуда не копируем.
+
 ## Ограничения и безопасность
 
 - Сбор основан на частных и изменяемых GraphQL-операциях Звука: `getPaginatedCollection`, `getPaginatedCollectionAll` / `getPaginatedCollectionAllSections`, `getPlaylistTracks`, `getPlaylists`, `getCollectionIds`. Формы ответов могут измениться. Фоновая обработка браузера, новая версия API или медленная загрузка могут оставить отдельный плейлист неполным; JSON обязан сохранить это состояние.
