@@ -163,6 +163,28 @@ test('Zvuk page connector captures only normalized favorites and playlist catalo
   assert.equal(catalog.hasMore, false);
 });
 
+test('Zvuk page connector accepts the documented paginatedCollection catalog response root', async () => {
+  const page = makePage('/collection', ({ payload }) => {
+    assert.equal(payload.operationName, 'getPaginatedCollectionAll');
+    return { data: { paginatedCollection: {
+      playlists: {
+        items: [{ id: 'playlist-live-shape', title: 'Road', trackCount: 7 }],
+        page: { endCursor: 'cursor-next', hasNextPage: true },
+      },
+      releases: { items: [], page: { endCursor: null, hasNextPage: false } },
+    } } };
+  });
+
+  await page.request('getPaginatedCollectionAll', { limit: 15, withPlaylists: true, withReleases: true });
+
+  const catalog = page.messages.find((message) => message.type === 'playlist-list-page');
+  assert.deepEqual(Array.from(catalog.playlists, (playlist) => [playlist.id, playlist.title, playlist.trackCount]), [
+    ['playlist-live-shape', 'Road', 7],
+  ]);
+  assert.equal(catalog.hasMore, true);
+  assert.ok(!page.messages.some((message) => message.type === 'read-error'));
+});
+
 test('Zvuk page connector preserves repeated playlist tracks and their requested offset', async () => {
   const page = makePage('/playlist/playlist-road');
   await page.request('getPlaylistTracks', { id: 'playlist-road', offset: 20, limit: 2 });

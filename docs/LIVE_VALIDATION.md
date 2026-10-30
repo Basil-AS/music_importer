@@ -4,10 +4,15 @@
 
 - Used the user's ordinary Chrome profile only; no separate profile was created. The Music Importer extension UI and signed-in provider tabs were already present. No cookies, access tokens, authorization headers, track names, or playlist names were read or copied.
 - With the user's approval, triggered the app's **Обновить открытые аккаунты** action. This was a read-only refresh; no catalog search or account write was run.
-- Yandex Music paginated Liked Songs and reported progress through 4,525 of 4,981 items, then the aggregate scan ended with `Нет подтверждённого состава плейлиста «Понравилось на Кинопоиске»`. The importer did not accept a complete Yandex snapshot.
+- Yandex Music paginated Liked Songs; an intermediate progress sample showed 4,525 of 4,981 items. The scan later failed while reading `Понравилось на Кинопоиске`, so the final likes count was not verified and the importer did not accept a complete Yandex snapshot.
 - Zvuk returned a sanitized unsupported-response error for `getPaginatedCollectionAll`. Spotify stalled while checking for a refreshed page session and timed out without saving a partial snapshot. Apple Music reported that it could not confirm favorite status for 341 songs and rejected the incomplete snapshot.
 - Result: the current installed build does **not** successfully load complete libraries from any of the four accounts in this live check. Fixture success must not be represented as live service success. No route was written or read back.
-- The user approved temporarily enabling Chrome's **View → Developer → Allow JavaScript from Apple Events** for this read-only check. macOS denied UI automation of System Events (`-1743`), so the menu toggle could not be restored by automation. The Chrome preference currently reads `browser.allow_javascript_apple_events: true`; it remains enabled pending a manual click on that menu item. Do not close/relaunch Chrome to restore it, because the existing Spotify tab should not be reloaded as a side effect.
+- The user approved temporarily enabling Chrome's **View → Developer → Allow JavaScript from Apple Events** for this read-only check. macOS denied UI automation of System Events (`-1743`), so the user switched the menu setting off manually after the scan. The Chrome preference was rechecked as `browser.allow_javascript_apple_events: false`; the existing Chrome session was left open.
+
+## 2026-10-30 — Zvuk collection response shape regression
+
+- Comparing the live error with `docs/providers/zvuk-api-inventory.md` revealed that the observed `getPaginatedCollectionAll` payload uses `data.paginatedCollection`, while the reader accepted only `paginatedCollectionAll` and `paginatedCollectionAllSections`. This matches the live unsupported-response error and the gap in prior fixtures.
+- Added the observed response-root alias with the existing playlist-section and cursor validation unchanged, plus a regression fixture based on the documented shape. The fixture suite passes; this is not yet live confirmation. A fresh read requires reloading the unpacked extension and the signed-in Zvuk tab, then retrying the scan.
 
 ## 2026-10-30 — responsive, contrast, and stage accessibility pass
 
