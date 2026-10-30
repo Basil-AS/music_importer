@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — target writers stop after favorite read-back failures
+
+- Added mixed-plan fixtures for Apple Music, Яндекс.Музыка, and Сбер.Звук where the favorite write request is accepted but its read-back omits the requested track. Each test asserts the command returns `partial_failure` and sends no playlist write.
+- Spotify already has the same mixed-plan regression fixture, and its saved-album writer already has a failed-read-back fixture. These tests exercise safe stopping in mocks only; no account was written.
+- Focused provider writer suite: **60/60 passed**. The full suite passes **369/369**; `git diff --check` passes. This remains fixture evidence only.
+
 ## 2026-10-31 — read-only refresh after UI polish
 
 - Reused the user's existing Chrome profile and the open `http://127.0.0.1:8001/` tab. Triggered **Обновить открытые аккаунты**; no destination was selected, no catalog search was run, and no account was written.

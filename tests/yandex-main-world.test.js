@@ -561,6 +561,36 @@ test('Yandex target writer adds and verifies favorites and ordered playlist trac
   assert.ok(page.requests.every((request) => request.init.credentials === 'include'));
 });
 
+test('Yandex stops before playlist writes when favorite read-back is incomplete', async () => {
+  let playlistWrites = 0;
+  const page = makePage(async ({ url, init }) => {
+    const path = new URL(url).pathname;
+    if (path === '/account/status') return { result: { account: { uid: 42 } } };
+    if (path === '/users/42/likes/tracks') return { result: { library: { revision: 1, tracks: [] } } };
+    if (path === '/users/42/likes/tracks/add-multiple') return { result: { revision: 2 } };
+    if (path === '/users/42/playlists/create' || path.endsWith('/change-relative')) playlistWrites += 1;
+    throw new Error(`Unexpected request after failed favorite verification: ${init.method || 'GET'} ${path}`);
+  });
+
+  await page.dispatch('execute-transfer', { plan: {
+    type: 'music-transfer-plan',
+    target: { provider: 'yandex-music', collectionType: 'library' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-road', sourceName: 'Road', targetName: 'Road' }],
+    operations: [
+      { operation: 'add_to_favorites', target: { providerId: 'liked-target' } },
+      { operation: 'add_to_playlist', source: { collectionId: 'source-road', position: 0 }, target: { providerId: 'playlist-target' } },
+    ],
+  } });
+  const response = page.messages.find((message) => message.type === 'command-response');
+
+  assert.equal(response.ok, false);
+  assert.match(response.error, /Обратная сверка лайков неполная/);
+  assert.equal(response.report.status, 'partial_failure');
+  assert.deepEqual(JSON.parse(JSON.stringify(response.report.playlists)), []);
+  assert.equal(playlistWrites, 0);
+});
+
 test('Yandex resume checks the existing playlist prefix and appends only missing tracks', async () => {
   const playlistItems = ['target-first'];
   let revision = 7;
