@@ -231,7 +231,12 @@
     }
 
     if (operationName === 'getPaginatedCollectionAll' || operationName === 'getPaginatedCollectionAllSections') {
-      const collection = payload.data?.paginatedCollectionAll || payload.data?.paginatedCollectionAllSections;
+      // The live Zvuk API has returned this operation under `paginatedCollection`.
+      // Keep the named aliases for older/newer variants, but accept the documented
+      // root while still validating the playlist section and its page cursor below.
+      const collection = payload.data?.paginatedCollectionAll
+        || payload.data?.paginatedCollectionAllSections
+        || payload.data?.paginatedCollection;
       const page = collection?.playlists;
       const items = Array.isArray(page) ? page : page?.items;
       if (!Array.isArray(items) && releaseItems(collection?.releases)) {
