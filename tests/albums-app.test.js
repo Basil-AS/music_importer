@@ -73,6 +73,26 @@ test('albums are a selectable scope with counts next to likes', async () => {
   assert.match(harness.$('#reviewSub').textContent, /1 треков · 2 альбомов/);
   assert.equal(harness.$('#albumSection').hidden, false);
   assert.equal(harness.$('#albumCount').textContent, '2 альбомов');
+  assert.equal(harness.cards.find((card) => card.dataset.provider === 'apple-music').querySelector('.source-collections').textContent,
+    'Лайки: 1 · Альбомы: 2 · Плейлисты: 0');
+});
+
+test('review filters and sorting update the visible track page', async () => {
+  const harness = createAppHarness({ libraries: {}, handler: async () => ({ ok: false, error: 'not used' }) });
+  await harness.$('#loadBtn').emit('click');
+  const original = harness.$('#trackList').innerHTML;
+  const sort = harness.$('#trackSort');
+  sort.value = 'title';
+  await sort.emit('change');
+  const sorted = harness.$('#trackList').innerHTML;
+  assert.notEqual(sorted, original);
+  assert.ok(sorted.indexOf('Мокрые кроссы') < sorted.indexOf('СОЛНЦЕ МОНАКО'));
+
+  const filter = harness.$('#trackStatusFilter');
+  filter.value = 'missing';
+  await filter.emit('change');
+  assert.equal(harness.$('#trackList').innerHTML.includes('В каталоге ничего не найдено'), false);
+  assert.match(harness.$('#trackList').innerHTML, /Ненайденных треков нет/);
 });
 
 test('a unique exact UPC with contradictory album metadata is left for manual review', () => {

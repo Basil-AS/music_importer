@@ -91,7 +91,7 @@ function createAppHarness({ libraries, handler, statuses = {} }) {
     window, document, chrome, location: { protocol: 'chrome-extension:', origin: 'chrome-extension://fixture-extension', href: 'chrome-extension://fixture-extension/app/index.html' },
     Option: class { constructor(text, value) { this.text = text; this.value = value; } },
     setTimeout, clearTimeout, URL, URLSearchParams, Blob: class {}, AbortController, DOMException, Promise, Map, Set, Number, String, Array, Object, Error, JSON, Math, Date, RegExp,
-    TypeError, structuredClone, console,
+    TypeError, Intl, structuredClone, console,
   };
   window.window = window;
   vm.createContext(context);
