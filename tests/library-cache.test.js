@@ -27,7 +27,7 @@ test('evaluate distinguishes missing, fresh, check and stale snapshots', () => {
   const cache = load();
   assert.equal(cache.evaluate({ now }), 'missing');
   assert.equal(cache.evaluate({ cachedSnapshot: snapshot(), lastCheckedAt: new Date(now - 60000).toISOString(), now }), 'fresh');
-  assert.equal(cache.evaluate({ cachedSnapshot: snapshot(), now }), 'check');
+  assert.equal(cache.evaluate({ cachedSnapshot: snapshot(), lastCheckedAt: new Date(now - 7 * hour).toISOString(), now }), 'check');
   assert.equal(cache.evaluate({ cachedSnapshot: snapshot({ completeness: { confirmed: false } }), now }), 'stale');
   assert.equal(cache.evaluate({ cachedSnapshot: snapshot({ exportedAt: new Date(now - 8 * 24 * hour).toISOString() }), now }), 'stale');
 });
@@ -89,7 +89,7 @@ test('a complete pulse can remove omitted collections and a fully refreshed snap
     { type: 'favorites', id: null, itemCount: 101, revision: 9, completeness: { confirmed: true }, items: [] },
     { type: 'playlists', id: 'p1', itemCount: 10, revision: 4, completeness: { confirmed: true }, items: [] },
   ], { removedKeys: ['albums:'], completeCatalog: true, now });
-  assert.deepEqual(merged.collections.map((collection) => cache.collectionKey(collection)).sort(), ['favorites:', 'playlists:p1']);
+  assert.deepEqual([...merged.collections].map((collection) => cache.collectionKey(collection)).sort(), ['favorites:', 'playlists:p1']);
   assert.equal(merged.snapshotCachedAt, new Date(now).toISOString());
 });
 
