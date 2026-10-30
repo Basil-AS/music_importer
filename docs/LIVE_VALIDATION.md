@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — read-only refresh after UI polish
+
+- Reused the user's existing Chrome profile and the open `http://127.0.0.1:8001/` tab. Triggered **Обновить открытые аккаунты**; no destination was selected, no catalog search was run, and no account was written.
+- The UI again reported that Zvuk stopped before confirming its next page. Spotify showed the existing no-progress timeout; this refresh did not produce a new complete Spotify snapshot. Yandex finished reading its liked tracks but rejected the full library because a playlist's catalog count did not match its detail evidence. Apple continued to show a previously saved snapshot; this pass did not confirm a new Apple snapshot.
+- No cookies, tokens, authorization headers, raw service responses, or account-specific library contents were collected. This is a live UI observation only; the installed extension version was not independently verified, so it cannot confirm the latest connector recovery changes.
+
 ## 2026-10-31 — reloaded the unpacked extension in the existing Chrome profile
 
 - Confirmed the installed unpacked extension points to this repository's `chrome-extension/` directory. Reloaded it there and used its extension-hosted app; no new Chrome profile was created.
