@@ -191,22 +191,24 @@ test('extension update reloads provider tabs with an old bridge protocol', async
   const worker = bootWorker({}, [
     { id: 41, url: 'https://music.apple.com/us/home', status: 'complete' },
     { id: 42, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
-  ], { oldBridgeTabIds: [41] });
+    { id: 43, url: 'https://open.spotify.com/artist/fixture', status: 'complete' },
+  ], { oldBridgeTabIds: [41, 43] });
   await worker.install('update');
   assert.deepEqual(worker.reloads, [41]);
   assert.ok(worker.messages.some(({ tabId, message }) => tabId === 41 && message.type === 'music-importer:bridge-health-check'));
-  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 42 && message.type === 'music-importer:bridge-health-check'));
+  assert.equal(worker.messages.some(({ tabId }) => tabId === 42 || tabId === 43), false);
 });
 
 test('browser startup reloads only provider tabs with a stale bridge protocol', async () => {
   const worker = bootWorker({}, [
     { id: 51, url: 'https://music.apple.com/us/home', status: 'complete' },
     { id: 52, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
-  ], { oldBridgeTabIds: [51] });
+    { id: 53, url: 'https://open.spotify.com/artist/fixture', status: 'complete' },
+  ], { oldBridgeTabIds: [51, 53] });
   await worker.startup();
   assert.deepEqual(worker.reloads, [51]);
   assert.ok(worker.messages.some(({ tabId, message }) => tabId === 51 && message.type === 'music-importer:bridge-health-check'));
-  assert.ok(worker.messages.some(({ tabId, message }) => tabId === 52 && message.type === 'music-importer:bridge-health-check'));
+  assert.equal(worker.messages.some(({ tabId }) => tabId === 52 || tabId === 53), false);
 });
 
 test('opening the importer app repairs stale provider bridges before scanning', async () => {
@@ -215,11 +217,33 @@ test('opening the importer app repairs stale provider bridges before scanning', 
     { id: 54, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
   ], { oldBridgeTabIds: [53] });
   const response = await worker.callFrom(
+    { type: 'music-importer:repair-provider-bridges', skipProviders: ['spotify'] },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: true, checked: 1, repaired: 1, failed: 0 });
+  assert.deepEqual(worker.reloads, [53]);
+});
+
+test('bridge repair rejects unknown skipped providers', async () => {
+  const worker = bootWorker({});
+  const response = await worker.callFrom(
+    { type: 'music-importer:repair-provider-bridges', skipProviders: ['other'] },
+    'chrome-extension://fixture-extension/app/index.html',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: false, error: 'Некорректный список сервисов для проверки.' });
+});
+
+test('explicit Spotify bridge repair reloads only after an app command requests it', async () => {
+  const worker = bootWorker({}, [
+    { id: 56, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
+    { id: 57, url: 'https://music.apple.com/us/home', status: 'complete' },
+  ], { oldBridgeTabIds: [56, 57] });
+  const response = await worker.callFrom(
     { type: 'music-importer:repair-provider-bridges' },
     'chrome-extension://fixture-extension/app/index.html',
   );
-  assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: true, checked: 2, repaired: 1, failed: 0 });
-  assert.deepEqual(worker.reloads, [53]);
+  assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: true, checked: 2, repaired: 2, failed: 0 });
+  assert.deepEqual(worker.reloads, [56, 57]);
 });
 
 test('library scan waits for a newly opened provider tab to finish loading before bridge health checks', async () => {

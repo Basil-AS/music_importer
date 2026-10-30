@@ -92,7 +92,7 @@
       status.textContent = 'Проверяю подключение к открытым сервисам и аккаунтам…';
       button.textContent = 'Подключаем аккаунты…';
       button.disabled = false;
-      void chrome.runtime.sendMessage({ type: 'music-importer:repair-provider-bridges' })
+      void chrome.runtime.sendMessage({ type: 'music-importer:repair-provider-bridges', skipProviders: ['spotify'] })
         .catch(() => null)
         .finally(() => scanOpenAccounts(true));
       return;
@@ -1838,7 +1838,8 @@
           if (!snapshot || ['failed', 'unavailable', 'stale'].includes(status?.status)) return true;
           return window.MusicLibraryCache.evaluate({ cachedSnapshot: snapshot, lastCheckedAt: snapshot.snapshotCachedAt || snapshot.exportedAt }) !== 'fresh';
         });
-        if (providersToRefresh.length) response = await requestAllLibraries(true, providersToRefresh);
+        const automaticProviders = window.MusicProviderConnectionFlow.providersForAutomaticRefresh(providersToRefresh, state.pendingLoginProviders);
+        if (automaticProviders.length) response = await requestAllLibraries(true, automaticProviders);
       } else {
         response = await requestAllLibraries(true, refreshProviders);
       }
@@ -1894,12 +1895,12 @@
 
   function scheduleFocusRefresh() {
     if (!state.extensionAvailable || document.visibilityState !== 'visible') return;
-    const providers = window.MusicProviderConnectionFlow.providersForFocusRefresh(
+    const providers = window.MusicProviderConnectionFlow.providersForAutomaticRefresh(window.MusicProviderConnectionFlow.providersForFocusRefresh(
       ['zvuk', 'spotify', 'yandex-music', 'apple-music'],
       state.librarySnapshots,
       state.libraryStatuses,
       state.pendingLoginProviders,
-    );
+    ), state.pendingLoginProviders);
     if (!providers.length) return;
     if (accountScanInProgress) {
       focusScanQueued = true;
