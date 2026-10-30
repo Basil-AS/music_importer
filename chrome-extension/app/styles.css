@@ -503,7 +503,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 }
 
 .confidence {
-  font-size:10px;
+  font-size:11px;
   color:var(--green);
   margin-top:3px
 }
@@ -517,7 +517,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 }
 
 .badge {
-  font-size:10px;
+  font-size:11px;
   border:1px solid #42602e;
   color:var(--green);
   padding:4px 7px;
@@ -1011,9 +1011,26 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   }
 
   .track {
-    grid-template-columns:30px minmax(68px,.7fr) minmax(115px,1.3fr) 32px;
+    grid-template-columns:30px minmax(0,.8fr) minmax(0,1.2fr) 32px;
+    grid-template-rows:auto auto;
     gap:7px
   }
+
+  .track > .cover { grid-column:1; grid-row:1 }
+  .track > div:nth-child(2) { grid-column:2; grid-row:1 }
+  .track > .match { grid-column:3; grid-row:1 / span 2; align-self:center }
+  .track > .badge {
+    display:inline-flex;
+    grid-column:2;
+    grid-row:2;
+    justify-self:start;
+    max-width:100%;
+    margin-top:3px;
+    padding:3px 6px;
+    white-space:normal;
+    line-height:1.25
+  }
+  .track > .include { grid-column:4; grid-row:1; justify-self:end; margin-top:5px }
 
   .cover {
     width:30px;
@@ -1025,15 +1042,15 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   }
 
   .track-name {
-    font-size:11px
+    font-size:12px
   }
 
   .track-artist {
-    font-size:10px
+    font-size:11px
   }
 
   .match select {
-    font-size:10px;
+    font-size:11px;
     padding:6px 4px
   }
 
@@ -1444,7 +1461,6 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 .provider-select { width:100%; margin-top:6px; background:var(--control-bg); border:1px solid var(--control-border); color:var(--text); border-radius:8px; padding:9px }
 .catalog-select { max-width:100%; background:var(--control-bg); border:1px solid var(--control-border); color:var(--text); border-radius:8px; padding:9px }
 .source-collection-tools { margin-top:12px }
-.file-input-label { cursor:pointer }
 .extension-status { margin-top:10px }
 .onboarding-note { margin-top:6px }
 .stat-review { color:var(--amber) }

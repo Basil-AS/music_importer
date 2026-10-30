@@ -409,6 +409,7 @@ function isConfirmedFavoritesPartial(payload, provider) {
   if (provider !== 'yandex-music' || payload?.service !== provider || payload?.partialScope !== 'favorites'
     || payload?.collection?.type !== 'library' || payload?.completeness?.confirmed !== false
     || payload?.completeness?.favoritesConfirmed !== true || !Array.isArray(payload?.tracks)
+    || !Number.isSafeInteger(payload?.completeness?.favoritesRevision) || payload.completeness.favoritesRevision < 0
     || payload.completeness.favoritesCount !== payload.tracks.length || !Array.isArray(payload.playlists)
     || payload.playlists.length !== 0) return false;
   const ids = payload.tracks.map((track) => String(track?.id || track?.providerId || ''));
@@ -815,7 +816,7 @@ function pageKind(url) {
 function messageMatchesPage(type, kind) {
   if (type === 'zvuk:favorite-page') return kind === 'favorites';
   if (type === 'zvuk:favorites-scroll-end' || type === 'zvuk:favorites-scroll-stall') return kind === 'favorites';
-  if (type === 'zvuk:scan-progress') return kind === 'favorites';
+  if (type === 'zvuk:scan-progress') return kind === 'favorites' || kind === 'collection';
   if (type === 'zvuk:playlist-list-page') return kind === 'collection';
   if (type === 'zvuk:playlist-metadata') return kind === 'collection' || kind === 'playlist';
   if (type === 'zvuk:release-list-page') return kind === 'collection';
@@ -1518,6 +1519,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ? `Сбер.Звук вернул не JSON при запросе ${operation}. Возможно, изменился API.`
             : message.invalidPagination === true
               ? `Сбер.Звук вернул неполную пагинацию при запросе ${operation}. Возможно, изменился API.`
+              : message.paginationFailed === true
+                ? `Не удалось получить следующую страницу каталога Сбер.Звука (${operation}). Проверьте соединение и повторите сбор.`
             : `Сбер.Звук вернул неподдерживаемый ответ при запросе ${operation}. Возможно, изменился API.`;
       const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
       const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;
