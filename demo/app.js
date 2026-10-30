@@ -155,6 +155,45 @@
       || state.transferInProgress || Boolean(state.unresolvedTransferJob);
   }
 
+  function formatStorageBytes(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return `${bytes} Б`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  }
+
+  let snapshotUsageRequest = 0;
+  let lastSnapshotUsageSignature = null;
+  async function updateSnapshotStorageEstimate() {
+    const status = $('#libraryStorageEstimate');
+    if (!status) return;
+    const signature = Object.entries(state.librarySnapshots).map(([provider, snapshot]) => [
+      provider,
+      snapshot.snapshotCachedAt || snapshot.exportedAt || '',
+      snapshot.tracks?.length || 0,
+      snapshot.playlists?.length || 0,
+      window.MusicAlbumMatcher.extractSourceAlbums(snapshot)?.rows.length || 0,
+    ].join(':')).sort().join('|');
+    if (signature === lastSnapshotUsageSignature) return;
+    lastSnapshotUsageSignature = signature;
+    const getBytesInUse = chrome.storage?.local?.getBytesInUse;
+    if (!extensionApp || typeof getBytesInUse !== 'function') {
+      status.textContent = 'Размер снимков можно посмотреть внутри приложения расширения.';
+      return;
+    }
+    const request = ++snapshotUsageRequest;
+    try {
+      const bytes = await getBytesInUse.call(chrome.storage.local, ['providerLibraryBridge', 'zvukFavoriteCapture']);
+      if (request !== snapshotUsageRequest) return;
+      const accountCount = Object.keys(state.librarySnapshots).length;
+      status.textContent = accountCount
+        ? `Данные коннекторов занимают примерно ${formatStorageBytes(bytes)} · аккаунтов: ${accountCount}. Оценка включает служебное состояние.`
+        : 'Сохранённых снимков библиотек нет.';
+    } catch {
+      if (request === snapshotUsageRequest) status.textContent = 'Не удалось определить размер локальных данных.';
+    }
+  }
+
   function updateCounts() {
     const searchBusy = state.searching || state.tracks.some((track) => track.searching) || state.albums.some((album) => album.searching);
     const selected = state.tracks.filter((track) => track.selected && track.match).length;
@@ -189,31 +228,66 @@
     renderAlbums();
   }
 
+  function filteredTrackEntries() {
+    const filter = $('#trackStatusFilter').value || 'all';
+    const sort = $('#trackSort').value || 'source';
+    const needsReview = (track) => track.searchError || track.metadataComplete === false
+      || (track.searched && !track.match && !track.userExcluded);
+    const rows = state.tracks.map((track, index) => ({ track, index })).filter(({ track }) => {
+      if (filter === 'review') return needsReview(track);
+      if (filter === 'matched') return Boolean(track.match) && !track.userExcluded;
+      if (filter === 'missing') return track.searched && !track.matches.length && !track.searchError;
+      if (filter === 'excluded') return Boolean(track.userExcluded);
+      return true;
+    });
+    if (sort === 'source') return rows;
+    const collator = new Intl.Collator('ru', { sensitivity: 'base', numeric: true });
+    rows.sort((left, right) => {
+      if (sort === 'confidence') {
+        const difference = (Number(right.track.matchConfidence) || 0) - (Number(left.track.matchConfidence) || 0);
+        if (difference) return difference;
+      } else {
+        const key = sort === 'artist' ? 'artist' : 'title';
+        const difference = collator.compare(String(left.track[key] || ''), String(right.track[key] || ''));
+        if (difference) return difference;
+        if (key === 'title') {
+          const artistDifference = collator.compare(String(left.track.artist || ''), String(right.track.artist || ''));
+          if (artistDifference) return artistDifference;
+        }
+      }
+      return left.index - right.index;
+    });
+    return rows;
+  }
+
   function renderTrackRows() {
-    const needsReviewOnly = $('#needsReviewOnly').checked;
-    const reviewable = state.tracks.some((track) => track.searched || track.searchError || track.metadataComplete === false);
-    const needsReview = (track) => track.searchError || track.metadataComplete === false || (track.searched && !track.match && !track.userExcluded);
-    const indexedTracks = state.tracks.map((track, index) => ({ track, index }));
-    const displayedTracks = needsReviewOnly ? indexedTracks.filter(({ track }) => needsReview(track)) : indexedTracks;
+    const filter = $('#trackStatusFilter').value || 'all';
+    const displayedTracks = filteredTrackEntries();
     const pageCount = Math.max(1, Math.ceil(displayedTracks.length / trackPageSize));
     trackPage = Math.min(trackPage, pageCount - 1);
     const first = trackPage * trackPageSize;
     const visibleTracks = displayedTracks.slice(first, first + trackPageSize);
     const tools = $('#trackTools');
-    const reviewFilter = $('#needsReviewOnly');
-    tools.hidden = state.tracks.length <= trackPageSize && !needsReviewOnly;
-    reviewFilter.disabled = !reviewable || state.searching;
+    tools.hidden = state.tracks.length === 0;
     $('#trackPageStatus').textContent = displayedTracks.length
-      ? `Показаны ${first + 1}–${Math.min(first + trackPageSize, displayedTracks.length)} из ${displayedTracks.length}${needsReviewOnly ? ' · требуют внимания' : ''}`
-      : needsReviewOnly ? 'Все записи имеют совпадения' : '0 записей';
+      ? `Показаны ${first + 1}–${Math.min(first + trackPageSize, displayedTracks.length)} из ${displayedTracks.length}`
+      : filter === 'review' ? 'Проверка не требуется'
+        : filter === 'matched' ? 'Совпадений пока нет'
+          : filter === 'missing' ? 'Ненайденных треков нет'
+            : filter === 'excluded' ? 'Исключённых треков нет' : '0 записей';
     $('#previousTrackPage').disabled = trackPage === 0;
     $('#nextTrackPage').disabled = trackPage >= pageCount - 1;
+    const visibleMatches = visibleTracks.map(({ track }) => track).filter((track) => track.match);
+    const allVisibleSelected = visibleMatches.length > 0 && visibleMatches.every((track) => track.selected);
+    $('#selectVisibleMatches').disabled = !visibleMatches.length || state.searching;
+    $('#selectVisibleMatches').textContent = allVisibleSelected
+      ? 'Снять выбор на странице' : 'Выбрать совпадения на странице';
 
     if (!state.tracks.length || !visibleTracks.length) {
       const playlistCount = state.sourceSnapshot?.collections?.filter((collection) => collection.type === 'playlists').length || 0;
-      $('#trackList').innerHTML = needsReviewOnly && state.tracks.length
-        ? '<div class="empty">Все записи имеют совпадения; проверка не требуется.</div>'
-        : playlistCount && !state.tracks.length ? `<div class="empty">Загружено плейлистов: ${playlistCount}. Треки для сопоставления не найдены.</div>`
+      $('#trackList').innerHTML = state.tracks.length
+        ? `<div class="empty">${filter === 'review' ? 'Проверка не требуется.' : filter === 'matched' ? 'Совпадений по этому фильтру пока нет.' : filter === 'missing' ? 'Ненайденных треков нет.' : filter === 'excluded' ? 'Исключённых треков нет.' : 'Треков для показа нет.'}</div>`
+        : playlistCount ? `<div class="empty">Загружено плейлистов: ${playlistCount}. Треки для сопоставления не найдены.</div>`
           : state.albums.length && !state.tracks.length ? '<div class="empty">Треки не выбраны для переноса; альбомы для сверки ниже.</div>'
             : '<div class="empty">Загрузите пример или свой список треков</div>';
       updateCounts();
@@ -339,6 +413,7 @@
   const providerLabels = sourceLabels;
 
   function renderSourceAvailability(statuses = {}) {
+    void updateSnapshotStorageEstimate();
     if (Object.keys(statuses).length) {
       state.libraryStatuses = { ...state.libraryStatuses, ...statuses };
       for (const [provider, status] of Object.entries(state.libraryStatuses)) {
@@ -361,9 +436,17 @@
       const snapshot = state.librarySnapshots[provider];
       const status = state.libraryStatuses[provider];
       const label = card.querySelector('.source-status');
+      const collections = card.querySelector('.source-collections');
       const button = card.querySelector('.connect');
       if (snapshot) {
         const count = window.MusicAccountCatalog.snapshotSummary(snapshot);
+        const albumInfo = window.MusicAlbumMatcher.extractSourceAlbums(snapshot);
+        const collectionParts = [`Лайки: ${snapshot.tracks?.length || 0}`];
+        if (albumInfo?.confirmed) collectionParts.push(`Альбомы: ${albumInfo.rows.length}`);
+        else if (albumInfo) collectionParts.push('Альбомы: не подтверждены');
+        collectionParts.push(`Плейлисты: ${snapshot.playlists?.length || 0}`);
+        collections.textContent = collectionParts.join(' · ');
+        collections.hidden = false;
         if (status?.status === 'scanning' && status.cached) {
           label.textContent = `Обновляем · предыдущий снимок: ${count}${status.cacheAge ? ` · ${status.cacheAge}` : ''}`;
         } else if (status?.status === 'stale' || status?.status === 'unavailable') {
@@ -376,15 +459,19 @@
         }
         label.classList.add('connected');
       } else if (status?.status === 'scanning') {
+        collections.hidden = true;
         label.textContent = status.message || 'Сканируем открытую сессию…';
         label.classList.remove('connected');
       } else if (status?.status === 'unavailable') {
+        collections.hidden = true;
         label.textContent = status.message || 'Войдите в аккаунт и вернитесь сюда';
         label.classList.remove('connected');
       } else if (status?.status === 'failed') {
+        collections.hidden = true;
         label.textContent = status.message || 'Не удалось прочитать библиотеку';
         label.classList.remove('connected');
       } else {
+        collections.hidden = true;
         label.textContent = state.extensionAvailable
           ? 'Войдите в аккаунт, чтобы загрузить библиотеку'
           : 'Подключите расширение для проверки открытой вкладки';
@@ -1890,8 +1977,27 @@
     renderTracks();
   });
 
-  $('#needsReviewOnly').addEventListener('change', () => {
+  $('#trackStatusFilter').addEventListener('change', () => {
     trackPage = 0;
+    renderTracks();
+  });
+  $('#trackSort').addEventListener('change', () => {
+    trackPage = 0;
+    renderTracks();
+  });
+  $('#selectVisibleMatches').addEventListener('click', () => {
+    const start = trackPage * trackPageSize;
+    const visibleMatches = filteredTrackEntries().slice(start, start + trackPageSize)
+      .map(({ track }) => track).filter((track) => track.match);
+    const shouldSelect = visibleMatches.some((track) => !track.selected);
+    visibleMatches.forEach((track) => { track.selected = shouldSelect; });
+    const context = matchCacheContext();
+    void window.MusicMatchCache?.putDecisions(visibleMatches, context.targetProvider, (track) => ({
+      selected: Boolean(shouldSelect && track.match),
+      trackId: track.match?.trackId || null,
+    }), context.storefront, context.accountCatalog, context.sourceProvider);
+    state.report = null;
+    $('#report').classList.remove('show');
     renderTracks();
   });
   $('#previousTrackPage').addEventListener('click', () => {

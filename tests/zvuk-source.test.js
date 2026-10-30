@@ -126,10 +126,23 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
       await xhr.send(JSON.stringify({ operationName, variables }));
       await new Promise((resolve) => setImmediate(resolve));
     },
+    async requestAsExternalXhr(url) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      await xhr.send('{}');
+      return { bypassesObserver: Object.hasOwn(xhr, 'send'), loadListeners: xhr.listeners.load?.length || 0 };
+    },
     setPath(pathname) { location.pathname = pathname; },
     async tickScrollAfter(ms) { now += ms; scrollCallback?.(); await new Promise((resolve) => setImmediate(resolve)); },
   };
 }
+
+test('Zvuk page connector bypasses analytics XHR outside its GraphQL endpoint', async () => {
+  const page = makePage('/collection');
+  const result = await page.requestAsExternalXhr('https://cnt.rambler.ru/cnt/v2/');
+  assert.deepEqual(result, { bypassesObserver: true, loadListeners: 0 });
+  assert.equal(page.messages.length, 0);
+});
 
 test('Zvuk page connector captures only normalized favorites and playlist catalog data', async () => {
   const page = makePage('/favorites');

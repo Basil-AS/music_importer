@@ -419,9 +419,18 @@
     }
   }
 
+  function isZvukGraphqlRequest(url) {
+    try {
+      const parsedUrl = new URL(url, location.href);
+      return parsedUrl.origin === location.origin && parsedUrl.pathname === '/api/v1/graphql';
+    } catch {
+      return false;
+    }
+  }
+
   function observeFetch(input, init, originalFetch, receiver) {
     const url = typeof input === 'string' ? input : input?.url || '';
-    if (!url.includes('/api/v1/graphql')) return originalFetch.call(receiver, input, init);
+    if (!isZvukGraphqlRequest(url)) return originalFetch.call(receiver, input, init);
     const body = typeof init?.body === 'string'
       ? Promise.resolve(init.body)
       : input instanceof Request ? input.clone().text().catch(() => '') : Promise.resolve('');
@@ -463,13 +472,26 @@
 
   const xhrOpen = XMLHttpRequest.prototype.open;
   const xhrSend = XMLHttpRequest.prototype.send;
+  const xhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
-    this.__musicImporterUrl = String(url);
-    xhrRequestMethods.set(this, String(method || 'POST'));
-    xhrRequestHeaders.set(this, Object.create(null));
+    const requestUrl = String(url);
+    const isZvukGraphql = isZvukGraphqlRequest(requestUrl);
+    if (isZvukGraphql) {
+      delete this.send;
+      if (xhrSetRequestHeader) delete this.setRequestHeader;
+      this.__musicImporterUrl = requestUrl;
+      xhrRequestMethods.set(this, String(method || 'POST'));
+      xhrRequestHeaders.set(this, Object.create(null));
+    } else {
+      // Let analytics and every other non-GraphQL request bypass the observer entirely.
+      this.send = xhrSend.bind(this);
+      if (xhrSetRequestHeader) this.setRequestHeader = xhrSetRequestHeader.bind(this);
+      delete this.__musicImporterUrl;
+      xhrRequestMethods.delete(this);
+      xhrRequestHeaders.delete(this);
+    }
     return xhrOpen.call(this, method, url, ...rest);
   };
-  const xhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
   if (xhrSetRequestHeader) XMLHttpRequest.prototype.setRequestHeader = function patchedSetRequestHeader(name, value) {
     const headers = xhrRequestHeaders.get(this) || Object.create(null);
     const key = String(name).toLowerCase();
@@ -479,7 +501,7 @@
   };
   XMLHttpRequest.prototype.send = function patchedSend(body) {
     const url = this.__musicImporterUrl || '';
-    if (url.includes('/api/v1/graphql')) {
+    if (isZvukGraphqlRequest(url)) {
       const parsed = parseOperation(body);
       if (parsed.name) {
         if (location.pathname.startsWith('/collection')
