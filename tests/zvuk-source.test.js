@@ -140,7 +140,7 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
     },
     async waitForMessage(type, attempts = 100) {
       for (let attempt = 0; attempt < attempts && !messages.some((message) => message.type === type); attempt += 1) {
-        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setTimeout(resolve, 1));
       }
       return messages.find((message) => message.type === type) || null;
     },
