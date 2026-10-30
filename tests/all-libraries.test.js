@@ -739,16 +739,24 @@ test('Zvuk account scan crawls favorites, playlist catalog, and playlist pages i
 
   await app.pageMessage({
     type: 'zvuk:playlist-list-page', hasMore: false,
-    playlists: [{ id: 'road', title: 'Road', trackCount: 2 }, { id: 'empty', title: 'Empty', trackCount: 0 }],
+    playlists: [{ id: 'road', title: 'Road', trackCount: 3 }, { id: 'empty', title: 'Empty', trackCount: 0 }],
   }, 1);
   await app.pageMessage({ type: 'zvuk:collection-scroll-end' }, 1);
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(app.updates.some((entry) => entry.tabId === 1 && entry.update.url === 'https://zvuk.com/playlist/road?music_importer_capture=1'));
 
   await app.pageMessage({
-    type: 'zvuk:playlist-track-page', playlistId: 'road', offset: 0, limit: 100,
+    type: 'zvuk:playlist-track-page', playlistId: 'road', offset: 0, limit: 2,
     tracks: [
       { id: 'road-1', title: 'First', artists: [{ title: 'Artist' }] },
+      { id: 'road-2', title: 'Second', artists: [{ title: 'Artist' }] },
+    ],
+  }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  await app.pageMessage({
+    type: 'zvuk:playlist-track-page', playlistId: 'road', offset: 1, limit: 2,
+    tracks: [
+      { id: 'road-2', title: 'Second', artists: [{ title: 'Artist' }] },
       { id: 'road-2', title: 'Second', artists: [{ title: 'Artist' }] },
     ],
   }, 1);
@@ -761,9 +769,41 @@ test('Zvuk account scan crawls favorites, playlist catalog, and playlist pages i
     ['road', 'Road', true], ['empty', 'Empty', true],
   ]);
   assert.deepEqual(Array.from(completed.payload.playlists[0].tracks, (track) => [track.id, track.position]), [
-    ['road-1', 0], ['road-2', 1],
+    ['road-1', 0], ['road-2', 1], ['road-2', 2],
   ]);
   assert.deepEqual(Array.from(completed.payload.playlists[1].tracks), []);
+});
+
+test('Zvuk rejects a playlist snapshot assembled from conflicting overlapping pages', async () => {
+  const tabs = [{ id: 1, url: 'https://zvuk.com/favorites' }];
+  const storage = { [ZVUK_KEY]: makeZvukState() };
+  const app = bootWorker(storage, tabs);
+  await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  await app.pageMessage({ type: 'zvuk:collection-count', uniqueTrackCount: 0, uniquePlaylistCount: 1 }, 1);
+  await app.pageMessage({ type: 'zvuk:favorites-scroll-end' }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  await app.pageMessage({
+    type: 'zvuk:playlist-list-page', hasMore: false,
+    playlists: [{ id: 'mutable', title: 'Mutable', trackCount: 3 }],
+  }, 1);
+  await app.pageMessage({ type: 'zvuk:collection-scroll-end' }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await app.pageMessage({
+    type: 'zvuk:playlist-track-page', playlistId: 'mutable', offset: 0, limit: 2,
+    tracks: [{ id: 'track-a', title: 'A' }, { id: 'track-b', title: 'B' }],
+  }, 1);
+  await app.pageMessage({
+    type: 'zvuk:playlist-track-page', playlistId: 'mutable', offset: 1, limit: 2,
+    tracks: [{ id: 'track-x', title: 'X' }, { id: 'track-c', title: 'C' }],
+  }, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const result = await app.call({ type: 'music-importer:get-library', provider: 'zvuk' });
+  assert.equal(result.payload, undefined, 'a conflicting playlist snapshot must not be offered as complete');
+  assert.match(result.error, /завершите полный сбор/i);
+  assert.equal(storage[ZVUK_KEY].playlists[0].complete, false);
+  assert.match(storage[ZVUK_KEY].playlists[0].incompleteReason, /изменились элементы плейлиста/);
 });
 
 test('Zvuk account scan refuses a favorites total mismatch', async () => {

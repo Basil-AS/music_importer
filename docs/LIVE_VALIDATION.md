@@ -1,5 +1,13 @@
 # Live validation log
 
+## 2026-10-30 — recovery and playlist consistency regression checks
+
+- Transfer-job progress and finish now update the record in one IndexedDB read/write transaction. A deliberately delayed old-style progress write fixture verifies that a terminal `complete` status and its plan cleanup cannot be overwritten by late progress.
+- Zvuk playlist capture now compares IDs at overlapping positions. Conflicting page snapshots keep the collection in `needs_review`; matching overlaps and intentional repeated tracks at different positions remain valid.
+- Full fixture suite: **326/326 passed** on Node.js 24.22.1. Extension app bundle check passed.
+- Chrome had the Music Importer extension page and all four provider page origins open. A read-only status refresh was not run: this Chrome profile has JavaScript-from-Apple-Events disabled, and I left that security setting unchanged. Tabs alone do not prove an active login or a successful library scan.
+- No provider account data was read or written in this pass. The prior live read evidence below remains the 2026-10-28 observation; no source→target route has live write/read-back evidence.
+
 ## 2026-10-28 — stale Apple bridge recovery
 
 - Version `0.13.43` upgrades all provider bridge health replies to protocol 3. Tabs still running a protocol 2 content script now fail the health check and are reloaded automatically on extension install/update or before the next read/write command.
