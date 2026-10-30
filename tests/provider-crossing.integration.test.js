@@ -385,7 +385,7 @@ test('Apple Music source → shared transfer engine → Spotify writer verifies 
     requestHeaders: { authorization: 'Bearer fixture', 'music-user-token': 'fixture-token' },
     fetch: async (url) => {
       const path = new URL(url).pathname + new URL(url).search;
-      const payload = path === '/v1/me/library/songs?limit=100'
+      const payload = path === '/v1/me/library/songs?limit=100&extend=inFavorites'
         ? { meta: { total: 1 }, next: null, data: [appleRow()] }
         : path === '/v1/me/library/playlists?limit=100'
           ? { meta: { total: 0 }, next: null, data: [] }

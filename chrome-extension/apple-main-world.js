@@ -162,12 +162,22 @@
     return payload;
   }
 
-  async function readPages(initialPath, label) {
+  function addExtendedAttributes(path, attributes) {
+    if (!attributes.length) return path;
+    const url = apiUrl(path);
+    const current = String(url.searchParams.get('extend') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    for (const attribute of attributes) if (!current.includes(attribute)) current.push(attribute);
+    url.searchParams.set('extend', current.join(','));
+    return `${url.pathname}${url.search}`;
+  }
+
+  async function readPages(initialPath, label, { extend = [] } = {}) {
     const rows = [];
     const seen = new Set();
-    let path = initialPath;
+    let path = addExtendedAttributes(initialPath, extend);
     let expectedTotal = null;
     while (path) {
+      path = addExtendedAttributes(path, extend);
       if (seen.has(path)) throw new Error(`Apple Music повторил страницу при чтении: ${label}.`);
       seen.add(path);
       const payload = await request(path);
@@ -260,7 +270,7 @@
     scanPromise = (async () => {
       await waitForSession();
       const [librarySongs, playlistCatalog, albumRead] = await Promise.all([
-        readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Песни Apple Music'),
+        readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Песни Apple Music', { extend: ['inFavorites'] }),
         readPages(`/v1/me/library/playlists?limit=${pageSize}`, 'Каталог плейлистов Apple Music'),
         // Albums are optional: a failure leaves the albums collection unconfirmed without blocking songs/playlists.
         readLibraryAlbums().catch((error) => ({ error: error instanceof Error ? error.message : 'Не удалось прочитать альбомы Apple Music.' })),
@@ -437,7 +447,7 @@
   }
 
   async function readFavoriteRows() {
-    const result = await readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Избранное Apple Music');
+    const result = await readPages(`/v1/me/library/songs?limit=${pageSize}`, 'Избранное Apple Music', { extend: ['inFavorites'] });
     return result.rows.filter((row) => row?.attributes?.inFavorites === true);
   }
 

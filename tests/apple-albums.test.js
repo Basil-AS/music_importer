@@ -87,7 +87,7 @@ const catalogRel = (id, upc) => ({ catalog: { data: [{ id, type: 'albums', attri
 
 function libraryFixtures() {
   return {
-    '/v1/me/library/songs?limit=100': { meta: { total: 1 }, next: null, data: [{ id: 'l1', attributes: { name: 'Song', artistName: 'Artist', inFavorites: true } }] },
+    '/v1/me/library/songs?limit=100&extend=inFavorites': { meta: { total: 1 }, next: null, data: [{ id: 'l1', attributes: { name: 'Song', artistName: 'Artist', inFavorites: true } }] },
     '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
     '/v1/me/library/albums?limit=100&include=catalog': {
       meta: { total: 2 }, next: '/v1/me/library/albums?limit=100&include=catalog&offset=1',
