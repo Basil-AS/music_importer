@@ -83,11 +83,11 @@ function makePage(fixtures, userTokenHeader = 'music-user-token', checkpointAck 
 
 test('Apple source reader classifies favorites and preserves playlist duplicates and order', async () => {
   const fixtures = {
-    '/v1/me/library/songs?limit=100': {
-      meta: { total: 2 }, next: '/v1/me/library/songs?limit=100&offset=1',
+    '/v1/me/library/songs?limit=100&extend=inFavorites': {
+      meta: { total: 2 }, next: '/v1/me/library/songs?limit=100&extend=inFavorites&offset=1',
       data: [{ id: 'library-song-1', attributes: { name: 'Liked track', artistName: 'Artist', albumName: 'Album', inFavorites: true, playParams: { id: 'catalog-track-1' }, isrc: 'USABC1234567' } }],
     },
-    '/v1/me/library/songs?limit=100&offset=1': {
+    '/v1/me/library/songs?limit=100&extend=inFavorites&offset=1': {
       meta: { total: 2 }, next: null,
       data: [{ id: 'library-song-2', attributes: { name: 'Unliked track', artistName: 'Artist', inFavorites: false } }],
     },
@@ -120,12 +120,14 @@ test('Apple source reader classifies favorites and preserves playlist duplicates
   assert.deepEqual(Array.from(payload.playlists[0].tracks, (track) => track.position), [0, 1]);
   assert.equal(payload.playlists[1].complete, true);
   assert.ok(page.requests.every((request) => request.headers.get('authorization') === `Bearer ${page.token}`));
+  assert.ok(page.requests.filter((request) => request.url.includes('/v1/me/library/songs')).every((request) =>
+    new URL(request.url).searchParams.get('extend')?.split(',').includes('inFavorites')));
   assert.ok(!JSON.stringify(page.messages).includes(page.token));
 });
 
 test('Apple Music reader times out a response body that stalls after headers', async () => {
   const page = makePage({
-    '/v1/me/library/songs?limit=100': { pendingBody: true },
+    '/v1/me/library/songs?limit=100&extend=inFavorites': { pendingBody: true },
     '/v1/me/library/playlists?limit=100': { pendingBody: true },
   }, 'music-user-token', true, 0.001);
   await page.scan();
@@ -135,7 +137,7 @@ test('Apple Music reader times out a response body that stalls after headers', a
 
 test('Apple source reader refuses an incomplete library page', async () => {
   const page = makePage({
-    '/v1/me/library/songs?limit=100': { meta: { total: 1 }, next: null, data: [] },
+    '/v1/me/library/songs?limit=100&extend=inFavorites': { meta: { total: 1 }, next: null, data: [] },
     '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
   });
   await page.scan();
@@ -146,8 +148,8 @@ test('Apple source reader refuses an incomplete library page', async () => {
 test('Apple reader rejects overlapping library-song pages that repeat a resource ID', async () => {
   const row = { id: 'duplicate-song', attributes: { name: 'Song', artistName: 'Artist', inFavorites: true } };
   const page = makePage({
-    '/v1/me/library/songs?limit=100': { meta: { total: 2 }, next: '/v1/me/library/songs?limit=100&offset=1', data: [row] },
-    '/v1/me/library/songs?limit=100&offset=1': { meta: { total: 2 }, next: null, data: [row] },
+    '/v1/me/library/songs?limit=100&extend=inFavorites': { meta: { total: 2 }, next: '/v1/me/library/songs?limit=100&extend=inFavorites&offset=1', data: [row] },
+    '/v1/me/library/songs?limit=100&extend=inFavorites&offset=1': { meta: { total: 2 }, next: null, data: [row] },
     '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
   });
   await page.scan();
@@ -160,7 +162,7 @@ test('Apple reader rejects overlapping library-song pages that repeat a resource
 test('Apple reader rejects a playlist catalog with duplicate resource IDs', async () => {
   const playlist = { id: 'duplicate-playlist', attributes: { name: 'Playlist' } };
   const page = makePage({
-    '/v1/me/library/songs?limit=100': { meta: { total: 0 }, next: null, data: [] },
+    '/v1/me/library/songs?limit=100&extend=inFavorites': { meta: { total: 0 }, next: null, data: [] },
     '/v1/me/library/playlists?limit=100': {
       meta: { total: 2 }, next: '/v1/me/library/playlists?limit=100&offset=1', data: [playlist],
     },
@@ -175,7 +177,7 @@ test('Apple reader rejects a playlist catalog with duplicate resource IDs', asyn
 
 test('Apple source reader refuses to confirm favorites when membership is missing on a library song', async () => {
   const page = makePage({
-    '/v1/me/library/songs?limit=100': {
+    '/v1/me/library/songs?limit=100&extend=inFavorites': {
       meta: { total: 1 }, next: null,
       data: [{ id: 'song-without-membership', attributes: { name: 'Song', artistName: 'Artist' } }],
     },
@@ -190,11 +192,11 @@ test('Apple source reader refuses to confirm favorites when membership is missin
 test('Apple source reader follows more than 10,000 pages without an artificial item cap', async () => {
   const total = 10001;
   const page = makePage({
-    '/v1/me/library/songs?limit=100*': ({ url }) => {
+    '/v1/me/library/songs?limit=100&extend=inFavorites*': ({ url }) => {
       const offset = Number(new URL(url).searchParams.get('offset') || 0);
       return {
         meta: { total },
-        next: offset + 1 < total ? `/v1/me/library/songs?limit=100&offset=${offset + 1}` : null,
+        next: offset + 1 < total ? `/v1/me/library/songs?limit=100&extend=inFavorites&offset=${offset + 1}` : null,
         data: [{ id: `song-${offset}`, attributes: { name: `Song ${offset}`, artistName: 'Artist', inFavorites: true } }],
       };
     },
@@ -210,7 +212,7 @@ test('Apple source reader follows more than 10,000 pages without an artificial i
 
 test('Apple page session preserves the observed Media-User-Token header spelling', async () => {
   const page = makePage({
-    '/v1/me/library/songs?limit=100': { meta: { total: 0 }, next: null, data: [] },
+    '/v1/me/library/songs?limit=100&extend=inFavorites': { meta: { total: 0 }, next: null, data: [] },
     '/v1/me/library/playlists?limit=100': { meta: { total: 0 }, next: null, data: [] },
   }, 'media-user-token');
   await page.scan();
@@ -301,7 +303,7 @@ test('Apple album batch search returns tracks from matching catalog album pages'
 test('Apple target writer adds favorites and ordered playlist items, then verifies both', async () => {
   let favoriteReads = 0;
   const fixtures = {
-    'GET /v1/me/library/songs?limit=100': () => {
+    'GET /v1/me/library/songs?limit=100&extend=inFavorites': () => {
       favoriteReads += 1;
       return favoriteReads === 1
         ? { meta: { total: 0 }, next: null, data: [] }

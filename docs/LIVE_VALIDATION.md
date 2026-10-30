@@ -14,6 +14,11 @@
 - Comparing the live error with `docs/providers/zvuk-api-inventory.md` revealed that the observed `getPaginatedCollectionAll` payload uses `data.paginatedCollection`, while the reader accepted only `paginatedCollectionAll` and `paginatedCollectionAllSections`. This matches the live unsupported-response error and the gap in prior fixtures.
 - Added the observed response-root alias with the existing playlist-section and cursor validation unchanged, plus a regression fixture based on the documented shape. The fixture suite passes; this is not yet live confirmation. A fresh read requires reloading the unpacked extension and the signed-in Zvuk tab, then retrying the scan.
 
+## 2026-10-30 — Apple favorite attribute request
+
+- The live Apple scan found 341 library-song rows without an `inFavorites` boolean and correctly refused to guess their favorite state. Apple documents `inFavorites` on library-song attributes and supports `extend` on the library-songs endpoint; the reader now explicitly requests `extend=inFavorites` on every page, including favorite verification reads.
+- Apple reader fixtures pass with that request parameter. This is a reasoned fix candidate, not live confirmation; retry after the updated extension is loaded. The reader still rejects a response if the service omits favorite state.
+
 ## 2026-10-30 — responsive, contrast, and stage accessibility pass
 
 - A temporary Chrome profile rendered the local UI with six demo tracks. At CSS viewport widths 320, 375, 390, 820, 821, 900, 960, and 1280 px, document/body widths matched the viewport and no track row exceeded its card. The sidebar stacks before the track grid becomes cramped.
