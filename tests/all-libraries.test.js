@@ -522,6 +522,28 @@ test('a provider scan with no progress for two minutes stops blocking the other 
   assert.deepEqual(app.messages, []);
 });
 
+test('Spotify auth-refresh scans fail promptly with a session-specific message', async () => {
+  const tabs = [{ id: 2, url: 'https://open.spotify.com/collection/tracks' }];
+  const startedAt = new Date(Date.now() - 21 * 1000).toISOString();
+  const app = bootWorker({
+    [PROVIDER_KEY]: {
+      snapshots: {},
+      scans: { spotify: { status: 'reading', phase: 'auth-refresh', message: 'Checking session', updatedAt: startedAt } },
+      previousSnapshots: {},
+    },
+    [ZVUK_KEY]: makeZvukState(),
+  }, tabs);
+
+  const response = await app.call({
+    type: 'music-importer:get-all-libraries', refresh: true, refreshProviders: ['spotify'],
+  });
+
+  assert.equal(response.pending, false);
+  assert.equal(response.statuses.spotify.status, 'failed');
+  assert.match(response.statuses.spotify.message, /HTTP 401 за 20 секунд.*Войдите в Spotify/i);
+  assert.deepEqual(app.messages, []);
+});
+
 test('a provider read error is reported as failed so its card can retry the scan', async () => {
   const app = bootWorker({
     [PROVIDER_KEY]: {

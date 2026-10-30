@@ -336,10 +336,15 @@
     const total = Number(first.detail?.trackCount ?? first.detail?.track_count ?? totalFromCatalog);
     const revisionValue = first.detail?.revision;
     const revision = revisionValue === null || revisionValue === undefined ? '' : String(revisionValue);
-    if (!refs || !Number.isInteger(total) || total < 0
-      || !revision
-      || (totalFromCatalog !== null && (!Number.isInteger(totalFromCatalog) || total !== totalFromCatalog))) {
-      throw new Error(`Нет подтверждённого состава плейлиста «${title}».`);
+    const missingEvidence = [];
+    if (!refs) missingEvidence.push('tracks');
+    if (!Number.isInteger(total) || total < 0) missingEvidence.push('track-count');
+    if (!revision) missingEvidence.push('revision');
+    if (totalFromCatalog !== null && (!Number.isInteger(totalFromCatalog) || total !== totalFromCatalog)) {
+      missingEvidence.push('catalog-count-mismatch');
+    }
+    if (missingEvidence.length) {
+      throw new Error(`Нет подтверждённого состава плейлиста «${title}» (не подтверждены поля: ${missingEvidence.join(', ')}).`);
     }
     const pages = [...refs];
     let pageInfo = playlistPager(first.detail, 1, refs, total, title);

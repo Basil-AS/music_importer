@@ -173,6 +173,28 @@ test('Yandex source reader rejects a playlist revision change between pages even
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 
+test('Yandex reports which completeness evidence is missing from a virtual playlist response', async () => {
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') {
+      return { result: { playlists: [{ uid: 42, kind: 99, title: 'Virtual', trackCount: 3 }] } };
+    }
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [99] };
+    if (parsed.pathname === '/users/42/playlists/99' && init.method !== 'POST') {
+      return { result: { playlist: { title: 'Virtual', trackCount: 3, tracks: [{ id: 'track-1' }] } } };
+    }
+    throw new Error(`Unexpected Yandex request: ${init.method || 'GET'} ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+
+  const error = page.messages.find((message) => message.type === 'scan-error');
+  assert.match(error?.error || '', /не подтверждены поля: revision/i);
+  assert.ok(!JSON.stringify(error).includes('token'));
+});
+
 test('Yandex source reader refuses a truncated playlist when paging metadata is missing', async () => {
   const page = makePage(async ({ url }) => {
     const parsed = new URL(url);
