@@ -303,17 +303,17 @@
     return null;
   }
 
-  function playlistPager(detail, requestedPage, refs, expectedTotal, title) {
+  function playlistPager(detail, requestedPage, refs, title) {
     const pager = detail?.pager;
     if (!pager || typeof pager !== 'object' || Array.isArray(pager)) return null;
     const total = Number(pager.total);
     const page = Number(pager.page);
     const perPage = Number(pager.perPage ?? pager.per_page ?? pager.pageSize ?? pager.page_size);
-    if (!Number.isInteger(total) || total !== expectedTotal
+    if (!Number.isInteger(total) || total < 0
       || !Number.isInteger(page) || page !== requestedPage
       || !Number.isInteger(perPage) || perPage < 0
       || (perPage > 0 && refs.length > perPage)) {
-      throw new Error(`Счётчик страниц плейлиста «${title}» не сошёлся с библиотекой.`);
+      throw new Error(`Некорректный счётчик страниц плейлиста «${title}».`);
     }
     return { total, page, perPage };
   }
@@ -337,9 +337,11 @@
     const first = await getPage(1);
     const refs = first.refs;
     const detailTotal = first.detail?.trackCount ?? first.detail?.track_count;
-    // The list endpoint can expose stale/advisory counts for virtual collections.
-    // Prefer the detail response; use the list count only when detail has no total.
-    const total = detailTotal === null || detailTotal === undefined ? totalFromCatalog : Number(detailTotal);
+    // Virtual collections can expose stale counts on both list and detail. The
+    // page counter is the pagination contract; final hydrated rows verify it.
+    const firstPager = playlistPager(first.detail, 1, refs || [], title);
+    const total = firstPager?.total
+      ?? (detailTotal === null || detailTotal === undefined ? totalFromCatalog : Number(detailTotal));
     const revisionValue = first.detail?.revision;
     const revision = revisionValue === null || revisionValue === undefined ? '' : String(revisionValue);
     const missingEvidence = [];
@@ -350,7 +352,7 @@
       throw new Error(`Нет подтверждённого состава плейлиста «${title}» (не подтверждены поля: ${missingEvidence.join(', ')}).`);
     }
     const pages = [...refs];
-    let pageInfo = playlistPager(first.detail, 1, refs, total, title);
+    let pageInfo = firstPager;
     if (pages.length > total) throw new Error(`Ответ плейлиста «${title}» содержит больше треков, чем каталог.`);
     if (pages.length < total && !pageInfo) {
       throw new Error(`Плейлист «${title}» обрезан, а API не вернул данные пагинации.`);
@@ -367,10 +369,8 @@
       if (!nextRevision || nextRevision !== revision) {
         throw new Error(`Плейлист «${title}» изменился во время чтения (revision); повторите сбор.`);
       }
-      const nextDetailTotal = next.detail?.trackCount ?? next.detail?.track_count;
-      const nextTotal = nextDetailTotal === null || nextDetailTotal === undefined ? total : Number(nextDetailTotal);
-      if (nextTotal !== total) throw new Error(`Размер плейлиста «${title}» изменился во время чтения; повторите сбор.`);
-      pageInfo = playlistPager(next.detail, page, next.refs, total, title);
+      pageInfo = playlistPager(next.detail, page, next.refs, title);
+      if (pageInfo && pageInfo.total !== total) throw new Error(`Размер плейлиста «${title}» изменился во время чтения; повторите сбор.`);
       if (!pageInfo) throw new Error(`Яндекс Музыка потеряла счётчик страниц плейлиста «${title}».`);
       pages.push(...next.refs);
       if (pages.length > total) throw new Error(`Страницы плейлиста «${title}» содержат больше треков, чем заявлено.`);

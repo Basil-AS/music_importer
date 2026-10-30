@@ -194,6 +194,11 @@
     return Array.isArray(items) ? items : null;
   }
 
+  function hasPageInfo(page) {
+    return Boolean(page && (typeof page.hasNextPage === 'boolean'
+      || (page.endCursor !== null && page.endCursor !== undefined && page.endCursor !== '')));
+  }
+
   function parseCollectionPage(operation, payload, diagnostic) {
     const collection = payload.data?.paginatedCollectionAll
       || payload.data?.paginatedCollectionAllSections
@@ -205,7 +210,10 @@
       || (operation.variables?.withPlaylists == null && releaseItems(collection?.releases)))) playlists = [];
     if (!Array.isArray(playlists)) return { error: { ...diagnostic, invalidShape: true } };
 
-    const playlistPageInfo = hasPlaylistSection ? playlistSection?.page || collection?.page || {} : {};
+    const nestedPlaylistPage = playlistSection?.page;
+    const playlistPageInfo = hasPlaylistSection
+      ? (hasPageInfo(nestedPlaylistPage) ? nestedPlaylistPage : collection?.page || {})
+      : {};
     const playlistHasMore = typeof playlistPageInfo.hasNextPage === 'boolean'
       ? playlistPageInfo.hasNextPage : Boolean(playlistPageInfo.endCursor);
     if (playlistHasMore && !playlistPageInfo.endCursor) return { error: { ...diagnostic, invalidPagination: true } };
@@ -215,7 +223,10 @@
     let releaseCursor = null;
     const releaseSection = collection?.releases;
     if (releaseItems(releaseSection)) {
-      const releasePageInfo = releaseSection?.page || (!hasPlaylistSection ? collection?.page : null) || {};
+      const nestedReleasePage = releaseSection?.page;
+      const releasePageInfo = hasPageInfo(nestedReleasePage)
+        ? nestedReleasePage
+        : (!hasPlaylistSection ? collection?.page : null) || {};
       releaseHasMore = typeof releasePageInfo.hasNextPage === 'boolean'
         ? releasePageInfo.hasNextPage : Boolean(releasePageInfo.endCursor);
       releaseCursor = releasePageInfo.endCursor == null || releasePageInfo.endCursor === ''
@@ -261,52 +272,83 @@
   }
 
   async function fetchCollectionCursorPage(url, init, requestBody, cursor, section) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
-    try {
-      const response = await originalFetch.call(window, url, {
-        ...init,
-        method: init?.method || 'POST',
-        credentials: init?.credentials || 'include',
-        body: JSON.stringify({
-          ...requestBody,
-          variables: {
-            ...requestBody.variables,
-            after: cursor,
-            withPlaylists: section === 'playlists',
-            withReleases: section === 'releases',
-          },
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const error = new Error('GraphQL запрос следующей страницы завершился ошибкой.');
-        error.httpStatus = response.status;
-        throw error;
+    const retryAfterMs = (value) => {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+      const seconds = Number(raw);
+      if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 60000);
+      const date = Date.parse(raw);
+      return Number.isFinite(date) ? Math.min(Math.max(0, date - Date.now()), 60000) : null;
+    };
+    const waitWithProgress = async (milliseconds, attempt) => {
+      let remaining = milliseconds;
+      while (remaining > 0) {
+        post('scan-progress', {
+          phase: 'retry',
+          message: `Каталог Звука временно недоступен; повтор ${attempt + 1} из 2 через ${Math.ceil(remaining / 1000)} с.`,
+        });
+        const interval = Math.min(remaining, 10000);
+        await new Promise((resolve) => setTimeout(resolve, interval));
+        remaining -= interval;
       }
-      const payload = await response.json();
-      if (payload?.errors?.length) {
-        const error = new Error('Звук вернул GraphQL-ошибку для следующей страницы.');
-        error.graphqlError = true;
-        throw error;
+    };
+
+    for (let attempt = 0; attempt <= 2; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+      try {
+        const response = await originalFetch.call(window, url, {
+          ...init,
+          method: init?.method || 'POST',
+          credentials: init?.credentials || 'include',
+          body: JSON.stringify({
+            ...requestBody,
+            variables: {
+              ...requestBody.variables,
+              after: cursor,
+              withPlaylists: section === 'playlists',
+              withReleases: section === 'releases',
+            },
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const error = new Error('GraphQL запрос следующей страницы завершился ошибкой.');
+          error.httpStatus = response.status;
+          error.retryAfter = response.headers?.get?.('retry-after') || null;
+          throw error;
+        }
+        const payload = await response.json();
+        if (payload?.errors?.length) {
+          const error = new Error('Звук вернул GraphQL-ошибку для следующей страницы.');
+          error.graphqlError = true;
+          throw error;
+        }
+        if (!payload?.data) {
+          const error = new Error('Звук вернул неподдерживаемый формат следующей страницы.');
+          error.invalidShape = true;
+          throw error;
+        }
+        return payload;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw Object.assign(new Error('Следующая страница каталога Звука не ответила за 45 секунд.'), { paginationFailed: true });
+        }
+        const status = Number(error?.httpStatus);
+        const retryableStatus = status === 408 || status === 429 || status >= 500;
+        const retryableNetwork = !error?.httpStatus && !error?.graphqlError && !error?.invalidShape;
+        if (attempt < 2 && (retryableStatus || retryableNetwork)) {
+          const retryAfter = status === 429 ? retryAfterMs(error?.retryAfter) : null;
+          await waitWithProgress(retryAfter ?? 500 * (2 ** attempt), attempt);
+          continue;
+        }
+        if (error?.httpStatus || error?.graphqlError || error?.invalidShape) throw error;
+        throw Object.assign(new Error('Не удалось загрузить следующую страницу каталога Звука.'), { paginationFailed: true });
+      } finally {
+        clearTimeout(timer);
       }
-      if (!payload?.data) {
-        const error = new Error('Звук вернул неподдерживаемый формат следующей страницы.');
-        error.invalidShape = true;
-        throw error;
-      }
-      return payload;
-    } catch (error) {
-      if (controller.signal.aborted) {
-        const timeout = new Error('Следующая страница каталога Звука не ответила за 45 секунд.');
-        timeout.paginationFailed = true;
-        throw timeout;
-      }
-      if (error?.httpStatus || error?.graphqlError || error?.invalidShape) throw error;
-      throw Object.assign(new Error('Не удалось загрузить следующую страницу каталога Звука.'), { paginationFailed: true });
-    } finally {
-      clearTimeout(timer);
     }
+    throw Object.assign(new Error('Не удалось загрузить следующую страницу каталога Звука.'), { paginationFailed: true });
   }
 
   async function continueCollectionScan(url, init, bodyText, firstPage, reported) {

@@ -142,6 +142,39 @@ test('Yandex trusts a complete virtual playlist detail when its list catalog cou
   ]);
 });
 
+test('Yandex trusts stable pager and hydrated rows when virtual detail trackCount is stale', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') {
+      return { result: { playlists: [{ uid: 42, kind: 100, title: 'Virtual', trackCount: 99 }] } };
+    }
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [100] };
+    if (parsed.pathname === '/users/42/playlists/100') {
+      const requestedPage = Number(parsed.searchParams.get('page'));
+      if (requestedPage === 1) return { result: { playlist: {
+        title: 'Virtual', revision: 5, trackCount: 99, pager: { total: 3, page: 1, perPage: 2 }, tracks: [
+          { id: 'virtual-1', track: song('virtual-1', 'First') },
+          { id: 'virtual-2', track: song('virtual-2', 'Second') },
+        ],
+      } } };
+      if (requestedPage === 2) return { result: { playlist: {
+        title: 'Virtual', revision: 5, trackCount: 99, pager: { total: 3, page: 2, perPage: 2 }, tracks: [
+          { id: 'virtual-3', track: song('virtual-3', 'Third') },
+        ],
+      } } };
+    }
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.equal(snapshot?.completeness.confirmed, true, JSON.stringify(page.messages));
+  assert.equal(snapshot.playlists[0].trackCount, 3);
+  assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => track.id), ['virtual-1', 'virtual-2', 'virtual-3']);
+});
+
 test('Yandex source reader refuses an unsafe favorites revision before saving a partial snapshot', async () => {
   const page = makePage(async ({ url }) => {
     const parsed = new URL(url);
