@@ -29,6 +29,14 @@ test('interactive controls have visible focus styles and skipped tracks retain f
   assert.match(css, /button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible/);
   assert.match(css, /\.track\.skipped\s*\{\s*border-left:\s*3px solid var\(--amber\)\s*\}/);
   assert.doesNotMatch(css, /\.track\.skipped\s*\{[^}]*opacity\s*:/);
+  assert.match(css, /\.include,\.album-include\s*\{[^}]*width:\s*24px;\s*height:\s*24px/);
+});
+
+test('first-run installation explains automatic tabs and the existing-account login flow consistently', () => {
+  const install = fs.readFileSync(require.resolve('../chrome-extension/INSTALL.txt'), 'utf8');
+  assert.match(install, /автоматически откроет приложение и недостающие страницы сервисов в фоне/);
+  assert.match(install, /Если сервис попросит войти, нажмите «Войти» в его карточке/);
+  assert.doesNotMatch(install, /Откройте вкладки нужных музыкальных сервисов/);
 });
 
 test('track search buttons identify the track they search', async () => {

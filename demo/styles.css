@@ -535,10 +535,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   color:var(--red)
 }
 
-.include {
+.include,.album-include {
   accent-color:var(--green);
-  width:15px;
-  height:15px
+  width:24px;
+  height:24px
 }
 
 .track.skipped {
