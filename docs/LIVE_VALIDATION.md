@@ -292,3 +292,9 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Zvuk now walks playlist and saved-release cursors independently, replaying each with only its corresponding `withPlaylists` or `withReleases` flag. A release-only response uses the root cursor for releases and cannot accidentally claim playlist pagination. Fixtures cover distinct cursors and release-only root pagination; live API behavior remains unconfirmed.
 - Final local verification: `node --test --test-concurrency=1 --test-reporter=spec tests/*.test.js` passed **361/361**. Bundle parity, JavaScript syntax, manifest JSON, and `git diff --check` also passed. These are local fixtures/unit checks; they do not establish live service scanning or transfers.
 - No account writes or reads were run after these code changes. The existing Chrome extension still needs a manual reload before any live retest.
+
+## 2026-10-31 — Spotify transfer fails fast after an unverified like
+
+- Spotify now stops before creating or appending any playlist when a requested favorite is missing from the immediate read-back. The partial report preserves favorite counts and leaves `playlists` empty so the user can retry safely without extra writes.
+- A mixed-plan fixture makes the favorite write appear successful while the subsequent library read omits it, then asserts no playlist creation, append, or read request occurs.
+- Focused Spotify target tests pass **10/10**; the full suite passes **365/365**. `git diff --check` passes. This is fixture verification only; no live Spotify account write was performed.

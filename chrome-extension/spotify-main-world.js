@@ -869,6 +869,11 @@
       },
       playlists: [],
     };
+    if (unverifiedFavorites.length) {
+      throw Object.assign(new Error('Spotify не подтвердил часть добавленных лайков.'), {
+        transferReport: { ...report, status: 'partial_failure' },
+      });
+    }
     const operationsByCollection = new Map();
     for (const operation of plan.operations.filter((item) => item.operation === 'add_to_playlist')) {
       const key = String(operation.source?.collectionId || operation.source?.collectionName || 'Плейлист');
@@ -937,7 +942,6 @@
       }
       playlistIndex += 1;
     }
-    if (unverifiedFavorites.length) throw Object.assign(new Error('Spotify не подтвердил часть добавленных лайков.'), { transferReport: { ...report, status: 'partial_failure' } });
     return report;
   }
 
