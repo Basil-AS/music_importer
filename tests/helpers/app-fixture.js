@@ -95,7 +95,7 @@ function createAppHarness({ libraries, handler, statuses = {} }) {
   };
   window.window = window;
   vm.createContext(context);
-  for (const file of ['theme.js', 'matcher.js', 'album-matcher.js', 'account-catalog.js', 'transfer-core.js', 'transfer-engine.js', 'provider-connection-flow.js']) {
+  for (const file of ['theme.js', 'matcher.js', 'album-matcher.js', 'library-cache.js', 'account-catalog.js', 'transfer-core.js', 'transfer-engine.js', 'provider-connection-flow.js']) {
     if (file === 'theme.js') continue;
     vm.runInContext(fs.readFileSync(require.resolve(`../../demo/${file}`), 'utf8'), context, { filename: file });
   }

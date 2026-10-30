@@ -12,6 +12,7 @@ const assets = [
   'app.js',
   'matcher.js',
   'album-matcher.js',
+  'library-cache.js',
   'account-catalog.js',
   'match-cache.js',
   'transfer-core.js',

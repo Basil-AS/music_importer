@@ -75,6 +75,20 @@ test('albums are a selectable scope with counts next to likes', async () => {
   assert.equal(harness.$('#albumCount').textContent, '2 альбомов');
 });
 
+test('a unique exact UPC with contradictory album metadata is left for manual review', () => {
+  const html = require('node:fs').readFileSync(require.resolve('../demo/album-matcher.js'), 'utf8');
+  const context = { window: { MusicMatcher: {
+    similarity: (a, b) => String(a).toLowerCase() === String(b).toLowerCase() ? 1 : 0,
+    normalizeText: (value) => String(value).toLowerCase().trim(),
+  } }, Object, String, Number, Array, Boolean, Set, Math };
+  require('node:vm').runInNewContext(html, context);
+  const result = context.window.MusicAlbumMatcher.suggestAlbumMatch({
+    providerId: 'source', title: 'Discovery', artists: ['Daft Punk'], upc: '0724384960650', trackCount: 14,
+  }, [{ providerId: 'target', title: 'Different album', artists: ['Someone Else'], upc: '724384960650', trackCount: 14 }]);
+  assert.equal(result.automatic, false);
+  assert.equal(result.reason, 'upc_metadata_conflict');
+});
+
 test('likes, albums and playlists transfer separately: UPC match is automatic, an uncertain edition waits for review', async () => {
   const calls = [];
   const harness = createAppHarness({ libraries: { 'apple-music': appleLibrary() }, handler: scriptedExtension(calls) });

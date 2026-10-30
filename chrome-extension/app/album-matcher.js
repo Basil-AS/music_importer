@@ -44,22 +44,24 @@
     const candidateTracks = Number(candidate?.trackCount) || 0;
     const trackCount = sourceTracks && candidateTracks ? (sourceTracks === candidateTracks ? 'match' : 'mismatch') : 'unknown';
     const upcExact = Boolean(sourceUpc && candidateUpc && sourceUpc === candidateUpc);
+    const upcMetadataConflict = upcExact && (title < reviewThreshold || artist < reviewThreshold || trackCount === 'mismatch');
     const trackBonus = trackCount === 'match' ? 1 : trackCount === 'unknown' ? 0.5 : 0;
-    const score = upcExact ? 1 : Math.min(0.99, 0.5 * title + 0.4 * artist + 0.1 * trackBonus);
-    return { score, title, artist, trackCount, upcExact };
+    const score = upcExact && !upcMetadataConflict ? 1 : Math.min(0.99, 0.5 * title + 0.4 * artist + 0.1 * trackBonus);
+    return { score, title, artist, trackCount, upcExact, upcMetadataConflict };
   }
 
-  // Auto-accept only exact UPC, or title+artist >= 0.96 with an equal known track count, and only
-  // when exactly one distinct album qualifies; everything else goes to the review queue.
+  // Auto-accept only a metadata-consistent exact UPC, or title+artist >= 0.96 with an equal known
+  // track count, and only when exactly one distinct album qualifies; everything else needs review.
   function suggestAlbumMatch(source, candidates) {
     const rows = (Array.isArray(candidates) ? candidates : []).filter((candidate) => candidateId(candidate))
       .map((candidate) => ({ candidate, ...scoreAlbum(source, candidate) }))
       .sort((left, right) => right.score - left.score);
     if (!rows.length) return { best: null, confidence: 0, automatic: false, reason: 'no_candidates', ranked: [] };
-    const isAuto = (row) => row.upcExact || (row.title >= autoThreshold && row.artist >= autoThreshold && row.trackCount === 'match');
-    // An exact UPC outranks title/artist guesses; two different albums sharing one UPC stay ambiguous.
+    const isAuto = (row) => (row.upcExact && !row.upcMetadataConflict)
+      || (row.title >= autoThreshold && row.artist >= autoThreshold && row.trackCount === 'match');
+    // Exact UPC outranks title/artist guesses only when the metadata does not contradict it.
     const upcRows = rows.filter((row) => row.upcExact);
-    const qualified = upcRows.length ? upcRows : rows.filter(isAuto);
+    const qualified = upcRows.length ? upcRows.filter((row) => !row.upcMetadataConflict) : rows.filter(isAuto);
     const qualifiedIds = new Set(qualified.map((row) => candidateId(row.candidate)));
     const best = rows[0];
     if (qualifiedIds.size === 1) {
@@ -70,7 +72,7 @@
       best: best.score >= reviewThreshold ? best.candidate : null,
       confidence: best.score,
       automatic: false,
-      reason: qualifiedIds.size > 1 ? 'ambiguous' : 'low_confidence',
+      reason: qualifiedIds.size > 1 ? 'ambiguous' : best.upcMetadataConflict ? 'upc_metadata_conflict' : 'low_confidence',
       ranked: rows,
     };
   }

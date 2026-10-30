@@ -339,7 +339,23 @@
   const providerLabels = sourceLabels;
 
   function renderSourceAvailability(statuses = {}) {
-    if (Object.keys(statuses).length) state.libraryStatuses = { ...statuses };
+    if (Object.keys(statuses).length) {
+      state.libraryStatuses = { ...state.libraryStatuses, ...statuses };
+      for (const [provider, status] of Object.entries(state.libraryStatuses)) {
+        const snapshot = state.librarySnapshots[provider];
+        if (!snapshot) continue;
+        const cachedAt = snapshot.snapshotCachedAt || snapshot.exportedAt || '';
+        const age = window.MusicLibraryCache?.formatAge(cachedAt) || '';
+        const freshness = window.MusicLibraryCache?.evaluate({ cachedSnapshot: snapshot, lastCheckedAt: cachedAt }) || 'stale';
+        state.libraryStatuses[provider] = {
+          ...status,
+          cacheAge: age,
+          ...(status.status === 'ready' && freshness !== 'fresh'
+            ? { status: 'stale', message: 'Сохранённый снимок старше шести часов; обновите библиотеку.' }
+            : {}),
+        };
+      }
+    }
     $$('.source').forEach((card) => {
       const provider = card.dataset.provider;
       const snapshot = state.librarySnapshots[provider];
@@ -349,12 +365,13 @@
       if (snapshot) {
         const count = window.MusicAccountCatalog.snapshotSummary(snapshot);
         if (status?.status === 'scanning' && status.cached) {
-          label.textContent = `Обновляем · предыдущий снимок: ${count}`;
+          label.textContent = `Обновляем · предыдущий снимок: ${count}${status.cacheAge ? ` · ${status.cacheAge}` : ''}`;
         } else if (status?.status === 'stale' || status?.status === 'unavailable') {
-          label.textContent = `Последний полный снимок · ${count}`;
+          label.textContent = `Последний полный снимок · ${count}${status.cacheAge ? ` · ${status.cacheAge}` : ''}`;
           button.title = status.message || 'Аккаунт сейчас не обновлён.';
         } else {
-          label.textContent = card.classList.contains('selected') ? `Выбран · ${count}` : `Подключено · ${count}`;
+          const labelPrefix = card.classList.contains('selected') ? 'Выбран' : 'Подключено';
+          label.textContent = `${labelPrefix} · ${count}${status?.cacheAge ? ` · ${status.cacheAge}` : ''}`;
           button.title = '';
         }
         label.classList.add('connected');
@@ -1714,11 +1731,27 @@
     button.disabled = true;
     button.textContent = 'Сканируем аккаунты…';
     $('#extensionStatus').textContent = automatic
-      ? 'Расширение подключено. Проверяю сессии сервисов, открывая недостающие страницы в фоне, и читаю библиотеки…'
+      ? 'Проверяю локальные снимки библиотек и обновляю устаревшие аккаунты…'
       : 'Обновляю библиотеки; недостающие страницы сервисов откроются в фоне…';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
     try {
-      let response = await requestAllLibraries(true, refreshProviders);
+      let response;
+      if (automatic && refreshProviders === null) {
+        response = await requestAllLibraries(false);
+        state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+        renderSourceAvailability(response.statuses || {});
+        const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+        const providersToRefresh = providers.filter((provider) => {
+          const snapshot = state.librarySnapshots[provider];
+          const status = state.libraryStatuses[provider];
+          if (status?.status === 'scanning') return false;
+          if (!snapshot || ['failed', 'unavailable', 'stale'].includes(status?.status)) return true;
+          return window.MusicLibraryCache.evaluate({ cachedSnapshot: snapshot, lastCheckedAt: snapshot.snapshotCachedAt || snapshot.exportedAt }) !== 'fresh';
+        });
+        if (providersToRefresh.length) response = await requestAllLibraries(true, providersToRefresh);
+      } else {
+        response = await requestAllLibraries(true, refreshProviders);
+      }
       while (response.pending && Date.now() < deadline) {
         state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
         renderSourceAvailability(response.statuses || {});

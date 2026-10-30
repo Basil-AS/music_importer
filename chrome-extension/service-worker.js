@@ -1,6 +1,8 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
 const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
+// No complete cheap pulse has been verified for every provider; auto-refresh full snapshots at most twice a day.
+const LIBRARY_AUTO_REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
 let providerStateMutationQueue = Promise.resolve();
 let zvukStateMutationQueue = Promise.resolve();
 const SERIALIZED_STATE_MESSAGE_TYPES = new Set([
@@ -169,6 +171,7 @@ function createLibraryPayload(state) {
   return {
     schemaVersion: 1,
     service: 'zvuk',
+    snapshotCachedAt: state.scan?.phase === 'complete' ? (state.scan.finishedAt || state.updatedAt || null) : null,
     collection: { type: 'library', name: 'Вся библиотека' },
     completeness: {
       confirmed: state.scan?.phase === 'complete' && favoritesConfirmed && catalogConfirmed && playlistItemsConfirmed,
@@ -193,6 +196,11 @@ function createLibraryPayload(state) {
     tracks: state.tracks,
     playlists: state.playlists,
   };
+}
+
+function snapshotIsStale(snapshot, fallbackTimestamp = null) {
+  const timestamp = Date.parse(snapshot?.snapshotCachedAt || fallbackTimestamp || '');
+  return !Number.isFinite(timestamp) || timestamp > Date.now() || Date.now() - timestamp >= LIBRARY_AUTO_REFRESH_AFTER_MS;
 }
 
 function sanitizeZvukRelease(release) {
@@ -596,7 +604,11 @@ async function requestProviderLibrary(provider, refresh) {
     return { error: scan.message || `Не удалось прочитать ${provider}.`, status: 'failed' };
   }
   const payload = state.snapshots[provider];
-  if (payload?.completeness?.confirmed === true) return { payload, stale: false };
+  if (payload?.completeness?.confirmed === true) {
+    const cachedAt = payload.snapshotCachedAt || (scan?.status === 'complete' ? scan.updatedAt : null);
+    const stale = snapshotIsStale(payload, cachedAt);
+    return { payload, stale, cached: true, cachedAt, message: stale ? 'Снимок старше шести часов; обновите его.' : '' };
+  }
   if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Сохранён последний полный снимок ${provider}.` };
   return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
 }
@@ -605,7 +617,11 @@ async function requestZvukLibrary(refresh) {
   const state = await readState();
   const payload = createLibraryPayload(state);
   const lastGoodSnapshot = payload.completeness.confirmed ? payload : state.previousCompleteSnapshot;
-  if (payload.completeness.confirmed && !refresh) return { payload, stale: false };
+  if (payload.completeness.confirmed && !refresh) {
+    const stale = snapshotIsStale(payload, state.scan?.finishedAt);
+    return { payload, stale, cached: true, cachedAt: payload.snapshotCachedAt || state.scan?.finishedAt || null,
+      message: stale ? 'Снимок старше шести часов; обновите его.' : '' };
+  }
   if (state.scan?.active) {
     const lastActivity = Date.parse(state.updatedAt || state.scan.startedAt || '');
     if (Number.isFinite(lastActivity) && Date.now() - lastActivity > PROVIDER_SCAN_STALE_AFTER_MS) {
@@ -683,6 +699,7 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
         playlistCount: result.payload.playlists.length,
         albumCount: albumsFromPayload(result.payload).confirmed ? albumsFromPayload(result.payload).items.length : null,
         cached: result.cached === true,
+        snapshotCachedAt: result.payload.snapshotCachedAt || result.cachedAt || null,
         message: result.message || '',
       };
     } else {
@@ -1113,11 +1130,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!valid) {
             state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
           } else {
-            const stored = withVerifiedAlbumsClaim(payload);
+            const snapshotCachedAt = new Date().toISOString();
+            const stored = { ...withVerifiedAlbumsClaim(payload), snapshotCachedAt };
             state.snapshots[provider] = stored;
             delete state.previousSnapshots[provider];
             const albums = albumsFromPayload(stored);
-            state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков, ${payload.playlists.length} плейлистов${albums.confirmed ? ` и ${albums.items.length} альбомов` : ''}.`, updatedAt: new Date().toISOString() };
+            state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков, ${payload.playlists.length} плейлистов${albums.confirmed ? ` и ${albums.items.length} альбомов` : ''}.`, updatedAt: snapshotCachedAt, snapshotCachedAt };
           }
         }
       });

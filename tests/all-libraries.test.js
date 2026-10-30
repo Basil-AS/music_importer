@@ -6,10 +6,10 @@ const vm = require('node:vm');
 const PROVIDER_KEY = 'providerLibraryBridge';
 const ZVUK_KEY = 'zvukFavoriteCapture';
 
-function makeProviderPayload(service, count = 1) {
+function makeProviderPayload(service, count = 1, snapshotCachedAt = new Date().toISOString()) {
   const tracks = Array.from({ length: count }, (_, index) => ({ id: `${service}-${index}`, title: `Track ${index}`, artist: 'Artist' }));
   return {
-    service,
+    service, snapshotCachedAt,
     collection: { type: 'library', name: 'Library' },
     completeness: {
       confirmed: true, favoritesConfirmed: true, favoritesCount: count,
@@ -352,7 +352,7 @@ test('onboarding rejects provider-tab requests from unrelated extension pages', 
 
 function makeZvukState(complete = false) {
   return {
-    scan: { active: complete, phase: complete ? 'complete' : 'idle', tabId: 1 },
+    scan: { active: complete, phase: complete ? 'complete' : 'idle', tabId: 1, ...(complete ? { finishedAt: new Date().toISOString() } : {}) },
     tracks: complete ? [{ id: 'zvuk-1', title: 'Track', artist: 'Artist' }] : [],
     expectedCount: complete ? 1 : null,
     hasMore: complete ? false : null,
@@ -705,6 +705,21 @@ test('one-click library scan returns all complete snapshots and marks missing se
   assert.equal(response.statuses.zvuk.status, 'ready');
   assert.equal(response.statuses['yandex-music'].status, 'unavailable');
   assert.equal(response.libraries.spotify.tracks.length, 3);
+});
+
+test('a provider snapshot older than the automatic refresh window is returned as stale', async () => {
+  const old = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+  const storage = {
+    [ZVUK_KEY]: makeZvukState(),
+    [PROVIDER_KEY]: {
+      snapshots: { spotify: makeProviderPayload('spotify', 1, old) },
+      scans: { spotify: { status: 'complete', updatedAt: old } },
+    },
+  };
+  const response = await bootWorker(storage).call({ type: 'music-importer:get-all-libraries', refresh: false });
+  assert.equal(response.statuses.spotify.status, 'stale');
+  assert.equal(response.statuses.spotify.snapshotCachedAt, old);
+  assert.equal(response.libraries.spotify.snapshotCachedAt, old);
 });
 
 test('Zvuk account scan crawls favorites, playlist catalog, and playlist pages into one confirmed snapshot', async () => {
