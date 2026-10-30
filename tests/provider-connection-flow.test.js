@@ -85,5 +85,7 @@ test('account-first copy names likes and playlists and presents CSV/JSON as an a
   assert.match(html, /Перенос лайков и плейлистов/);
   assert.match(html, /Лайки и плейлисты из аккаунта/);
   assert.match(html, /CSV\/JSON можно загрузить как альтернативный источник/);
+  assert.match(html, /Доступность зависит от входа и текущей работы сервиса/);
+  assert.doesNotMatch(html, /доступны как источники и цели/);
   assert.match(html, /src="provider-connection-flow\.js"/);
 });

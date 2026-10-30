@@ -11,8 +11,8 @@
   --amber:#f2c879;
   --red:#f28f8f;
   --radius:18px;
-      --control-bg:#222329;
-      --control-border:#3a3b43;
+  --control-bg:#222329;
+  --control-border:#3a3b43;
   font:15px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif
 }
 
@@ -1456,7 +1456,6 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 .track-bulk { margin-left:auto }
 .track-pages { width:100% }
 .track-pages #trackPageStatus { text-align:center }
-:root[data-theme="light"] .step:not(:last-child):after { background:#20202a20 }
 :root[data-theme="light"] .source-collections { color:#62636d }
 :root[data-theme="light"] .connect:disabled { color:#666772; opacity:1 }
 :root[data-theme="light"] .step:not(.active) { color:#666772 }
