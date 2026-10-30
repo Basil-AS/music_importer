@@ -199,12 +199,13 @@
       || payload.data?.paginatedCollectionAllSections
       || payload.data?.paginatedCollection;
     const playlistSection = collection?.playlists;
+    const hasPlaylistSection = Array.isArray(playlistSection) || Array.isArray(playlistSection?.items);
     let playlists = Array.isArray(playlistSection) ? playlistSection : playlistSection?.items;
     if (!Array.isArray(playlists) && (operation.variables?.withPlaylists === false
       || (operation.variables?.withPlaylists == null && releaseItems(collection?.releases)))) playlists = [];
     if (!Array.isArray(playlists)) return { error: { ...diagnostic, invalidShape: true } };
 
-    const playlistPageInfo = playlistSection?.page || collection?.page || {};
+    const playlistPageInfo = hasPlaylistSection ? playlistSection?.page || collection?.page || {} : {};
     const playlistHasMore = typeof playlistPageInfo.hasNextPage === 'boolean'
       ? playlistPageInfo.hasNextPage : Boolean(playlistPageInfo.endCursor);
     if (playlistHasMore && !playlistPageInfo.endCursor) return { error: { ...diagnostic, invalidPagination: true } };
@@ -214,7 +215,7 @@
     let releaseCursor = null;
     const releaseSection = collection?.releases;
     if (releaseItems(releaseSection)) {
-      const releasePageInfo = releaseSection?.page || collection?.page || {};
+      const releasePageInfo = releaseSection?.page || (!hasPlaylistSection ? collection?.page : null) || {};
       releaseHasMore = typeof releasePageInfo.hasNextPage === 'boolean'
         ? releasePageInfo.hasNextPage : Boolean(releasePageInfo.endCursor);
       releaseCursor = releasePageInfo.endCursor == null || releasePageInfo.endCursor === ''
@@ -238,13 +239,15 @@
     };
   }
 
-  async function saveCollectionPage(page) {
-    const saved = await postWithAck('playlist-list-page', {
-      playlists: page.playlists,
-      hasMore: page.playlistHasMore,
-    });
-    if (!saved) return false;
-    if (page.releases) {
+  async function saveCollectionPage(page, onlySection = null) {
+    if (onlySection !== 'releases') {
+      const saved = await postWithAck('playlist-list-page', {
+        playlists: page.playlists,
+        hasMore: page.playlistHasMore,
+      });
+      if (!saved) return false;
+    }
+    if (page.releases && onlySection !== 'playlists') {
       const releasesSaved = await postWithAck('release-list-page', {
         releases: page.releases,
         hasMore: page.releaseHasMore,
@@ -252,12 +255,12 @@
       if (!releasesSaved) return false;
     }
     lastCollectionPageAt = Date.now();
-    lastCollectionHasMore = page.playlistHasMore;
+    if (onlySection !== 'releases') lastCollectionHasMore = page.playlistHasMore;
     lastCollectionDiagnostic = null;
     return true;
   }
 
-  async function fetchCollectionCursorPage(url, init, requestBody, cursor) {
+  async function fetchCollectionCursorPage(url, init, requestBody, cursor, section) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 45000);
     try {
@@ -267,7 +270,12 @@
         credentials: init?.credentials || 'include',
         body: JSON.stringify({
           ...requestBody,
-          variables: { ...requestBody.variables, after: cursor },
+          variables: {
+            ...requestBody.variables,
+            after: cursor,
+            withPlaylists: section === 'playlists',
+            withReleases: section === 'releases',
+          },
         }),
         signal: controller.signal,
       });
@@ -334,33 +342,45 @@
       let pagesRead = 1;
       const seenCursors = { playlists: new Set(), releases: new Set() };
       const maxPages = 500;
+      const initialPage = page;
 
-      while (true) {
-        if (!enabled || !location.pathname.startsWith('/collection')) return;
-        const section = page.playlistHasMore ? 'playlists' : page.releaseHasMore ? 'releases' : '';
-        if (!section) break;
-        const cursor = section === 'playlists' ? page.playlistCursor : page.releaseCursor;
-        if (!cursor || seenCursors[section].has(cursor)) {
-          throw Object.assign(new Error('Звук повторил или не вернул cursor каталога.'), { invalidPagination: true });
+      for (const section of ['playlists', 'releases']) {
+        let sectionPage = initialPage;
+        while (section === 'playlists' ? sectionPage.playlistHasMore : sectionPage.releaseHasMore) {
+          if (!enabled || !location.pathname.startsWith('/collection')) return;
+          const cursor = section === 'playlists' ? sectionPage.playlistCursor : sectionPage.releaseCursor;
+          if (!cursor || seenCursors[section].has(cursor)) {
+            throw Object.assign(new Error('Звук повторил или не вернул cursor каталога.'), { invalidPagination: true });
+          }
+          if (pagesRead >= maxPages) {
+            throw Object.assign(new Error('Превышен предел страниц каталога Звука.'), { invalidPagination: true });
+          }
+          seenCursors[section].add(cursor);
+          const payload = await fetchCollectionCursorPage(url, init, requestBody, cursor, section);
+          const pageOperation = {
+            ...operation,
+            variables: {
+              ...requestBody.variables,
+              after: cursor,
+              withPlaylists: section === 'playlists',
+              withReleases: section === 'releases',
+            },
+          };
+          sectionPage = parseCollectionPage(pageOperation, payload, diagnostic);
+          if (sectionPage.error) throw Object.assign(new Error('Звук вернул неполную пагинацию каталога.'), sectionPage.error);
+          const sectionItems = section === 'playlists' ? sectionPage.playlists : sectionPage.releases;
+          const sectionHasMore = section === 'playlists' ? sectionPage.playlistHasMore : sectionPage.releaseHasMore;
+          if (!Array.isArray(sectionItems) || (sectionHasMore && sectionItems.length === 0)) {
+            throw Object.assign(new Error('Звук вернул пустую страницу с продолжением.'), { invalidPagination: true });
+          }
+          if (!await saveCollectionPage(sectionPage, section)) {
+            throw Object.assign(new Error('Приложение не подтвердило сохранение страницы каталога Звука.'), { paginationFailed: true });
+          }
+          pagesRead += 1;
+          if (!await postWithAck('scan-progress', {
+            phase: 'playlists', message: `Каталог Звука: сохранено страниц ${pagesRead}.`,
+          })) throw Object.assign(new Error('Приложение не подтвердило прогресс каталога Звука.'), { paginationFailed: true });
         }
-        if (pagesRead >= maxPages) {
-          throw Object.assign(new Error('Превышен предел страниц каталога Звука.'), { invalidPagination: true });
-        }
-        seenCursors[section].add(cursor);
-        const payload = await fetchCollectionCursorPage(url, init, requestBody, cursor);
-        page = parseCollectionPage(operation, payload, diagnostic);
-        if (page.error) throw Object.assign(new Error('Звук вернул неполную пагинацию каталога.'), page.error);
-        if ((page.playlistHasMore && page.playlists.length === 0)
-          || (page.releaseHasMore && Array.isArray(page.releases) && page.releases.length === 0)) {
-          throw Object.assign(new Error('Звук вернул пустую страницу с продолжением.'), { invalidPagination: true });
-        }
-        if (!await saveCollectionPage(page)) {
-          throw Object.assign(new Error('Приложение не подтвердило сохранение страницы каталога Звука.'), { paginationFailed: true });
-        }
-        pagesRead += 1;
-        if (!await postWithAck('scan-progress', {
-          phase: 'playlists', message: `Каталог Звука: сохранено страниц ${pagesRead}.`,
-        })) throw Object.assign(new Error('Приложение не подтвердило прогресс каталога Звука.'), { paginationFailed: true });
       }
 
       stopAutoScroll();

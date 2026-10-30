@@ -64,6 +64,22 @@
       });
       return;
     }
+    if (type === 'scan-progress' && detail.progressAckId) {
+      sendRuntimeMessage({ type: `spotify:${type}`, ...detail }).then((response) => {
+        window.postMessage({
+          source: marker, type: 'scan-progress-ack', progressAckId: String(detail.progressAckId), ok: response?.ok === true,
+        }, location.origin);
+      });
+      return;
+    }
+    if (['library-snapshot', 'scan-error'].includes(type) && detail.terminalAckId) {
+      sendRuntimeMessage({ type: `spotify:${type}`, ...detail }).then((response) => {
+        window.postMessage({
+          source: marker, type: 'scan-terminal-ack', terminalAckId: String(detail.terminalAckId), ok: response?.ok === true,
+        }, location.origin);
+      });
+      return;
+    }
     if (!accepted.has(type)) return;
     void sendRuntimeMessage({ type: `spotify:${type}`, ...detail });
   });

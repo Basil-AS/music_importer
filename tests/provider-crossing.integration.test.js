@@ -29,6 +29,16 @@ function makePage({ origin, script, fetch, requestHeaders = {}, href = `${origin
           source: window, origin, data: { source: data.source, type: 'transfer-progress-ack', checkpointId: data.progress.checkpointId, ok: true },
         });
       });
+      if (data.type === 'scan-progress' && data.progressAckId) queueMicrotask(() => {
+        for (const listener of listeners.get('message') || []) void listener({
+          source: window, origin, data: { source: data.source, type: 'scan-progress-ack', progressAckId: data.progressAckId, ok: true },
+        });
+      });
+      if (['library-snapshot', 'scan-error'].includes(data.type) && data.terminalAckId) queueMicrotask(() => {
+        for (const listener of listeners.get('message') || []) void listener({
+          source: window, origin, data: { source: data.source, type: 'scan-terminal-ack', terminalAckId: data.terminalAckId, ok: true },
+        });
+      });
     },
     fetch: async (url, init = {}) => {
       const headers = new Headers({ ...requestHeaders, ...(init.headers || {}) });

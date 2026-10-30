@@ -336,16 +336,16 @@
     };
     const first = await getPage(1);
     const refs = first.refs;
-    const total = Number(first.detail?.trackCount ?? first.detail?.track_count ?? totalFromCatalog);
+    const detailTotal = first.detail?.trackCount ?? first.detail?.track_count;
+    // The list endpoint can expose stale/advisory counts for virtual collections.
+    // Prefer the detail response; use the list count only when detail has no total.
+    const total = detailTotal === null || detailTotal === undefined ? totalFromCatalog : Number(detailTotal);
     const revisionValue = first.detail?.revision;
     const revision = revisionValue === null || revisionValue === undefined ? '' : String(revisionValue);
     const missingEvidence = [];
     if (!refs) missingEvidence.push('tracks');
     if (!Number.isInteger(total) || total < 0) missingEvidence.push('track-count');
     if (!revision) missingEvidence.push('revision');
-    if (totalFromCatalog !== null && (!Number.isInteger(totalFromCatalog) || total !== totalFromCatalog)) {
-      missingEvidence.push('catalog-count-mismatch');
-    }
     if (missingEvidence.length) {
       throw new Error(`Нет подтверждённого состава плейлиста «${title}» (не подтверждены поля: ${missingEvidence.join(', ')}).`);
     }
@@ -367,7 +367,8 @@
       if (!nextRevision || nextRevision !== revision) {
         throw new Error(`Плейлист «${title}» изменился во время чтения (revision); повторите сбор.`);
       }
-      const nextTotal = Number(next.detail?.trackCount ?? next.detail?.track_count ?? totalFromCatalog);
+      const nextDetailTotal = next.detail?.trackCount ?? next.detail?.track_count;
+      const nextTotal = nextDetailTotal === null || nextDetailTotal === undefined ? total : Number(nextDetailTotal);
       if (nextTotal !== total) throw new Error(`Размер плейлиста «${title}» изменился во время чтения; повторите сбор.`);
       pageInfo = playlistPager(next.detail, page, next.refs, total, title);
       if (!pageInfo) throw new Error(`Яндекс Музыка потеряла счётчик страниц плейлиста «${title}».`);

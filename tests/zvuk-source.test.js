@@ -220,6 +220,57 @@ test('Zvuk catalog reader follows playlist cursors and confirms every saved page
   assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
 });
 
+test('Zvuk paginates playlist and release sections with their independent cursors', async () => {
+  const release = (id) => ({ id, title: `Album ${id}`, artists: [{ title: 'Artist' }], trackCount: 1 });
+  const page = makePage('/collection', ({ payload }) => {
+    const { after, withPlaylists, withReleases } = payload.variables || {};
+    if (!after) return { data: { paginatedCollection: {
+      playlists: { items: [{ id: 'p1', title: 'Road', trackCount: 0 }], page: { endCursor: 'p2', hasNextPage: true } },
+      releases: { items: [release('r1')], page: { endCursor: 'r2', hasNextPage: true } },
+    } } };
+    if (withPlaylists === true && withReleases === false && after === 'p2') return { data: { paginatedCollection: {
+      playlists: { items: [{ id: 'p2', title: 'Keep', trackCount: 0 }], page: { endCursor: null, hasNextPage: false } },
+    } } };
+    if (withPlaylists === false && withReleases === true && after === 'r2') return { data: { paginatedCollection: {
+      releases: { items: [release('r2')], page: { endCursor: null, hasNextPage: false } },
+    } } };
+    throw new Error(`Unexpected section cursor replay: ${JSON.stringify(payload.variables)}`);
+  });
+
+  await page.request('getPaginatedCollectionAll', { after: '', withPlaylists: true, withReleases: true });
+  await page.waitForMessage('collection-scroll-end');
+  const playlistPages = page.messages.filter((message) => message.type === 'playlist-list-page');
+  const releasePages = page.messages.filter((message) => message.type === 'release-list-page');
+  assert.deepEqual(playlistPages.flatMap((message) => message.playlists.map((item) => item.id)), ['p1', 'p2']);
+  assert.deepEqual(releasePages.flatMap((message) => message.releases.map((item) => item.id)), ['r1', 'r2'], JSON.stringify(page.messages));
+  const replayed = page.requests.filter((request) => request.payload.operationName === 'getPaginatedCollectionAll');
+  assert.deepEqual(replayed.map((request) => [request.payload.variables.after, request.payload.variables.withPlaylists, request.payload.variables.withReleases]), [
+    ['', true, true], ['p2', true, false], ['r2', false, true],
+  ]);
+  assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
+});
+
+test('Zvuk release-only collection uses the root cursor without claiming playlist pagination', async () => {
+  const release = (id) => ({ id, title: `Album ${id}`, artists: [{ title: 'Artist' }], trackCount: 1 });
+  const page = makePage('/collection', ({ payload }) => {
+    const after = payload.variables?.after || '';
+    if (!after) return { data: { paginatedCollectionAll: {
+      releases: { items: [release('r1')] },
+      page: { endCursor: 'release-next', hasNextPage: true },
+    } } };
+    return { data: { paginatedCollectionAll: {
+      releases: { items: [release('r2')], page: { endCursor: null, hasNextPage: false } },
+    } } };
+  });
+
+  await page.request('getPaginatedCollectionAll', { after: '', withPlaylists: false, withReleases: true });
+  await page.waitForMessage('collection-scroll-end');
+  assert.deepEqual(page.messages.filter((message) => message.type === 'playlist-list-page').map((message) => message.hasMore), [false]);
+  assert.deepEqual(page.messages.filter((message) => message.type === 'release-list-page')
+    .flatMap((message) => message.releases.map((item) => item.id)), ['r1', 'r2']);
+  assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
+});
+
 test('Zvuk catalog cursor replay works when the page uses XMLHttpRequest', async () => {
   const page = makePage('/collection', ({ payload }) => {
     const cursor = payload.variables?.after || null;
