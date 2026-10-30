@@ -32,6 +32,17 @@ test('interactive controls have visible focus styles and skipped tracks retain f
   assert.match(css, /\.include,\.album-include\s*\{[^}]*width:\s*24px;\s*height:\s*24px/);
 });
 
+test('mobile workflow keeps the current step label readable and source cards legible', () => {
+  const html = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
+  const css = fs.readFileSync(require.resolve('../demo/styles.css'), 'utf8');
+  assert.match(html, /<span class="step-label">Источник<\/span>/);
+  assert.match(html, /<span class="step-label">План<\/span>/);
+  assert.match(css, /\.step:not\(\.active\) \.step-label\s*\{[^}]*clip:rect\(0,0,0,0\)/);
+  assert.match(css, /\.step\.active \.step-label\s*\{[^}]*font-size:12px/);
+  assert.match(css, /\.source h3\s*\{[^}]*font-size:13px/);
+  assert.match(css, /\.connect\s*\{[^}]*font-size:12px/);
+});
+
 test('first-run installation explains automatic tabs and the existing-account login flow consistently', () => {
   const install = fs.readFileSync(require.resolve('../chrome-extension/INSTALL.txt'), 'utf8');
   assert.match(install, /автоматически откроет приложение и недостающие страницы сервисов в фоне/);
