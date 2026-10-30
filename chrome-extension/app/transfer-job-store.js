@@ -121,16 +121,6 @@
     });
   }
 
-  async function putJob(record) {
-    const db = await openDatabase();
-    if (!db) return false;
-    try {
-      await transaction(db, jobsStoreName, 'readwrite', (tx) => tx.objectStore(jobsStoreName).put(record));
-      void prune(db);
-      return true;
-    } catch { return false; }
-  }
-
   async function putJobAndPlan(record, recoveryPlan) {
     const db = await openDatabase();
     if (!db) return false;
@@ -138,19 +128,6 @@
       await transaction(db, [jobsStoreName, recoveryPlansStoreName], 'readwrite', (tx) => {
         tx.objectStore(recoveryPlansStoreName).put({ id: record.id, recoveryPlan });
         tx.objectStore(jobsStoreName).put(record);
-      });
-      void prune(db);
-      return true;
-    } catch { return false; }
-  }
-
-  async function putJobAndDeletePlan(record) {
-    const db = await openDatabase();
-    if (!db) return false;
-    try {
-      await transaction(db, [jobsStoreName, recoveryPlansStoreName], 'readwrite', (tx) => {
-        tx.objectStore(jobsStoreName).put(record);
-        tx.objectStore(recoveryPlansStoreName).delete(record.id);
       });
       void prune(db);
       return true;
@@ -188,45 +165,29 @@
     return record ? putJobAndPlan(record, recoveryPlan) : false;
   }
 
-  async function getJob(id) {
-    const db = await openDatabase();
-    if (!db) return null;
-    return new Promise((resolve) => {
-      let tx;
-      try { tx = db.transaction(jobsStoreName, 'readonly'); }
-      catch { return resolve(null); }
-      const request = tx.objectStore(jobsStoreName).get(String(id || ''));
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => resolve(null);
-    });
-  }
-
   async function updateProgress(id, progress) {
-    const current = await getJob(id);
-    if (!current || current.status !== 'in-progress') return false;
-    const playlistTargets = { ...current.playlistTargets };
-    if (progress?.sourceKey && progress?.targetPlaylistId) {
-      playlistTargets[String(progress.sourceKey).slice(0, 500)] = String(progress.targetPlaylistId).slice(0, 300);
-    }
-    const updated = normalizeJob({ ...current, progress, playlistTargets });
-    return updated ? putJob(updated) : false;
+    return mutateExisting(id, (current) => current.status === 'in-progress', (current) => {
+      const playlistTargets = { ...current.playlistTargets };
+      if (progress?.sourceKey && progress?.targetPlaylistId) {
+        playlistTargets[String(progress.sourceKey).slice(0, 500)] = String(progress.targetPlaylistId).slice(0, 300);
+      }
+      return { ...current, progress, playlistTargets };
+    });
   }
 
   async function finish(id, status, outcome = '') {
-    const current = await getJob(id);
-    if (!current) return false;
     const nextStatus = String(status || 'unknown');
-    const clearsPlan = terminalSafeStatuses.has(nextStatus);
-    const updated = normalizeJob({
-      ...current,
-      status: nextStatus,
-      outcome,
-      progress: current.progress,
-      hasRecoveryPlan: clearsPlan ? false : current.hasRecoveryPlan,
-      playlistTargets: clearsPlan ? {} : current.playlistTargets,
+    return mutateExisting(id, (current) => !terminalSafeStatuses.has(current.status), (current) => {
+      const clearsPlan = terminalSafeStatuses.has(nextStatus);
+      return {
+        ...current,
+        status: nextStatus,
+        outcome,
+        progress: current.progress,
+        hasRecoveryPlan: clearsPlan ? false : current.hasRecoveryPlan,
+        playlistTargets: clearsPlan ? {} : current.playlistTargets,
+      };
     });
-    if (!updated) return false;
-    return clearsPlan ? putJobAndDeletePlan(updated) : putJob(updated);
   }
 
   async function mutateExisting(id, predicate, update) {

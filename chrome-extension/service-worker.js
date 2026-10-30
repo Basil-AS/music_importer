@@ -1329,11 +1329,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const limit = Math.max(0, Number(message.limit) || 0);
       const pageTracks = Array.isArray(message.tracks) ? message.tracks : [];
       const itemsByPosition = new Map(playlist.tracks.map((item) => [item.position, item]));
+      const pageSignatures = { ...(playlist.pageSignatures || {}) };
+      const signature = pageTracks.map((track) => String(track?.id || ''));
+      let pageConflict = Boolean(playlist.pageConflict);
+      for (const [priorOffsetText, priorIds] of Object.entries(pageSignatures)) {
+        const priorOffset = Number(priorOffsetText);
+        if (!Number.isSafeInteger(priorOffset) || !Array.isArray(priorIds)) continue;
+        const priorSignature = priorIds.map(String);
+        if (priorOffset === offset) {
+          if (JSON.stringify(priorSignature) !== JSON.stringify(signature)) pageConflict = true;
+          continue;
+        }
+        const overlapStart = Math.max(offset, priorOffset);
+        const overlapEnd = Math.min(offset + signature.length, priorOffset + priorSignature.length);
+        for (let position = overlapStart; position < overlapEnd; position += 1) {
+          if (signature[position - offset] !== priorSignature[position - priorOffset]) pageConflict = true;
+        }
+      }
       pageTracks.forEach((track, index) => {
-        if (track?.id && track?.title) itemsByPosition.set(offset + index, { ...track, position: offset + index });
+        if (!track?.id || !track?.title) return;
+        const position = offset + index;
+        const prior = itemsByPosition.get(position);
+        if (prior && String(prior.id) !== String(track.id)) pageConflict = true;
+        if (!prior || String(prior.id) === String(track.id)) itemsByPosition.set(position, { ...track, position });
       });
+      pageSignatures[offset] = signature;
       playlist.tracks = [...itemsByPosition.values()].sort((left, right) => left.position - right.position);
       playlist.pagesSeen = Number(playlist.pagesSeen || 0) + 1;
+      playlist.pageSignatures = pageSignatures;
+      playlist.pageConflict = pageConflict;
       playlist.offsetsSeen = [...new Set([...(playlist.offsetsSeen || []), offset])].sort((left, right) => left - right);
       playlist.lastOffset = offset;
       playlist.lastPageSize = pageTracks.length;
@@ -1341,6 +1365,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ? (limit > 0 && pageTracks.length >= limit)
         : offset + pageTracks.length < playlist.trackCount;
       playlist.complete = Number.isInteger(playlist.trackCount)
+        && !playlist.pageConflict
         && playlist.tracks.length === playlist.trackCount
         && playlist.tracks.every((item, position) => item.position === position);
       const atAutomationPlaylist = state.automation?.active
@@ -1350,7 +1375,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ? offset + pageTracks.length >= playlist.trackCount
         : limit > 0 && pageTracks.length < limit;
       if (atAutomationPlaylist && pageEnded) playlist.itemsScanFinished = true;
-      if (atAutomationPlaylist && pageEnded && !playlist.complete) playlist.incompleteReason = 'Количество полученных элементов не сошлось с trackCount/порядком страниц.';
+      if (atAutomationPlaylist && pageEnded && !playlist.complete) playlist.incompleteReason = playlist.pageConflict
+        ? 'Во время чтения изменились элементы плейлиста; снимок не подтверждён.'
+        : 'Количество полученных элементов не сошлось с trackCount/порядком страниц.';
       state.updatedAt = new Date().toISOString();
       state.error = null;
       await writeState(state);

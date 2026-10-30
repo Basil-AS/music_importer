@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function createIndexedDB({ legacyJobs = [] } = {}) {
+function createIndexedDB({ legacyJobs = [], delayProgressWrite = false } = {}) {
   const stores = new Map();
   let version = legacyJobs.length ? 1 : 0;
   let planWrites = 0;
@@ -29,6 +29,15 @@ function createIndexedDB({ legacyJobs = [] } = {}) {
           indexNames: indexNames(),
           createIndex() {},
           put(record) {
+            const isDelayedProgress = delayProgressWrite && allowed.length === 1 && name === 'jobs'
+              && record.status === 'in-progress' && record.progress?.completed === 1;
+            if (isDelayedProgress) {
+              setTimeout(() => {
+                records.set(record.id, structuredClone(record));
+                setTimeout(() => transaction.oncomplete?.(), 0);
+              }, 20);
+              return {};
+            }
             records.set(record.id, structuredClone(record));
             if (name === 'recoveryPlans') planWrites += 1;
             setTimeout(() => transaction.oncomplete?.(), 0);
@@ -146,6 +155,28 @@ test('progress checkpoints do not rewrite the recovery plan', async () => {
   assert.equal(await store.acknowledge('job-2'), true);
   assert.equal(indexedDB.planDeletes, 1);
   assert.equal(await store.latestUnresolved(), null);
+});
+
+test('a delayed progress checkpoint cannot overwrite a completed transfer', async () => {
+  const indexedDB = createIndexedDB({ delayProgressWrite: true });
+  const store = loadStore(indexedDB);
+  assert.equal(await store.start({ id: 'job-race', sourceProvider: 'apple-music', targetProvider: 'yandex-music', recoveryPlan }), true);
+
+  const [progressSaved, completionSaved] = await Promise.all([
+    store.updateProgress('job-race', {
+      phase: 'playlist-items', completed: 1, total: 1,
+      sourceKey: 'playlist-1', targetPlaylistId: 'target-playlist-1',
+    }),
+    store.finish('job-race', 'complete', 'Read-back подтверждён.'),
+  ]);
+
+  assert.equal(completionSaved, true);
+  const finalRecord = indexedDB.readJob('job-race');
+  assert.equal(finalRecord.status, 'complete');
+  assert.equal(finalRecord.hasRecoveryPlan, false);
+  assert.equal(finalRecord.progress?.completed, progressSaved ? 1 : null);
+  assert.equal(await store.latestUnresolved(), null);
+  assert.equal(indexedDB.planDeletes, 1);
 });
 
 test('migrates an existing version 1 inline plan to the separate recovery store', async () => {
