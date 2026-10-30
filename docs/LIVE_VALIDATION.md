@@ -31,6 +31,12 @@
 - Spotify progress now retains a validated scan phase. If the page reports an auth refresh after HTTP 401 but the bridge never delivers a terminal result, the worker ends that scan after 20 seconds with a session-specific instruction instead of waiting for the generic two-minute watchdog. A worker fixture covers this lost-terminal-event path.
 - These code and fixture changes still need live confirmation after the unpacked extension is reloaded. The Yandex reader remains fail-closed until it has enough evidence to prove playlist completeness.
 
+## 2026-10-30 — preserve verified Yandex likes on playlist failure
+
+- After Yandex confirms the full liked-track list and its revision, the page now sends a separately validated favorites snapshot before reading playlists. The worker stores this under a partial snapshot slot; it never promotes it to a complete library. Duplicate/missing IDs, bad positions, or a count mismatch reject the partial payload.
+- If playlist discovery or any playlist read fails and there is no earlier complete snapshot, the app exposes the partial source with a warning and restricts the collection selector to the single option «Только подтверждённые лайки». The selected transfer plan contains a confirmed favorites collection and no playlist mappings. An earlier complete snapshot remains preferred if one exists. A later complete scan replaces and removes the partial copy.
+- Reader, bridge, worker validation/storage, app selection, transfer-plan fixtures, and UI scope tests pass. This is fixture evidence only; the live Yandex error has not yet been retested in the user's existing Chrome profile.
+
 ## 2026-10-30 — responsive, contrast, and stage accessibility pass
 
 - A temporary Chrome profile rendered the local UI with six demo tracks. At CSS viewport widths 320, 375, 390, 820, 821, 900, 960, and 1280 px, document/body widths matched the viewport and no track row exceeded its card. The sidebar stacks before the track grid becomes cramped.

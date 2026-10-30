@@ -91,3 +91,21 @@ for (const bridgeCase of cases) {
     assert.ok(bridge.healthCheck().some((response) => response?.ok === true));
   });
 }
+
+test('yandex-bridge forwards the separately confirmed favorites snapshot to extension storage', () => {
+  const sent = [];
+  const bridge = createBridge({
+    file: 'yandex-bridge.js',
+    origin: 'https://music.yandex.ru',
+    sendMessage(message) { sent.push(message); return Promise.resolve({ ok: true }); },
+  });
+  const payload = {
+    service: 'yandex-music',
+    partialScope: 'favorites',
+    completeness: { confirmed: false, favoritesConfirmed: true, favoritesCount: 1 },
+    tracks: [{ id: 'liked-1', position: 0 }],
+    playlists: [],
+  };
+  bridge.dispatch({ source: 'music-importer-yandex', type: 'favorites-snapshot', payload });
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[0])), { type: 'yandex:favorites-snapshot', source: 'music-importer-yandex', payload });
+});

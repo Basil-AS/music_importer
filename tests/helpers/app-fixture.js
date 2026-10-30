@@ -34,7 +34,7 @@ function makeElement(selector, registry) {
   return element;
 }
 
-function createAppHarness({ libraries, handler, statuses = {} }) {
+function createAppHarness({ libraries, partialLibraries = {}, handler, statuses = {} }) {
   const cache = new Map();
   const registry = { get(selector) { if (!cache.has(selector)) cache.set(selector, makeElement(selector, registry)); return cache.get(selector); } };
   const cards = ['zvuk', 'spotify', 'yandex-music', 'apple-music'].map((provider) => {
@@ -88,7 +88,7 @@ function createAppHarness({ libraries, handler, statuses = {} }) {
       async sendMessage(message) {
         sent.push(message);
         if (message.type === 'music-importer:repair-provider-bridges') return { ok: true };
-        if (message.type === 'music-importer:get-all-libraries') return { libraries, statuses, pending: false };
+        if (message.type === 'music-importer:get-all-libraries') return { libraries, partialLibraries, statuses, pending: false };
         return handler(message, { emitProgress: (provider, requestId, progress) => progressPorts.forEach((listener) => listener({ type: 'transfer-progress', provider, requestId, progress })) });
       },
     },

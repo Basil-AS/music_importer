@@ -22,6 +22,25 @@ function makeProviderPayload(service, count = 1, snapshotCachedAt = new Date().t
   };
 }
 
+function makeYandexFavoritesPartial() {
+  return {
+    service: 'yandex-music',
+    partialScope: 'favorites',
+    snapshotCachedAt: new Date().toISOString(),
+    collection: { type: 'library', name: 'Только лайки' },
+    completeness: {
+      confirmed: false, favoritesConfirmed: true, favoritesCount: 2, favoritesRevision: 7,
+      catalogConfirmed: false, playlistCatalogKindsConfirmed: false,
+      playlistItemsConfirmed: false, playlistItemsTotal: null,
+    },
+    tracks: [
+      { id: 'liked-1', title: 'Favorite 1', artists: ['Artist'], collectionType: 'favorites', position: 0 },
+      { id: 'liked-2', title: 'Favorite 2', artists: ['Artist'], collectionType: 'favorites', position: 1 },
+    ],
+    playlists: [],
+  };
+}
+
 function bootWorker(storageState, tabs = [], options = {}) {
   const messages = [];
   const updates = [];
@@ -754,6 +773,42 @@ test('one-click library scan returns all complete snapshots and marks missing se
   assert.equal(response.statuses.zvuk.status, 'ready');
   assert.equal(response.statuses['yandex-music'].status, 'unavailable');
   assert.equal(response.libraries.spotify.tracks.length, 3);
+});
+
+test('failed Yandex playlist discovery still exposes its independently confirmed likes', async () => {
+  const worker = bootWorker({
+    providerLibraryBridge: { scans: { 'yandex-music': { status: 'failed', message: 'Playlist kind mismatch.' } }, snapshots: {}, previousSnapshots: {}, partialSnapshots: {} },
+  }, [{ id: 76, url: 'https://music.yandex.ru/collection/likes', status: 'complete' }]);
+  const payload = makeYandexFavoritesPartial();
+  await worker.pageMessage({ type: 'yandex:favorites-snapshot', payload }, 76);
+  await worker.pageMessage({ type: 'yandex:scan-error', error: 'Playlist kind mismatch.' }, 76);
+
+  const response = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
+  assert.equal(response.libraries['yandex-music'], undefined, 'an incomplete whole-library snapshot stays blocked');
+  assert.equal(response.partialLibraries['yandex-music'].partialScope, 'favorites');
+  assert.deepEqual(Array.from(response.partialLibraries['yandex-music'].tracks, (track) => track.id), ['liked-1', 'liked-2']);
+  assert.equal(response.statuses['yandex-music'].status, 'failed');
+  assert.equal(response.statuses['yandex-music'].partialScope, 'favorites');
+
+  await worker.pageMessage({ type: 'yandex:library-snapshot', payload: makeProviderPayload('yandex-music') }, 76);
+  const completeResponse = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
+  assert.equal(completeResponse.partialLibraries['yandex-music'], undefined);
+  assert.equal(completeResponse.libraries['yandex-music'].completeness.confirmed, true);
+});
+
+test('Yandex partial favorites are rejected when the independent count or IDs do not match', async () => {
+  const worker = bootWorker({}, [{ id: 77, url: 'https://music.yandex.ru/home', status: 'complete' }]);
+  const payload = makeYandexFavoritesPartial();
+  payload.completeness.favoritesCount = 3;
+  await worker.pageMessage({ type: 'yandex:favorites-snapshot', payload }, 77);
+  const response = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
+  assert.equal(response.partialLibraries['yandex-music'], undefined);
+
+  payload.completeness.favoritesCount = 2;
+  payload.tracks[1].id = payload.tracks[0].id;
+  await worker.pageMessage({ type: 'yandex:favorites-snapshot', payload }, 77);
+  const duplicateResponse = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
+  assert.equal(duplicateResponse.partialLibraries['yandex-music'], undefined);
 });
 
 test('a provider tab-query failure does not discard statuses for the other services', async () => {

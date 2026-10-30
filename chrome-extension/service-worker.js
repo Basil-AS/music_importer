@@ -399,9 +399,21 @@ async function readProviderState() {
   const stored = await chrome.storage.local.get(PROVIDER_STORAGE_KEY);
   return {
     snapshots: stored[PROVIDER_STORAGE_KEY]?.snapshots || {},
+    partialSnapshots: stored[PROVIDER_STORAGE_KEY]?.partialSnapshots || {},
     scans: stored[PROVIDER_STORAGE_KEY]?.scans || {},
     previousSnapshots: stored[PROVIDER_STORAGE_KEY]?.previousSnapshots || {},
   };
+}
+
+function isConfirmedFavoritesPartial(payload, provider) {
+  if (provider !== 'yandex-music' || payload?.service !== provider || payload?.partialScope !== 'favorites'
+    || payload?.collection?.type !== 'library' || payload?.completeness?.confirmed !== false
+    || payload?.completeness?.favoritesConfirmed !== true || !Array.isArray(payload?.tracks)
+    || payload.completeness.favoritesCount !== payload.tracks.length || !Array.isArray(payload.playlists)
+    || payload.playlists.length !== 0) return false;
+  const ids = payload.tracks.map((track) => String(track?.id || track?.providerId || ''));
+  return ids.every(Boolean) && new Set(ids).size === ids.length
+    && payload.tracks.every((track, index) => track.position === index);
 }
 
 async function writeProviderState(state) {
@@ -554,6 +566,8 @@ async function requestProviderLibrary(provider, refresh) {
   if (!providerConfig) return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
   let state = await readProviderState();
   let scan = state.scans[provider];
+  let lastGoodPartial = isConfirmedFavoritesPartial(state.partialSnapshots[provider], provider)
+    ? state.partialSnapshots[provider] : null;
   const staleAfterMs = provider === 'spotify' && scan?.phase === 'auth-refresh'
     ? SPOTIFY_AUTH_REFRESH_STALE_AFTER_MS : PROVIDER_SCAN_STALE_AFTER_MS;
   const lastUpdate = Date.parse(scan?.updatedAt || scan?.startedAt || '');
@@ -574,11 +588,13 @@ async function requestProviderLibrary(provider, refresh) {
     });
     state = update.state;
     scan = state.scans[provider];
+    lastGoodPartial = isConfirmedFavoritesPartial(state.partialSnapshots[provider], provider)
+      ? state.partialSnapshots[provider] : null;
     lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
       .find((snapshot) => snapshot?.completeness?.confirmed === true);
     if (update.result) {
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: staleMessage };
-      return { error: staleMessage, status: 'failed' };
+      return { error: staleMessage, status: 'failed', partialPayload: lastGoodPartial };
     }
   }
   if (refresh && scan?.status !== 'reading') {
@@ -587,7 +603,7 @@ async function requestProviderLibrary(provider, refresh) {
     const providerName = provider === 'spotify' ? 'Spotify Web Player' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыку';
     if (!tab?.id) {
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Откройте ${providerName}, чтобы обновить сохранённый снимок.` };
-      return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
+      return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.`, partialPayload: lastGoodPartial };
     }
     const start = await mutateProviderState((current) => {
       if (current.scans[provider]?.status === 'reading') return false;
@@ -602,7 +618,7 @@ async function requestProviderLibrary(provider, refresh) {
     if (!start.result) {
       const currentSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
         .find((snapshot) => snapshot?.completeness?.confirmed === true);
-      return { pending: true, progress: state.scans[provider]?.message || `Читаем ${providerName}…`, payload: currentSnapshot, cached: Boolean(currentSnapshot), stale: Boolean(currentSnapshot) };
+      return { pending: true, progress: state.scans[provider]?.message || `Читаем ${providerName}…`, payload: currentSnapshot, partialPayload: lastGoodPartial, cached: Boolean(currentSnapshot), stale: Boolean(currentSnapshot) };
     }
     try {
       await startProviderLibraryScan(tab.id, providerConfig.startMessage);
@@ -617,15 +633,17 @@ async function requestProviderLibrary(provider, refresh) {
       state = failed.state;
       lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
         .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      lastGoodPartial = isConfirmedFavoritesPartial(state.partialSnapshots[provider], provider)
+        ? state.partialSnapshots[provider] : null;
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: failed.result.message };
-      return { error: failed.result.message, status: 'failed' };
+      return { error: failed.result.message, status: 'failed', partialPayload: lastGoodPartial };
     }
-    return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+    return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, partialPayload: lastGoodPartial, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   }
-  if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+  if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, payload: lastGoodSnapshot, partialPayload: lastGoodPartial, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   if (scan?.status === 'failed') {
     if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message || `Обновление ${provider} не завершилось.` };
-    return { error: scan.message || `Не удалось прочитать ${provider}.`, status: 'failed' };
+    return { error: scan.message || `Не удалось прочитать ${provider}.`, status: 'failed', partialPayload: lastGoodPartial };
   }
   const payload = state.snapshots[provider];
   if (payload?.completeness?.confirmed === true) {
@@ -634,7 +652,7 @@ async function requestProviderLibrary(provider, refresh) {
     return { payload, stale, cached: true, cachedAt, message: stale ? 'Снимок старше шести часов; обновите его.' : '' };
   }
   if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Сохранён последний полный снимок ${provider}.` };
-  return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
+  return { error: `Сбор ${provider} не запускался. Повторите импорт из расширения.`, partialPayload: lastGoodPartial };
 }
 
 async function requestZvukLibrary(refresh) {
@@ -714,9 +732,11 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
     }
   }));
   const libraries = {};
+  const partialLibraries = {};
   const statuses = {};
   let pending = false;
   for (const [provider, result] of outcomes) {
+    if (isConfirmedFavoritesPartial(result.partialPayload, provider)) partialLibraries[provider] = result.partialPayload;
     if (result.pending) {
       pending = true;
       if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) libraries[provider] = result.payload;
@@ -724,6 +744,7 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
         status: 'scanning',
         message: String(result.progress || `Сканируем ${provider}…`),
         cached: result.cached === true,
+        ...(partialLibraries[provider] ? { partialScope: 'favorites', partialTrackCount: partialLibraries[provider].tracks.length } : {}),
       };
     } else if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) {
       libraries[provider] = result.payload;
@@ -740,10 +761,11 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
       statuses[provider] = {
         status: result.status === 'failed' ? 'failed' : 'unavailable',
         message: String(result.error || 'Полная библиотека пока недоступна.'),
+        ...(partialLibraries[provider] ? { partialScope: 'favorites', partialTrackCount: partialLibraries[provider].tracks.length } : {}),
       };
     }
   }
-  return { libraries, statuses, pending };
+  return { libraries, partialLibraries, statuses, pending };
 }
 
 async function openMissingProviderTabs(providerIds = null, { activateFirst = true, focusProviderId = null } = {}) {
@@ -1134,7 +1156,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    const providerMessage = /^(spotify|yandex|apple):(?:scan-progress|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
+    const providerMessage = /^(spotify|yandex|apple):(?:scan-progress|favorites-snapshot|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
     if (providerMessage) {
       const provider = providerMessage[1] === 'yandex' ? 'yandex-music' : providerMessage[1] === 'apple' ? 'apple-music' : 'spotify';
       const expectedOrigin = provider === 'spotify' ? 'https://open.spotify.com' : provider === 'apple-music' ? 'https://music.apple.com' : 'https://music.yandex.ru';
@@ -1151,6 +1173,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           state.scans[provider] = { status: 'reading', phase, message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
         } else if (message.type.endsWith(':scan-error')) {
           state.scans[provider] = { status: 'failed', message: String(message.error || `Не удалось прочитать ${provider}.`).slice(0, 500), updatedAt: new Date().toISOString() };
+        } else if (message.type.endsWith(':favorites-snapshot')) {
+          const payload = message.payload;
+          if (!isConfirmedFavoritesPartial(payload, provider)) {
+            state.scans[provider] = { status: 'failed', message: 'Яндекс Музыка не подтвердила полноту лайков.', updatedAt: new Date().toISOString() };
+          } else {
+            state.partialSnapshots[provider] = { ...payload, snapshotCachedAt: new Date().toISOString() };
+          }
         } else {
           const payload = message.payload;
           const valid = payload?.service === provider
@@ -1175,6 +1204,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const snapshotCachedAt = new Date().toISOString();
             const stored = { ...withVerifiedAlbumsClaim(payload), snapshotCachedAt };
             state.snapshots[provider] = stored;
+            delete state.partialSnapshots[provider];
             delete state.previousSnapshots[provider];
             const albums = albumsFromPayload(stored);
             state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков, ${payload.playlists.length} плейлистов${albums.confirmed ? ` и ${albums.items.length} альбомов` : ''}.`, updatedAt: snapshotCachedAt, snapshotCachedAt };

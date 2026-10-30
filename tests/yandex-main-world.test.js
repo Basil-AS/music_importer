@@ -105,6 +105,29 @@ test('Yandex source reader confirms favorites, every playlist, order, and empty 
   assert.ok(page.requests.every((request) => request.init.credentials === 'include'));
 });
 
+test('Yandex emits a separately confirmed favorites snapshot before a playlist scan can fail', async () => {
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [{ id: 'liked-1' }] } } };
+    if (parsed.pathname === '/tracks' && init.method === 'POST') return { result: [song('liked-1', 'Favorite')] };
+    if (parsed.pathname === '/users/42/playlists/list') return { status: 400, payload: { error: 'fixture playlist failure' } };
+    throw new Error(`Unexpected Yandex request: ${init.method || 'GET'} ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const partial = page.messages.find((message) => message.type === 'favorites-snapshot')?.payload;
+  assert.ok(partial, JSON.stringify(page.messages));
+  assert.equal(partial.partialScope, 'favorites');
+  assert.equal(partial.completeness.confirmed, false);
+  assert.equal(partial.completeness.favoritesConfirmed, true);
+  assert.equal(partial.completeness.favoritesCount, 1);
+  assert.deepEqual(Array.from(partial.tracks, (track) => [track.id, track.position, track.collectionType]), [['liked-1', 0, 'favorites']]);
+  assert.deepEqual(Array.from(partial.playlists), []);
+  assert.ok(page.messages.some((message) => message.type === 'scan-error'));
+  assert.equal(page.messages.some((message) => message.type === 'library-snapshot'), false);
+});
+
 test('Yandex source reader follows playlist pages and preserves item order', async () => {
   const page = makePage(async ({ url, init }) => {
     const parsed = new URL(url);
