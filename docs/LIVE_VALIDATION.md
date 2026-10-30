@@ -1,5 +1,14 @@
 # Live validation log
 
+## 2026-10-31 — reloaded the unpacked extension in the existing Chrome profile
+
+- Confirmed the installed unpacked extension points to this repository's `chrome-extension/` directory. Reloaded it there and used its extension-hosted app; no new Chrome profile was created.
+- Apple Music has a complete locally stored library snapshot after the current extension reload. The earlier live `inFavorites` omission was not reproduced in this read; the app continues to fail closed if Apple omits that attribute.
+- Yandex returned a complete independently counted liked-track list, then its playlist completeness check rejected a virtual collection because the independent catalog count did not match. The extension-hosted app exposes the confirmed likes as a partial source and does not offer unconfirmed playlists.
+- Zvuk delivered its liked-track pages, but the collection reader still stops before confirming the next playlist-catalog page. The exact cursor/page diagnostics remain a follow-up; response bodies and credentials were not collected.
+- Spotify stayed on the explicit-refresh path and was not freshly read in this pass. No account write or transfer read-back was run. The previously saved one-track Apple → Yandex transfer remains pending and was not resumed.
+- The localhost bridge was found to omit `partialLibraries` from its response even though the service worker returned it. A regression test and forwarder fix are in `feature/forward-partial-library-through-local-bridge`; the extension-hosted app path already displayed the partial source.
+
 ## 2026-10-30 — read-only scan in the user's existing Chrome profile
 
 - Used the user's ordinary Chrome profile only; no separate profile was created. The Music Importer extension UI and signed-in provider tabs were already present. No cookies, access tokens, authorization headers, track names, or playlist names were read or copied.

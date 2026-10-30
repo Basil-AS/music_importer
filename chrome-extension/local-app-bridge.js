@@ -105,6 +105,7 @@
           type: 'all-libraries-response',
           requestId,
           libraries: response?.libraries || {},
+          partialLibraries: response?.partialLibraries || {},
           statuses: response?.statuses || {},
           pending: response?.pending === true,
           error: response?.error || null,
