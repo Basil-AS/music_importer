@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
 const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
+const SPOTIFY_AUTH_REFRESH_STALE_AFTER_MS = 20 * 1000;
 // No complete cheap pulse has been verified for every provider; auto-refresh full snapshots at most twice a day.
 const LIBRARY_AUTO_REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
 let providerStateMutationQueue = Promise.resolve();
@@ -536,15 +537,21 @@ async function requestProviderLibrary(provider, refresh) {
   if (!providerConfig) return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
   let state = await readProviderState();
   let scan = state.scans[provider];
+  const staleAfterMs = provider === 'spotify' && scan?.phase === 'auth-refresh'
+    ? SPOTIFY_AUTH_REFRESH_STALE_AFTER_MS : PROVIDER_SCAN_STALE_AFTER_MS;
   const lastUpdate = Date.parse(scan?.updatedAt || scan?.startedAt || '');
   let lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
-  if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > PROVIDER_SCAN_STALE_AFTER_MS) {
-    const staleMessage = 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.';
+  if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > staleAfterMs) {
+    const staleMessage = provider === 'spotify' && scan.phase === 'auth-refresh'
+      ? 'Spotify не обновил сессию после HTTP 401 за 20 секунд. Войдите в Spotify и повторите сканирование.'
+      : 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.';
     const update = await mutateProviderState((current) => {
       const latest = current.scans[provider];
       const latestAt = Date.parse(latest?.updatedAt || latest?.startedAt || '');
-      if (latest?.status !== 'reading' || !Number.isFinite(latestAt) || Date.now() - latestAt <= PROVIDER_SCAN_STALE_AFTER_MS) return false;
+      const latestStaleAfterMs = provider === 'spotify' && latest?.phase === 'auth-refresh'
+        ? SPOTIFY_AUTH_REFRESH_STALE_AFTER_MS : PROVIDER_SCAN_STALE_AFTER_MS;
+      if (latest?.status !== 'reading' || !Number.isFinite(latestAt) || Date.now() - latestAt <= latestStaleAfterMs) return false;
       current.scans[provider] = { status: 'failed', message: staleMessage, updatedAt: new Date().toISOString() };
       return true;
     });
@@ -1116,7 +1123,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       await mutateProviderState((state) => {
         if (message.type.endsWith(':scan-progress')) {
-          state.scans[provider] = { status: 'reading', message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
+          const phases = new Set(['reading', 'auth-refresh', 'favorites', 'playlists', 'playlist-items', 'albums', 'retry']);
+          const phase = phases.has(String(message.phase || '')) ? String(message.phase) : 'reading';
+          state.scans[provider] = { status: 'reading', phase, message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
         } else if (message.type.endsWith(':scan-error')) {
           state.scans[provider] = { status: 'failed', message: String(message.error || `Не удалось прочитать ${provider}.`).slice(0, 500), updatedAt: new Date().toISOString() };
         } else {

@@ -193,3 +193,7 @@ Spotify позволяет запросить машиночитаемую ко�
 - [mirrorfm/spotify-webplayer-token at `7f0ac21`](https://github.com/mirrorfm/spotify-webplayer-token/tree/7f0ac21eb95c0c592394fdb2529d9f6671b8aef4) and pinned [TOTP secret dictionary source at `4cd9440`](https://github.com/xyloflake/spot-secrets-go/tree/4cd9440671af3a419bad112164a193ea1374e0e1)
 
 Официальные endpoints сверены с документацией; полный inventory получен из официальной OpenAPI спецификации. Практический браузерный read-only просмотр, terminal no-auth контроль и полная пагинация приватной Web Player коллекции выполнены. OAuth flow официального Web API и запись в собственном аккаунте ещё не запускали.
+
+## Live auth-refresh timeout (30.10.2026)
+
+В live-сборе Spotify вернул HTTP 401. Reader ожидает до 8 секунд, появится ли в самой странице новая сессия; если расширение теряет финальную ошибку моста, ранее карточка могла оставаться в ожидании до общего watchdog в 2 минуты. Worker теперь хранит allowlisted фазу и завершает зависшую фазу `auth-refresh` через 20 секунд с просьбой обновить вход, не выводя заголовки или токены. Нужен повторный read-only прогон после загрузки расширения.

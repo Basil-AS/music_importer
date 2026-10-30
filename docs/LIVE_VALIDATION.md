@@ -19,6 +19,12 @@
 - The live Apple scan found 341 library-song rows without an `inFavorites` boolean and correctly refused to guess their favorite state. Apple documents `inFavorites` on library-song attributes and supports `extend` on the library-songs endpoint; the reader now explicitly requests `extend=inFavorites` on every page, including favorite verification reads.
 - Apple reader fixtures pass with that request parameter. This is a reasoned fix candidate, not live confirmation; retry after the updated extension is loaded. The reader still rejects a response if the service omits favorite state.
 
+## 2026-10-30 — Yandex playlist evidence and Spotify auth timeout
+
+- Yandex's playlist completeness failure now reports only which required evidence is absent (`tracks`, `track-count`, `revision`, or catalog count mismatch); it never includes response bodies, account IDs, or credentials. A fixture reproduces a virtual playlist with no revision.
+- Spotify progress now retains a validated scan phase. If the page reports an auth refresh after HTTP 401 but the bridge never delivers a terminal result, the worker ends that scan after 20 seconds with a session-specific instruction instead of waiting for the generic two-minute watchdog. A worker fixture covers this lost-terminal-event path.
+- These code and fixture changes still need live confirmation after the unpacked extension is reloaded. The Yandex reader remains fail-closed until it has enough evidence to prove playlist completeness.
+
 ## 2026-10-30 — responsive, contrast, and stage accessibility pass
 
 - A temporary Chrome profile rendered the local UI with six demo tracks. At CSS viewport widths 320, 375, 390, 820, 821, 900, 960, and 1280 px, document/body widths matched the viewport and no track row exceeded its card. The sidebar stacks before the track grid becomes cramped.
