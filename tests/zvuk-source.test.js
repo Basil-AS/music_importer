@@ -436,6 +436,11 @@ test('Zvuk catalog reports only the HTTP status when a cursor replay fails', asy
   const error = await page.waitForMessage('read-error');
   assert.equal(error.httpStatus, 503);
   assert.equal(error.operation, 'getPaginatedCollectionAll');
+  assert.equal(error.section, 'playlists');
+  assert.equal(error.pageOrdinal, 2);
+  assert.equal(error.cursorPresent, true);
+  assert.equal(error.cursorRepeated, false);
+  assert.equal(Object.hasOwn(error, 'cursor'), false);
   assert.equal(JSON.stringify(error).includes('private provider response'), false);
   assert.equal(page.messages.some((message) => message.type === 'collection-scroll-end'), false);
 });

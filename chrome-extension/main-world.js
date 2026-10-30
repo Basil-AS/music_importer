@@ -355,6 +355,15 @@
     if (!enabled || !location.pathname.startsWith('/collection') || collectionScanStarted || collectionReplayUnavailable) return;
     collectionScanStarted = true;
     stopAutoScroll();
+    const diagnostic = {
+      operation: 'getPaginatedCollectionAll',
+      httpStatus: null,
+      graphqlError: false,
+      section: null,
+      pageOrdinal: null,
+      cursorPresent: false,
+      cursorRepeated: false,
+    };
     try {
       if (await reported !== true) {
         throw Object.assign(new Error('Приложение не подтвердило сохранение страницы каталога Звука.'), { paginationFailed: true });
@@ -374,11 +383,7 @@
       }
 
       const operation = operationFor(url, bodyText);
-      const diagnostic = {
-        operation: operation.name,
-        httpStatus: null,
-        graphqlError: false,
-      };
+      diagnostic.operation = operation.name || diagnostic.operation;
       let page = parseCollectionPage(operation, firstPage, diagnostic);
       if (page.error) throw Object.assign(new Error('Звук вернул неполную пагинацию каталога.'), page.error);
       let pagesRead = 1;
@@ -388,9 +393,15 @@
 
       for (const section of ['playlists', 'releases']) {
         let sectionPage = initialPage;
+        let sectionPagesRead = 1;
         while (section === 'playlists' ? sectionPage.playlistHasMore : sectionPage.releaseHasMore) {
           if (!enabled || !location.pathname.startsWith('/collection')) return;
           const cursor = section === 'playlists' ? sectionPage.playlistCursor : sectionPage.releaseCursor;
+          diagnostic.section = section;
+          diagnostic.pageOrdinal = sectionPagesRead + 1;
+          diagnostic.cursorPresent = Boolean(cursor);
+          diagnostic.cursorRepeated = Boolean(cursor && seenCursors[section].has(cursor));
+          lastCollectionDiagnostic = { ...diagnostic };
           if (!cursor || seenCursors[section].has(cursor)) {
             throw Object.assign(new Error('Звук повторил или не вернул cursor каталога.'), { invalidPagination: true });
           }
@@ -419,6 +430,7 @@
             throw Object.assign(new Error('Приложение не подтвердило сохранение страницы каталога Звука.'), { paginationFailed: true });
           }
           pagesRead += 1;
+          sectionPagesRead += 1;
           if (!await postWithAck('scan-progress', {
             phase: 'playlists', message: `Каталог Звука: сохранено страниц ${pagesRead}.`,
           })) throw Object.assign(new Error('Приложение не подтвердило прогресс каталога Звука.'), { paginationFailed: true });
@@ -438,6 +450,10 @@
         invalidPagination: error?.invalidPagination === true,
         invalidShape: error?.invalidShape === true,
         paginationFailed: error?.paginationFailed === true,
+        section: ['playlists', 'releases'].includes(diagnostic.section) ? diagnostic.section : null,
+        pageOrdinal: Number.isInteger(diagnostic.pageOrdinal) ? diagnostic.pageOrdinal : null,
+        cursorPresent: diagnostic.cursorPresent === true,
+        cursorRepeated: diagnostic.cursorRepeated === true,
       };
       lastCollectionDiagnostic = failure;
       if (enabled) post('read-error', failure);
