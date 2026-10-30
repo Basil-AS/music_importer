@@ -117,6 +117,35 @@ test('Zvuk favorites write is idempotent and confirmed by cursor read-back', asy
   });
 });
 
+test('Zvuk stops before playlist writes when favorite read-back is incomplete', async () => {
+  let playlistWrites = 0;
+  const page = makePage((request) => {
+    const { operationName } = graphRequest(request);
+    if (operationName === 'getPaginatedCollection') {
+      return { payload: { data: { paginatedCollection: { tracks: { items: [], page: { endCursor: null } } } } } };
+    }
+    if (operationName === 'AddItemsToCollection') return { payload: { data: { collection: { addItems: true } } } };
+    if (['createPlaylist', 'addItems'].includes(operationName)) playlistWrites += 1;
+    throw new Error(`Unexpected request after failed favorite verification: ${operationName}`);
+  });
+
+  const response = await page.command('execute-transfer', { plan: {
+    type: 'music-transfer-plan', target: { provider: 'zvuk', collectionType: 'library' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-list', sourceName: 'Road', targetName: 'Road' }],
+    operations: [
+      { operation: 'add_to_favorites', target: { provider: 'zvuk', providerId: 'like-target' } },
+      { operation: 'add_to_playlist', source: { collectionId: 'source-list', collectionName: 'Road', position: 0 }, target: { provider: 'zvuk', providerId: 'playlist-target' } },
+    ],
+  } });
+
+  assert.equal(response.ok, false);
+  assert.match(response.error, /Обратная сверка лайков Звука подтвердила 0 из 1/);
+  assert.equal(response.report.status, 'partial_failure');
+  assert.deepEqual(JSON.parse(JSON.stringify(response.report.playlists)), []);
+  assert.equal(playlistWrites, 0);
+});
+
 test('Zvuk favorite verification follows cursor pages beyond the former fixed page cap', async () => {
   const pageCount = 10_001;
   let added = false;

@@ -347,6 +347,31 @@ test('Apple target writer adds favorites and ordered playlist items, then verifi
   assert.ok(!JSON.stringify(page.messages).includes(page.token));
 });
 
+test('Apple stops before playlist writes when favorite read-back is incomplete', async () => {
+  const page = makePage({
+    'GET /v1/me/library/songs?limit=100&extend=inFavorites': { meta: { total: 0 }, next: null, data: [] },
+    'POST /v1/me/favorites?ids%5Bsongs%5D=catalog-song-a': { status: 202, payload: {} },
+  }, undefined, true, 0.001);
+  const result = await page.command('execute-transfer', {
+    plan: {
+      type: 'music-transfer-plan',
+      target: { provider: 'apple-music', collectionType: 'library' },
+      completeness: { source: [{ confirmed: true }] },
+      collectionMappings: [{ sourceId: 'source-playlist', sourceName: 'Road', targetName: 'Road' }],
+      operations: [
+        { operation: 'add_to_favorites', target: { providerId: 'catalog-song-a' } },
+        { operation: 'add_to_playlist', source: { collectionId: 'source-playlist', position: 0 }, target: { providerId: 'catalog-song-b' } },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /обратная сверка подтвердила 0 из 1 лайков/);
+  assert.equal(result.report.status, 'partial_failure');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.report.playlists)), []);
+  assert.equal(page.requests.some((request) => request.url.includes('/library/playlists')), false);
+});
+
 test('Apple resume validates the existing playlist prefix and writes only the missing suffix', async () => {
   let playlistIds = ['catalog-song-a'];
   const page = makePage({
