@@ -35,7 +35,7 @@ button {
   cursor:pointer
 }
 
-button:focus-visible,select:focus-visible,a:focus-visible {
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible {
   outline:2px solid var(--green);
   outline-offset:3px
 }
@@ -542,7 +542,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 }
 
 .track.skipped {
-  opacity:.38
+  border-left:3px solid var(--amber)
 }
 
 .review-tools {
