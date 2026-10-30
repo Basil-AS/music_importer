@@ -105,6 +105,22 @@ test('Yandex source reader confirms favorites, every playlist, order, and empty 
   assert.ok(page.requests.every((request) => request.init.credentials === 'include'));
 });
 
+test('Yandex source reader refuses an unsafe favorites revision before saving a partial snapshot', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') {
+      return { result: { library: { revision: Number.MAX_SAFE_INTEGER + 1, tracks: [] } } };
+    }
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /список лайков/i.test(message.error)));
+  assert.equal(page.messages.some((message) => message.type === 'favorites-snapshot'), false);
+  assert.equal(page.messages.some((message) => message.type === 'library-snapshot'), false);
+});
+
 test('Yandex emits a separately confirmed favorites snapshot before a playlist scan can fail', async () => {
   const page = makePage(async ({ url, init }) => {
     const parsed = new URL(url);
@@ -256,7 +272,22 @@ test('Yandex source reader rejects playlist kind mismatches instead of claiming 
   });
 
   await page.dispatch('start-library-scan');
-  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /kinds не совпали/i.test(message.error)));
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /kinds не совпали: количество записей различается/i.test(message.error)));
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Yandex reports same-count playlist kind membership mismatches separately', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 1, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [{ uid: 42, kind: 10, title: 'Road', trackCount: 0 }] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [20] };
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /состав значений различается/i.test(message.error)));
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
 });
 

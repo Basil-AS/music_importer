@@ -206,14 +206,17 @@
     const result = await libraryRequest(`/users/${encodeURIComponent(uid)}/likes/tracks?if-modified-since-revision=0`);
     const library = result?.library || result;
     const refs = asArray(library);
-    if (!refs || library?.revision === null || library?.revision === undefined || !Number.isInteger(Number(library.revision))) throw new Error('Не удалось подтвердить список лайков Яндекс Музыки.');
+    const revision = Number(library?.revision);
+    if (!refs || library?.revision === null || library?.revision === undefined || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error('Не удалось подтвердить список лайков Яндекс Музыки.');
+    }
     const ids = refs.map(trackId);
     if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new Error('В ответе лайков Яндекс Музыки есть пустые или повторные ID.');
     const rows = await hydrate(ids, 'Лайки');
     const tracks = rows.map((row, index) => normalizeLibraryTrack(row, index));
     if (tracks.length !== refs.length) throw new Error('Карточки лайков Яндекс Музыки неполны.');
     const metadataIncompleteCount = tracks.filter((track) => !track.metadataComplete).length;
-    return { tracks, revision: Number(library.revision), count: refs.length, metadataIncompleteCount };
+    return { tracks, revision, count: refs.length, metadataIncompleteCount };
   }
 
   function albumRefId(value) {
@@ -725,9 +728,14 @@
       const listedSorted = listedKinds.slice().sort();
       if (expectedKinds.some((kind) => !kind) || listedKinds.some((kind) => !kind)
         || new Set(expectedKinds).size !== expectedKinds.length
-        || expectedKinds.length !== listedKinds.length
-        || expectedSorted.some((kind, index) => kind !== listedSorted[index])) {
-        throw new Error('Список Яндекс Музыки и независимый список playlist kinds не совпали.');
+        || new Set(listedKinds).size !== listedKinds.length) {
+        throw new Error('Список плейлистов Яндекс Музыки и независимый список kinds содержат пустые или повторные значения.');
+      }
+      if (expectedKinds.length !== listedKinds.length) {
+        throw new Error('Список плейлистов Яндекс Музыки и независимый список kinds не совпали: количество записей различается.');
+      }
+      if (expectedSorted.some((kind, index) => kind !== listedSorted[index])) {
+        throw new Error('Список плейлистов Яндекс Музыки и независимый список kinds не совпали: состав значений различается.');
       }
       const unique = new Set();
       const playlists = [];

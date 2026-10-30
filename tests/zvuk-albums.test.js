@@ -10,7 +10,13 @@ function makeSource(path, respond) {
   const window = {
     location,
     addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(message) { messages.push(message); },
+    postMessage(message) {
+      messages.push(message);
+      if (message.captureAckId) queueMicrotask(() => listeners.get('message')?.({
+        source: window, origin: location.origin,
+        data: { source: 'music-importer-zvuk', type: 'capture-ack', captureAckId: message.captureAckId, ok: true },
+      }));
+    },
     scrollTo() {},
     fetch: async (_input, init = {}) => {
       const payload = respond(JSON.parse(init.body || '{}'));
@@ -35,6 +41,12 @@ function makeSource(path, respond) {
       await response.clone().json();
       await new Promise((resolve) => setImmediate(resolve));
     },
+    async waitForMessage(type, attempts = 100) {
+      for (let attempt = 0; attempt < attempts && !messages.some((message) => message.type === type); attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return messages.find((message) => message.type === type) || null;
+    },
   };
 }
 
@@ -48,7 +60,7 @@ test('Zvuk source reader reports saved releases separately from playlists and fa
     playlists: { items: [{ id: 'p1', title: 'Road', trackCount: 1 }], page: { endCursor: 'next' } },
     releases: { items: [releaseCard('r1'), releaseCard('r2', { tracks: undefined, trackCount: 9 })], page: { endCursor: 'next' } },
   } } }));
-  await page.request('getPaginatedCollectionAll', { limit: 15, withReleases: true });
+  await page.request('getPaginatedCollectionAll', { limit: 15, withReleases: true, after: null });
   const releasePage = page.messages.find((message) => message.type === 'release-list-page');
   assert.equal(releasePage.hasMore, true);
   assert.deepEqual(Array.from(releasePage.releases, (r) => [r.id, r.title, r.trackCount, r.releaseDate]), [
@@ -66,8 +78,8 @@ test('Zvuk source reader paginates release-only pages and fails closed on a miss
     c2: { items: [releaseCard('r2')], page: { hasNextPage: false, endCursor: null } },
   };
   const page = makeSource('/collection', ({ variables }) => ({ data: { paginatedCollectionAll: { releases: pages[variables.after || 'first'] } } }));
-  await page.request('getPaginatedCollectionAll', { after: '' });
-  await page.request('getPaginatedCollectionAll', { after: 'c2' });
+  await page.request('getPaginatedCollectionAll', { after: '', withReleases: true });
+  await page.waitForMessage('collection-scroll-end');
   const releasePages = page.messages.filter((message) => message.type === 'release-list-page');
   assert.deepEqual(releasePages.map((message) => message.hasMore), [true, false]);
 

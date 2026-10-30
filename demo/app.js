@@ -229,6 +229,7 @@
     $('#targetProvider').disabled = searchBusy;
     $('#storefront').disabled = searchBusy;
     $('#loadBtn').disabled = searchBusy;
+    $('#uploadFileBtn').disabled = searchBusy;
     $('#fileInput').disabled = searchBusy;
     $('#clearMatchCache').disabled = searchBusy;
     $('#cancelSearchBtn').hidden = !state.searching;
@@ -1709,6 +1710,9 @@
   }));
 
   $('#loadBtn').addEventListener('click', () => loadTracks(demoTracks, 'Демо-данные', { provider: 'file' }));
+  $('#uploadFileBtn').addEventListener('click', () => {
+    if (!$('#uploadFileBtn').disabled) $('#fileInput').click();
+  });
   $('#fileInput').addEventListener('change', async (event) => {
     const file = event.target.files[0];
     if (!file) return;

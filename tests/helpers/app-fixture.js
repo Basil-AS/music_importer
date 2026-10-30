@@ -9,7 +9,7 @@ function makeElement(selector, registry) {
   const classes = new Set();
   const attributes = new Map();
   const element = {
-    selector, dataset: {}, style: {}, hidden: false, disabled: false, value: '', textContent: '', innerHTML: '', checked: false, open: false,
+    selector, dataset: {}, style: {}, hidden: false, disabled: false, value: '', textContent: '', innerHTML: '', checked: false, open: false, clickCount: 0,
     options: [],
     classList: {
       add: (...names) => names.forEach((name) => classes.add(name)),
@@ -20,6 +20,7 @@ function makeElement(selector, registry) {
     get selectedOptions() { return element.options.filter((option) => option.value === element.value); },
     addEventListener(type, handler) { (listeners[type] ||= []).push(handler); },
     removeEventListener() {},
+    click() { element.clickCount += 1; },
     setAttribute(name, value) { attributes.set(name, String(value)); },
     removeAttribute(name) { attributes.delete(name); },
     getAttribute(name) { return attributes.get(name) ?? null; },

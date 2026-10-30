@@ -430,6 +430,17 @@ test('Zvuk pagination stall is not mislabeled as a rejected HTTP response', asyn
   assert.ok(!storage[ZVUK_KEY].error.includes('HTTP 200'));
 });
 
+test('Zvuk catalog scan accepts page progress from the collection tab', async () => {
+  const storage = { [ZVUK_KEY]: {
+    ...makeZvukState(), captureEnabled: true,
+    scan: { active: true, phase: 'playlists', tabId: 9 },
+  } };
+  const worker = bootWorker(storage, [{ id: 9, url: 'https://zvuk.com/collection', status: 'complete' }]);
+  const response = await worker.pageMessage({ type: 'zvuk:scan-progress', message: 'Каталог Звука: сохранено страниц 2.' }, 9);
+  assert.equal(response.ok, true);
+  assert.equal(storage[ZVUK_KEY].scan.message, 'Каталог Звука: сохранено страниц 2.');
+});
+
 test('one-click library scan starts readers in every open provider tab', async () => {
   const tabs = [
     { id: 1, url: 'https://zvuk.com/favorites' },
@@ -809,6 +820,18 @@ test('Yandex partial favorites are rejected when the independent count or IDs do
   await worker.pageMessage({ type: 'yandex:favorites-snapshot', payload }, 77);
   const duplicateResponse = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
   assert.equal(duplicateResponse.partialLibraries['yandex-music'], undefined);
+});
+
+test('Yandex partial favorites are rejected without a safe nonnegative revision', async () => {
+  for (const revision of [undefined, '7', -1, Number.MAX_SAFE_INTEGER + 1]) {
+    const worker = bootWorker({}, [{ id: 78, url: 'https://music.yandex.ru/home', status: 'complete' }]);
+    const payload = makeYandexFavoritesPartial();
+    if (revision === undefined) delete payload.completeness.favoritesRevision;
+    else payload.completeness.favoritesRevision = revision;
+    await worker.pageMessage({ type: 'yandex:favorites-snapshot', payload }, 78);
+    const response = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
+    assert.equal(response.partialLibraries['yandex-music'], undefined, `revision ${String(revision)} must be rejected`);
+  }
 });
 
 test('a provider tab-query failure does not discard statuses for the other services', async () => {
