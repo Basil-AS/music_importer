@@ -142,9 +142,12 @@
 
   function setStep(step) {
     $$('.step').forEach((element, index) => {
-      element.classList.toggle('active', index + 1 === step);
+      const active = index + 1 === step;
+      element.classList.toggle('active', active);
       element.classList.toggle('done', index + 1 < step);
       element.querySelector('.step-num').textContent = index + 1 < step ? '✓' : String(index + 1);
+      if (active) element.setAttribute('aria-current', 'step');
+      else element.removeAttribute('aria-current');
     });
   }
 
