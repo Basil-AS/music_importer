@@ -19,12 +19,64 @@
   let lastQueryAt = 0;
   let queryStartQueue = Promise.resolve();
   let activeCommandId = '';
+  const scanProgressWaiters = new Map();
+  let scanProgressSequence = 0;
+  let scanTerminalSequence = 0;
   const checkpointWaiters = new Map();
   let checkpointSequence = 0;
 
   function post(type, detail = {}) {
     window.postMessage({ source: marker, type, ...detail }, location.origin);
   }
+
+  function scanProgress(detail, timeoutMs = 15000) {
+    const progressAckId = `scan-progress-${Date.now()}-${++scanProgressSequence}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        scanProgressWaiters.delete(progressAckId);
+        reject(new Error('Spotify не подтвердил обновление статуса сканирования. Перезагрузите страницу Spotify и повторите.'));
+      }, timeoutMs);
+      scanProgressWaiters.set(progressAckId, (ok) => {
+        clearTimeout(timer);
+        scanProgressWaiters.delete(progressAckId);
+        if (ok) resolve(true);
+        else reject(new Error('Spotify не смог передать статус сканирования расширению. Обновите вкладку сервиса и повторите.'));
+      });
+      post('scan-progress', { ...detail, progressAckId });
+    });
+  }
+
+  function providerProgress(phase, message) {
+    if (activeCommandId) {
+      transferProgress(message);
+      return Promise.resolve(true);
+    }
+    return scanProgress({ phase, message });
+  }
+
+  function scanTerminal(type, detail, timeoutMs = 15000) {
+    const terminalAckId = `scan-terminal-${Date.now()}-${++scanTerminalSequence}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        scanProgressWaiters.delete(terminalAckId);
+        reject(new Error('Spotify: приложение не подтвердило получение результата сканирования.'));
+      }, timeoutMs);
+      scanProgressWaiters.set(terminalAckId, (ok) => {
+        clearTimeout(timer);
+        scanProgressWaiters.delete(terminalAckId);
+        if (ok) resolve(true);
+        else reject(new Error('Spotify: расширение не смогло сохранить результат сканирования.'));
+      });
+      post(type, { ...detail, terminalAckId });
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.origin !== location.origin || event.data?.source !== marker
+      || !['scan-progress-ack', 'scan-terminal-ack'].includes(event.data?.type)) return;
+    const ackId = event.data.type === 'scan-progress-ack' ? event.data.progressAckId : event.data.terminalAckId;
+    scanProgressWaiters.get(String(ackId || ''))?.(event.data.ok === true);
+  });
 
   function scanPageCoordinates(variables) {
     const page = {};
@@ -208,7 +260,7 @@
         ? `Spotify ограничил запросы; ждём ещё ${seconds} с (${operationName}).`
         : `Spotify продолжит запрос (${operationName}).`;
       if (activeCommandId) transferProgress(message);
-      else post('scan-progress', { phase: 'rate-limit', message });
+      else await providerProgress('rate-limit', message);
     }
   }
 
@@ -262,7 +314,7 @@
         sessionRefreshes += 1;
         const message = 'Spotify отклонил запрос. Проверяем, обновилась ли сессия страницы…';
         if (activeCommandId) transferProgress(message);
-        else post('scan-progress', { phase: 'auth-refresh', message });
+        else await providerProgress('auth-refresh', message);
         for (let attempt = 0; attempt < 32 && sessionHeaderGeneration <= headerGeneration; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
@@ -336,7 +388,7 @@
     let lastPageData = null;
     let lastOffset = 0;
     for (let offset = 0; total === null || offset < total;) {
-      post('scan-progress', { phase: 'favorites', message: `Читаем Spotify Liked Songs: страница с ${offset + 1}…` });
+      await providerProgress('favorites', `Читаем Spotify Liked Songs: страница с ${offset + 1}…`);
       const data = await query('fetchLibraryTracks', { offset, limit: pageSize });
       lastPageData = data;
       lastOffset = offset;
@@ -347,7 +399,7 @@
       if (!Number.isInteger(pageOffset) || pageOffset !== offset) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'unexpected_offset', 'Spotify вернул неверное смещение страницы любимых треков.', data);
       total = library.totalCount;
       tracksData.push(...library.items);
-      post('scan-progress', { phase: 'favorites', message: `Собираем Spotify Liked Songs: ${Math.min(tracksData.length, total)} из ${total}.` });
+      await providerProgress('favorites', `Собираем Spotify Liked Songs: ${Math.min(tracksData.length, total)} из ${total}.`);
       if (library.items.length === 0 && offset < total) failScanShape('fetchLibraryTracks', { offset, limit: pageSize }, 'empty_page', 'Spotify вернул пустую страницу до конца библиотеки.', data);
       offset = pageOffset + library.items.length;
     }
@@ -365,7 +417,7 @@
     let lastPageData = null;
     let lastOffset = 0;
     for (let offset = 0; total === null || offset < total;) {
-      post('scan-progress', { phase: 'playlists', message: `Читаем каталог плейлистов Spotify: страница с ${offset + 1}…` });
+      await providerProgress('playlists', `Читаем каталог плейлистов Spotify: страница с ${offset + 1}…`);
       const data = await query('libraryV3', {
         filters: ['Playlists'], order: null, textFilter: '',
         features: ['LIKED_SONGS', 'YOUR_EPISODES_V2', 'PRERELEASES', 'EVENTS'],
@@ -385,7 +437,7 @@
         const data = wrapper?.data || {};
         playlists.push({ id: uri, title: String(data.name || ''), trackCount: Number.isInteger(data.totalLength) ? data.totalLength : null });
       }
-      post('scan-progress', { phase: 'playlists', message: `Найдено плейлистов Spotify: ${playlists.length} из ${total}.` });
+      await providerProgress('playlists', `Найдено плейлистов Spotify: ${playlists.length} из ${total}.`);
       if (library.items.length === 0 && offset < total) failScanShape('libraryV3', { offset, limit: 50 }, 'empty_page', 'Spotify вернул пустую страницу каталога до конца.', data);
       offset += library.items.length;
     }
@@ -401,7 +453,7 @@
     let lastPageData = null;
     let lastOffset = 0;
     for (let offset = 0; total === null || offset < total;) {
-      post('scan-progress', { phase: 'playlist-items', message: `Запрашиваем треки плейлиста «${playlist.title}» с позиции ${offset + 1}…` });
+      await providerProgress('playlist-items', `Запрашиваем треки плейлиста «${playlist.title}» с позиции ${offset + 1}…`);
       const data = await query('fetchPlaylistContents', { uri: playlist.id, offset, limit: pageSize, includeEpisodeContentRatingsV2: true });
       lastPageData = data;
       lastOffset = offset;
@@ -413,7 +465,7 @@
       if (pageOffset !== offset) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'unexpected_offset', 'Spotify вернул неверное смещение страницы плейлиста.', data);
       rows.push(...page.items);
       offset = pageOffset + page.items.length;
-      post('scan-progress', { phase: 'playlist-items', message: `Читаем «${playlist.title}»: ${Math.min(rows.length, total)} из ${total}.` });
+      await providerProgress('playlist-items', `Читаем «${playlist.title}»: ${Math.min(rows.length, total)} из ${total}.`);
       if (page.items.length === 0 && offset < total) failScanShape('fetchPlaylistContents', { offset, limit: pageSize }, 'empty_page', 'Spotify вернул пустую страницу плейлиста.', data);
     }
     const tracks = rows.map((row) => trackFrom(row?.itemV2?.data)).filter(Boolean).map((track, position) => ({ ...track, position }));
@@ -618,7 +670,7 @@
         sessionRefreshes += 1;
         const message = 'Spotify отклонил запрос. Проверяем, обновилась ли сессия страницы…';
         if (activeCommandId) transferProgress(message);
-        else post('scan-progress', { phase: 'auth-refresh', message });
+        else await providerProgress('auth-refresh', message);
         for (let attempt = 0; attempt < 32 && sessionHeaderGeneration <= headerGeneration; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
@@ -667,7 +719,9 @@
     const albums = [];
     let total = null;
     for (let offset = 0; total === null || offset < total;) {
-      post('scan-progress', { phase: 'albums', message: `Читаем сохранённые альбомы Spotify: страница с ${offset + 1}…` });
+      const progressMessage = `Читаем сохранённые альбомы Spotify: страница с ${offset + 1}…`;
+      if (activeCommandId) transferProgress(progressMessage);
+      else await providerProgress('albums', progressMessage);
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset), market: 'from_token' });
       const page = await restRequest('GET', `https://api.spotify.com/v1/me/albums?${params}`, 'savedAlbums');
       if (!Array.isArray(page?.items) || !Number.isInteger(page.total)) throw Object.assign(new Error('Неожиданный ответ Spotify с сохранёнными альбомами.'), { code: 'invalid_page_shape' });
@@ -679,7 +733,9 @@
         if (!album) throw Object.assign(new Error('Spotify вернул альбом без ID.'), { code: 'invalid_item_shape' });
         albums.push(album);
       }
-      post('scan-progress', { phase: 'albums', message: `Собираем сохранённые альбомы Spotify: ${Math.min(albums.length, total)} из ${total}.` });
+      const progressSummary = `Собираем сохранённые альбомы Spotify: ${Math.min(albums.length, total)} из ${total}.`;
+      if (activeCommandId) transferProgress(progressSummary);
+      else await providerProgress('albums', progressSummary);
       if (page.items.length === 0 && offset < total) throw Object.assign(new Error('Spotify вернул пустую страницу альбомов до конца библиотеки.'), { code: 'empty_page' });
       offset += page.items.length;
     }
@@ -924,7 +980,7 @@
       const [favorites, playlistCatalog] = await Promise.all([readFavorites(), readPlaylists()]);
       const playlists = [];
       for (const [index, playlist] of playlistCatalog.entries()) {
-        post('scan-progress', { phase: 'playlist-items', message: `Плейлист ${index + 1} из ${playlistCatalog.length}: ${playlist.title}.` });
+        await providerProgress('playlist-items', `Плейлист ${index + 1} из ${playlistCatalog.length}: ${playlist.title}.`);
         playlists.push(await readPlaylist(playlist));
       }
       let albums = null;
@@ -967,15 +1023,18 @@
       return;
     }
     if (event.data.type !== 'start-library-scan') return;
+    let payload;
     try {
-      post('scan-progress', { phase: 'reading', message: 'Читаем лайки и плейлисты Spotify…' });
-      const payload = await scanLibrary();
-      post('library-snapshot', { payload });
+      await scanProgress({ phase: 'reading', message: 'Читаем лайки и плейлисты Spotify…' });
+      payload = await scanLibrary();
     } catch (error) {
-      post('scan-error', {
+      try { await scanTerminal('scan-error', {
         error: [error instanceof Error ? error.message : 'Не удалось прочитать библиотеку Spotify.', scanDiagnosticSummary(lastScanDiagnostic)].filter(Boolean).join(' '),
         diagnostic: lastScanDiagnostic,
-      });
+      }); } catch { /* The extension context reloads itself if terminal delivery is unavailable. */ }
+      return;
     }
+    try { await scanTerminal('library-snapshot', { payload }); }
+    catch { /* The worker may have stored the snapshot before its acknowledgment was delayed or lost. */ }
   });
 })();

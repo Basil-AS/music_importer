@@ -807,6 +807,22 @@ test('failed Yandex playlist discovery still exposes its independently confirmed
   assert.equal(completeResponse.libraries['yandex-music'].completeness.confirmed, true);
 });
 
+test('Spotify scan progress is acknowledged only after it is stored without the bridge receipt ID', async () => {
+  const worker = bootWorker({}, [{ id: 79, url: 'https://open.spotify.com/collection/tracks', status: 'complete' }]);
+  const response = await worker.pageMessage({
+    type: 'spotify:scan-progress',
+    phase: 'playlists',
+    message: 'Reading Spotify playlists.',
+    progressAckId: 'scan-progress-private-receipt',
+  }, 79);
+
+  assert.equal(response.ok, true);
+  const libraries = await worker.call({ type: 'music-importer:get-all-libraries', refresh: false });
+  assert.equal(libraries.statuses.spotify.status, 'scanning');
+  assert.equal(libraries.statuses.spotify.message, 'Reading Spotify playlists.');
+  assert.ok(!JSON.stringify(libraries).includes('scan-progress-private-receipt'));
+});
+
 test('Yandex partial favorites are rejected when the independent count or IDs do not match', async () => {
   const worker = bootWorker({}, [{ id: 77, url: 'https://music.yandex.ru/home', status: 'complete' }]);
   const payload = makeYandexFavoritesPartial();

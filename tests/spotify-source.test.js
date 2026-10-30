@@ -6,16 +6,40 @@ const vm = require('node:vm');
 const origin = 'https://open.spotify.com';
 const endpoint = 'https://api-partner.spotify.com/pathfinder/v2/query';
 
-function makePage(respond, timerScale = 1, scriptUrls = []) {
+function makePage(respond, timerScale = 1, scriptUrls = [], options = {}) {
   const listeners = new Map();
   const messages = [];
   const requests = [];
   const location = { origin, href: `${origin}/collection/tracks` };
   const document = { querySelectorAll: () => scriptUrls.map((src) => ({ src })) };
+  const dispatchMessage = (data) => {
+    return Promise.all((listeners.get('message') || []).map((listener) => listener({ source: window, origin, data })));
+  };
   const window = {
     location,
-    addEventListener(name, callback) { listeners.set(name, callback); },
-    postMessage(message) { messages.push(message); },
+    addEventListener(name, callback) { listeners.set(name, [...(listeners.get(name) || []), callback]); },
+    postMessage(message) {
+      messages.push(message);
+      if (message.type === 'scan-progress' && message.progressAckId) setImmediate(() => {
+        dispatchMessage({
+          source: 'music-importer-spotify',
+          type: 'scan-progress-ack',
+          progressAckId: message.progressAckId,
+          ok: options.rejectScanProgressAck !== true,
+        });
+      });
+      if (['library-snapshot', 'scan-error'].includes(message.type) && message.terminalAckId) setImmediate(() => {
+        const acknowledge = () => dispatchMessage({
+          source: 'music-importer-spotify',
+          type: 'scan-terminal-ack',
+          terminalAckId: message.terminalAckId,
+          ok: options.rejectTerminalAckType !== message.type,
+        });
+        if (message.type === 'library-snapshot' && options.delaySnapshotAckMs) {
+          setTimeout(acknowledge, options.delaySnapshotAckMs * timerScale);
+        } else acknowledge();
+      });
+    },
     async fetch(url, init = {}) {
       const request = { url: String(url), init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null, startedAt: Date.now() };
       requests.push(request);
@@ -53,10 +77,7 @@ function makePage(respond, timerScale = 1, scriptUrls = []) {
         headers: { authorization: 'Bearer fixture-secret', 'client-token': 'fixture-client-secret' },
         body: JSON.stringify({ operationName: 'initialPageRequest', extensions: { persistedQuery: { sha256Hash: 'a'.repeat(64) } } }),
       });
-      await listeners.get('message')({
-        source: window, origin,
-        data: { source: 'music-importer-spotify', type: 'start-library-scan' },
-      });
+      await dispatchMessage({ source: 'music-importer-spotify', type: 'start-library-scan' });
     },
     refreshSession(headers) {
       return window.fetch(endpoint, {
@@ -338,4 +359,45 @@ test('Spotify source reader reports the playlist phase and fails a stalled API r
   assert.ok(page.messages.some((message) => message.type === 'scan-progress' && /каталог плейлистов/i.test(message.message)));
   assert.ok(page.messages.some((message) => message.type === 'scan-error' && /не ответил за 45 с/i.test(message.error)));
   assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Spotify source reader stops with a clear error when the extension does not confirm progress delivery', async () => {
+  const page = makePage(({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 1, [], { rejectScanProgressAck: true });
+
+  await page.startScan();
+  assert.ok(page.messages.some((message) => message.type === 'scan-error'
+    && /не смог передать статус сканирования расширению/i.test(message.error)));
+  assert.ok(!page.messages.some((message) => message.type === 'library-snapshot'));
+});
+
+test('Spotify source reader does not replace a completed snapshot after a rejected terminal acknowledgment', async () => {
+  const page = makePage(({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    if (payload?.operationName === 'savedAlbums') return { status: 200, payload: { items: [], total: 0 } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 0.001, [], { rejectTerminalAckType: 'library-snapshot' });
+
+  await page.startScan();
+  assert.ok(page.messages.some((message) => message.type === 'library-snapshot' && message.terminalAckId));
+  assert.ok(!page.messages.some((message) => message.type === 'scan-error'));
+});
+
+test('Spotify source reader does not overwrite a snapshot when its acknowledgment arrives late', async () => {
+  const page = makePage(({ payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    if (payload?.operationName === 'savedAlbums') return { status: 200, payload: { items: [], total: 0 } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName}`);
+  }, 0.001, [], { delaySnapshotAckMs: 30000 });
+
+  await page.startScan();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(page.messages.some((message) => message.type === 'library-snapshot'));
+  assert.ok(!page.messages.some((message) => message.type === 'scan-error'));
 });

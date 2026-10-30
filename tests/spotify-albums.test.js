@@ -27,6 +27,16 @@ function makePage(respond) {
           source: 'music-importer-spotify', type: 'transfer-progress-ack', checkpointId: data.progress.checkpointId, ok: page.rejectCheckpoints !== true,
         } });
       });
+      if (data.type === 'scan-progress' && data.progressAckId) queueMicrotask(() => {
+        void dispatch({ source: window, origin, data: {
+          source: 'music-importer-spotify', type: 'scan-progress-ack', progressAckId: data.progressAckId, ok: true,
+        } });
+      });
+      if (['library-snapshot', 'scan-error'].includes(data.type) && data.terminalAckId) queueMicrotask(() => {
+        void dispatch({ source: window, origin, data: {
+          source: 'music-importer-spotify', type: 'scan-terminal-ack', terminalAckId: data.terminalAckId, ok: true,
+        } });
+      });
     },
     fetch: async (url, init = {}) => {
       const request = { url: String(url), method: init.method || 'GET', init, payload: typeof init.body === 'string' ? JSON.parse(init.body) : null };
