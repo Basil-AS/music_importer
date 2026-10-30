@@ -1,5 +1,12 @@
 # Live validation log
 
+## 2026-10-30 — visual layout check
+
+- The demo UI was rendered in a temporary headless Chrome profile in light and dark desktop modes, then measured at actual 320 px and 390 px CSS viewports through the Chrome DevTools Protocol.
+- At both narrow widths, `documentElement.scrollWidth` and `body.scrollWidth` matched the viewport and no element extended outside it. A 390 × 844 screenshot was visually inspected; source cards stack, the notice wraps, and the theme control stays visible.
+- This verifies layout only. It did not load an extension context or read provider accounts.
+
+
 ## 2026-10-30 — provider error isolation regression check
 
 - A failed Chrome tab query for one provider now yields that provider's own `failed` status while the response still contains statuses for the other three. A fault-injection fixture verifies the failure is isolated and does not reject the aggregate scan response.
