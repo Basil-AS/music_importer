@@ -1,6 +1,6 @@
 (() => {
   const marker = 'music-importer-yandex';
-  const accepted = new Set(['scan-progress', 'library-snapshot', 'scan-error', 'command-response', 'transfer-progress']);
+  const accepted = new Set(['scan-progress', 'favorites-snapshot', 'library-snapshot', 'scan-error', 'command-response', 'transfer-progress']);
   let reloadScheduled = false;
 
   function scheduleReloadAfterInvalidation() {

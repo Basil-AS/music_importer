@@ -10,7 +10,7 @@
     { title: 'Плакала', artist: 'KAZKA', album: '' },
   ];
   const trackPageSize = 50;
-  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, libraryStatuses: {}, sourceCollectionScope: 'all', collectionType: 'library', tracks: [], albums: [], albumsSkipped: false, loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
+  const state = { source: '', sourceProvider: '', targetProvider: '', sourceSnapshot: null, librarySnapshots: {}, partialLibraries: {}, libraryStatuses: {}, sourceCollectionScope: 'all', collectionType: 'library', tracks: [], albums: [], albumsSkipped: false, loaded: false, report: null, searching: false, transferInProgress: false, extensionAvailable: false, unresolvedTransferJob: null, pendingLoginProviders: new Set(), openingProviderTabs: new Set() };
   const extensionApp = location.protocol === 'chrome-extension:' && typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   const extensionAppPort = extensionApp ? chrome.runtime.connect({ name: 'music-importer-app' }) : null;
   let trackPage = 0;
@@ -78,8 +78,17 @@
     const count = $('[aria-labelledby="source-heading"] .count');
     if (!count) return;
     count.textContent = state.extensionAvailable
-      ? `${Object.keys(state.librarySnapshots).length} из ${$$('.source').length}`
+      ? `${new Set([...Object.keys(state.librarySnapshots), ...Object.keys(state.partialLibraries)]).size} из ${$$('.source').length}`
       : 'Подключите расширение';
+  }
+
+  function sourceSnapshotForProvider(provider) {
+    return state.librarySnapshots[provider] || state.partialLibraries[provider] || null;
+  }
+
+  function applyLibraryResponse(response) {
+    state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+    state.partialLibraries = response.partialLibraries || {};
   }
 
   function checkLocalExtension() {
@@ -170,7 +179,8 @@
   async function updateSnapshotStorageEstimate() {
     const status = $('#libraryStorageEstimate');
     if (!status) return;
-    const signature = Object.entries(state.librarySnapshots).map(([provider, snapshot]) => [
+    const snapshots = { ...state.librarySnapshots, ...state.partialLibraries };
+    const signature = Object.entries(snapshots).map(([provider, snapshot]) => [
       provider,
       snapshot.snapshotCachedAt || snapshot.exportedAt || '',
       snapshot.tracks?.length || 0,
@@ -188,7 +198,7 @@
     try {
       const bytes = await getBytesInUse.call(chrome.storage.local, ['providerLibraryBridge', 'zvukFavoriteCapture']);
       if (request !== snapshotUsageRequest) return;
-      const accountCount = Object.keys(state.librarySnapshots).length;
+      const accountCount = Object.keys(snapshots).length;
       status.textContent = accountCount
         ? `Данные коннекторов занимают примерно ${formatStorageBytes(bytes)} · аккаунтов: ${accountCount}. Оценка включает служебное состояние.`
         : 'Сохранённых снимков библиотек нет.';
@@ -437,11 +447,13 @@
     $$('.source').forEach((card) => {
       const provider = card.dataset.provider;
       const snapshot = state.librarySnapshots[provider];
+      const partial = state.partialLibraries[provider];
       const status = state.libraryStatuses[provider];
       const label = card.querySelector('.source-status');
       const collections = card.querySelector('.source-collections');
       const button = card.querySelector('.connect');
       if (snapshot) {
+        label.classList.remove('partial');
         const count = window.MusicAccountCatalog.snapshotSummary(snapshot);
         const albumInfo = window.MusicAlbumMatcher.extractSourceAlbums(snapshot);
         const collectionParts = [`Лайки: ${snapshot.tracks?.length || 0}`];
@@ -461,19 +473,32 @@
           button.title = '';
         }
         label.classList.add('connected');
+      } else if (partial) {
+        collections.textContent = `Лайки: ${partial.tracks.length} · Плейлисты: не подтверждены`;
+        collections.hidden = false;
+        label.textContent = status?.status === 'scanning'
+          ? `Лайки подтверждены · читаем остальную библиотеку…`
+          : `Подтверждены только лайки · ${partial.tracks.length}. Можно выбрать и перенести их отдельно.`;
+        label.classList.add('partial');
+        label.classList.remove('connected');
+        button.title = status?.message || 'Каталог или содержимое плейлистов не подтверждено.';
       } else if (status?.status === 'scanning') {
+        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = status.message || 'Сканируем открытую сессию…';
         label.classList.remove('connected');
       } else if (status?.status === 'unavailable') {
+        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = status.message || 'Войдите в аккаунт и вернитесь сюда';
         label.classList.remove('connected');
       } else if (status?.status === 'failed') {
+        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = status.message || 'Не удалось прочитать библиотеку';
         label.classList.remove('connected');
       } else {
+        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = state.extensionAvailable
           ? 'Войдите в аккаунт, чтобы загрузить библиотеку'
@@ -482,7 +507,7 @@
       }
       const action = window.MusicProviderConnectionFlow.sourceAction({
         extensionAvailable: state.extensionAvailable,
-        snapshot,
+        snapshot: snapshot || partial,
         status,
         providerName: sourceLabels[provider],
         selected: card.classList.contains('selected'),
@@ -497,18 +522,21 @@
   }
 
   function renderSourceCollectionPicker(provider, selectedScope = 'all') {
-    const payload = state.librarySnapshots[provider];
+    const payload = sourceSnapshotForProvider(provider);
     const tools = $('#sourceCollectionTools');
     const select = $('#sourceCollectionSelect');
     const playlists = Array.isArray(payload?.playlists) ? payload.playlists : [];
+    const favoritesOnly = payload?.partialScope === 'favorites';
     const canScope = Boolean(payload && (playlists.length || Array.isArray(payload.tracks)));
     tools.hidden = !canScope;
     if (!canScope) return;
     const albumInfo = window.MusicAlbumMatcher.extractSourceAlbums(payload);
-    const options = [new Option(albumInfo?.confirmed ? 'Лайки, альбомы и все плейлисты' : 'Лайки и все плейлисты', 'all')];
-    if (Array.isArray(payload.tracks)) options.push(new Option(`Только лайки (${payload.tracks.length})`, 'favorites'));
-    if (albumInfo) options.push(new Option(albumInfo.confirmed ? `Только альбомы (${albumInfo.rows.length})` : 'Только альбомы (не подтверждены)', 'albums'));
-    for (const playlist of playlists) {
+    const options = favoritesOnly
+      ? [new Option(`Только подтверждённые лайки (${payload.tracks.length})`, 'favorites')]
+      : [new Option(albumInfo?.confirmed ? 'Лайки, альбомы и все плейлисты' : 'Лайки и все плейлисты', 'all')];
+    if (!favoritesOnly && Array.isArray(payload.tracks)) options.push(new Option(`Только лайки (${payload.tracks.length})`, 'favorites'));
+    if (!favoritesOnly && albumInfo) options.push(new Option(albumInfo.confirmed ? `Только альбомы (${albumInfo.rows.length})` : 'Только альбомы (не подтверждены)', 'albums'));
+    for (const playlist of favoritesOnly ? [] : playlists) {
       const id = String(playlist.id || playlist.title || playlist.name || '');
       const title = String(playlist.title || playlist.name || 'Плейлист');
       const count = Number.isInteger(playlist.trackCount) ? playlist.trackCount : (playlist.tracks || playlist.items || []).length;
@@ -516,6 +544,8 @@
     }
     select.replaceChildren(...options);
     select.value = options.some((option) => option.value === selectedScope) ? selectedScope : 'all';
+    if (favoritesOnly) select.value = 'favorites';
+    select.disabled = favoritesOnly;
     const onePlaylist = select.value.startsWith('playlist:');
     $('#targetPlaylistName').hidden = !onePlaylist;
     $('#targetPlaylistNameLabel').hidden = !onePlaylist;
@@ -523,8 +553,9 @@
   }
 
   function selectProviderSnapshot(provider, collectionScope = null) {
-    const originalPayload = state.librarySnapshots[provider];
-    const scope = collectionScope || (state.sourceProvider === provider ? state.sourceCollectionScope : 'all');
+    const originalPayload = sourceSnapshotForProvider(provider);
+    const favoritesOnly = originalPayload?.partialScope === 'favorites';
+    const scope = collectionScope || (state.sourceProvider === provider ? state.sourceCollectionScope : favoritesOnly ? 'favorites' : 'all');
     renderSourceCollectionPicker(provider, scope);
     let payload = originalPayload;
     if (!payload) {
@@ -533,7 +564,16 @@
     }
     state.sourceCollectionScope = $('#sourceCollectionSelect').value || 'all';
     if (state.sourceCollectionScope === 'favorites') {
-      payload = { ...payload, playlists: [], completeness: { ...payload.completeness, playlists: [], playlistCount: 0 } };
+      payload = {
+        ...payload,
+        playlists: [],
+        completeness: {
+          ...payload.completeness,
+          ...(favoritesOnly ? { confirmed: payload.completeness.favoritesConfirmed === true, libraryComplete: false } : {}),
+          playlists: [], playlistCount: 0, playlistItemsTotal: 0,
+          ...(favoritesOnly ? { playlistItemsConfirmed: true } : {}),
+        },
+      };
     } else if (state.sourceCollectionScope === 'albums') {
       payload = {
         ...payload,
@@ -566,8 +606,8 @@
       button.textContent = active ? '✓ Источник' : 'Выбрать источник';
     });
     const tracks = normalizeJSON(payload);
-    const albumScope = window.MusicAlbumMatcher.albumsForScope(originalPayload, state.sourceCollectionScope);
-    loadTracks(tracks, `${state.source} · библиотека из расширения`, {
+    const albumScope = favoritesOnly ? { albums: null, skipped: false } : window.MusicAlbumMatcher.albumsForScope(originalPayload, state.sourceCollectionScope);
+    loadTracks(tracks, `${state.source} · ${favoritesOnly ? 'только лайки, плейлисты не подтверждены' : 'библиотека из расширения'}`, {
       provider,
       collectionName: payload.collection?.name,
       collectionType: payload.collection?.type,
@@ -1548,7 +1588,7 @@
       sourceSnapshot: state.sourceSnapshot,
       targetProvider: state.targetProvider,
       targetCollectionType: state.sourceCollectionScope === 'albums' ? 'albums' : state.collectionType,
-      targetCollectionName: state.sourceCollectionScope === 'albums' ? 'Альбомы' : state.collectionType === 'library' ? 'Любимое, альбомы и плейлисты' : state.collectionType === 'favorites' ? 'Любимое' : 'Плейлисты',
+      targetCollectionName: state.sourceCollectionScope === 'albums' ? 'Альбомы' : state.sourceCollectionScope === 'favorites' || state.collectionType === 'favorites' ? 'Любимые песни' : state.collectionType === 'library' ? 'Любимое, альбомы и плейлисты' : 'Плейлисты',
       storefront: state.targetProvider === 'apple-music' ? $('#storefront').value : null,
       tracks: state.tracks,
       albums: state.albums,
@@ -1647,13 +1687,13 @@
     const provider = card.dataset.provider;
     const action = window.MusicProviderConnectionFlow.sourceAction({
       extensionAvailable: state.extensionAvailable,
-      snapshot: state.librarySnapshots[provider],
+      snapshot: sourceSnapshotForProvider(provider),
       status: state.libraryStatuses[provider],
       providerName: sourceLabels[provider],
       selected: card.classList.contains('selected'),
       opening: state.openingProviderTabs.has(provider),
     });
-    if (provider && state.librarySnapshots[provider]) {
+    if (provider && sourceSnapshotForProvider(provider)) {
       selectProviderSnapshot(provider);
       return;
     }
@@ -1828,7 +1868,7 @@
       let response;
       if (automatic && refreshProviders === null) {
         response = await requestAllLibraries(false);
-        state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+        applyLibraryResponse(response);
         renderSourceAvailability(response.statuses || {});
         const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
         const providersToRefresh = providers.filter((provider) => {
@@ -1844,7 +1884,7 @@
         response = await requestAllLibraries(true, refreshProviders);
       }
       while (response.pending && Date.now() < deadline) {
-        state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+        applyLibraryResponse(response);
         renderSourceAvailability(response.statuses || {});
         const running = Object.values(response.statuses || {}).filter((status) => status.status === 'scanning').map((status) => status.message);
         button.textContent = running[0] || 'Сканируем библиотеки…';
@@ -1854,14 +1894,17 @@
       }
       if (response.pending) throw new Error('Сбор ещё выполняется. Библиотеки можно будет выбрать после завершения.');
       if (response.error) throw new Error(response.error);
-      state.librarySnapshots = { ...state.librarySnapshots, ...(response.libraries || {}) };
+      applyLibraryResponse(response);
       renderSourceAvailability(response.statuses || {});
       for (const provider of state.pendingLoginProviders) {
         if (response.statuses?.[provider]?.status === 'ready' && state.librarySnapshots[provider]) {
           state.pendingLoginProviders.delete(provider);
         }
       }
-      const connected = Object.keys(state.librarySnapshots).filter((provider) => response.libraries?.[provider] || ['ready', 'stale'].includes(response.statuses?.[provider]?.status));
+      const availableProviders = new Set([...Object.keys(state.librarySnapshots), ...Object.keys(state.partialLibraries)]);
+      const connected = [...availableProviders].filter((provider) => response.libraries?.[provider]
+        || response.partialLibraries?.[provider]
+        || ['ready', 'stale'].includes(response.statuses?.[provider]?.status));
       if (!connected.length) {
         const details = Object.entries(response.statuses || {}).map(([provider, status]) => `${sourceLabels[provider]}: ${status.message || 'недоступен'}`).join(' · ');
         throw new Error(details || 'Не нашёл открытых библиотек. Войдите в музыкальные сервисы в Chrome и повторите.');
@@ -1871,7 +1914,8 @@
       const unavailable = Object.values(response.statuses || {}).filter((status) => status.status === 'unavailable').length;
       const failed = Object.values(response.statuses || {}).filter((status) => status.status === 'failed').length;
       const stale = Object.values(response.statuses || {}).filter((status) => status.status === 'stale').length;
-      $('#extensionStatus').textContent = `Библиотек доступно: ${connected.length} из 4${stale ? ` · не обновились: ${stale}` : ''}${failed ? ` · ошибка чтения: ${failed}` : ''}${unavailable ? ` · нет сессии: ${unavailable}` : ''}. Выберите источник выше.`;
+      const partialCount = connected.filter((provider) => state.partialLibraries[provider] && !state.librarySnapshots[provider]).length;
+      $('#extensionStatus').textContent = `Данные доступны: ${connected.length} из 4${partialCount ? ` · только лайки подтверждены: ${partialCount}` : ''}${stale ? ` · не обновились: ${stale}` : ''}${failed ? ` · ошибка чтения: ${failed}` : ''}${unavailable ? ` · нет сессии: ${unavailable}` : ''}. Выберите источник выше.`;
       if (!automatic || connected.length) {
         if (stale) toast(`Доступно библиотек: ${connected.length}; часть снимков не обновилась`);
         else if (failed) toast(`Загружено библиотек: ${connected.length}; часть сервисов не смогла прочитать аккаунт`);
@@ -2185,6 +2229,7 @@
       const response = await chrome.runtime.sendMessage({ type: 'music-importer:clear-library-snapshots' });
       if (!response?.ok) throw new Error(response?.error || 'Не удалось удалить снимки библиотек.');
       state.librarySnapshots = {};
+      state.partialLibraries = {};
       state.libraryStatuses = {};
       state.sourceSnapshot = null;
       state.sourceProvider = '';

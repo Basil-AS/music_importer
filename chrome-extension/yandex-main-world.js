@@ -689,6 +689,30 @@
       const uid = String(uidValue);
       post('scan-progress', { phase: 'favorites', message: 'Читаем лайки Яндекс Музыки…' });
       const favorites = await readFavorites(uid);
+      post('favorites-snapshot', {
+        payload: {
+          schemaVersion: 1,
+          service: 'yandex-music',
+          collection: { type: 'library', name: 'Только лайки' },
+          partialScope: 'favorites',
+          completeness: {
+            confirmed: false,
+            favoritesConfirmed: true,
+            favoritesCount: favorites.count,
+            favoritesRevision: favorites.revision,
+            metadataComplete: favorites.metadataIncompleteCount === 0,
+            metadataIncompleteCount: favorites.metadataIncompleteCount,
+            catalogConfirmed: false,
+            playlistCatalogKindsConfirmed: false,
+            playlistItemsConfirmed: false,
+            playlistItemsTotal: null,
+            albumsConfirmed: false,
+            albumsCount: null,
+          },
+          tracks: favorites.tracks.map((track) => ({ ...track, collectionType: 'favorites' })),
+          playlists: [],
+        },
+      });
       post('scan-progress', { phase: 'playlists', message: 'Читаем каталог плейлистов Яндекс Музыки…' });
       const playlistResult = await libraryRequest(`/users/${encodeURIComponent(uid)}/playlists/list`);
       const playlistRows = playlistListFrom(playlistResult);

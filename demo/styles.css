@@ -324,6 +324,10 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   color:var(--green)
 }
 
+.source-status.partial {
+  color:var(--amber)
+}
+
 .connect {
   width:100%;
   margin-top:10px;
@@ -1457,6 +1461,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 .track-pages { width:100% }
 .track-pages #trackPageStatus { text-align:center }
 :root[data-theme="light"] .source-collections { color:#62636d }
+:root[data-theme="light"] .source-status.partial { color:#8b5e00 }
 :root[data-theme="light"] .connect:disabled { color:#666772; opacity:1 }
 :root[data-theme="light"] .step:not(.active) { color:#666772 }
 :root[data-theme="light"] .check-row { color:#45454e }

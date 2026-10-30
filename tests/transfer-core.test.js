@@ -102,3 +102,36 @@ test('a filtered complete playlist creates only one destination playlist and sel
   assert.equal(plan.collectionMappings.length, 1);
   assert.equal(plan.collectionMappings[0].sourceId, 'source-list');
 });
+
+test('a confirmed Yandex favorites-only selection produces a safe likes-only transfer plan', () => {
+  const core = loadCore();
+  const sourceSnapshot = core.createImportedSnapshot({
+    provider: 'yandex-music',
+    collectionType: 'library',
+    tracks: [
+      { id: 'liked-1', title: 'First', artist: 'Artist', sourceCollectionType: 'favorites' },
+      { id: 'liked-2', title: 'Second', artist: 'Artist', sourceCollectionType: 'favorites' },
+    ],
+    playlists: [],
+    completeness: {
+      confirmed: true, libraryComplete: false,
+      favoritesConfirmed: true, favoritesCount: 2,
+      catalogConfirmed: false, playlistItemsConfirmed: true, playlistItemsTotal: 0,
+    },
+  });
+  assert.equal(sourceSnapshot.completeness.confirmed, true);
+  assert.equal(sourceSnapshot.completeness.libraryComplete, false);
+  assert.deepEqual(Array.from(sourceSnapshot.collections, (collection) => collection.type), ['favorites']);
+  assert.equal(sourceSnapshot.collections[0].completeness.confirmed, true);
+
+  const plan = core.createTransferPlan({
+    sourceSnapshot,
+    targetProvider: 'apple-music',
+    targetCollectionType: 'library',
+    tracks: sourceSnapshot.collections[0].items.map(({ track }) => ({
+      ...track, sourceCollectionType: 'favorites', selected: true, match: { trackId: `apple-${track.providerId}` }, matchReason: 'isrc', matchConfidence: 1,
+    })),
+  });
+  assert.deepEqual(Array.from(plan.operations, (operation) => operation.operation), ['add_to_favorites', 'add_to_favorites']);
+  assert.deepEqual(Array.from(plan.collectionMappings), []);
+});
