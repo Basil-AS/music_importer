@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-30 — provider error isolation regression check
+
+- A failed Chrome tab query for one provider now yields that provider's own `failed` status while the response still contains statuses for the other three. A fault-injection fixture verifies the failure is isolated and does not reject the aggregate scan response.
+- Full fixture suite: **327/327 passed** on Node.js 24.22.1. JavaScript syntax, manifest JSON, extension bundle parity, and `git diff --check` passed.
+- No provider session was read and no account was written in this check. Live account verification still requires the permitted read-only Chrome DOM access and separate route-specific write/read-back evidence.
+
 ## 2026-10-30 — recovery and playlist consistency regression checks
 
 - Transfer-job progress and finish now update the record in one IndexedDB read/write transaction. A deliberately delayed old-style progress write fixture verifies that a terminal `complete` status and its plan cleanup cannot be overwritten by late progress.

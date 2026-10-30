@@ -672,12 +672,22 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
     const providersToOpen = Array.isArray(refreshProviders) ? refreshProviders : providers;
     await openMissingProviderTabs(providersToOpen, { activateFirst: false }).catch(() => {});
   }
+  const providerNames = {
+    zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыку', 'apple-music': 'Apple Music',
+  };
   const outcomes = await Promise.all(providers.map(async (provider) => {
     const refreshProvider = refresh === true && (!Array.isArray(refreshProviders) || refreshProviders.includes(provider));
-    const result = provider === 'zvuk'
-      ? await requestZvukLibrary(refreshProvider)
-      : await requestProviderLibrary(provider, refreshProvider);
-    return [provider, result || { error: 'Сервис не вернул состояние.' }];
+    try {
+      const result = provider === 'zvuk'
+        ? await requestZvukLibrary(refreshProvider)
+        : await requestProviderLibrary(provider, refreshProvider);
+      return [provider, result || { error: 'Сервис не вернул состояние.' }];
+    } catch {
+      return [provider, {
+        status: 'failed',
+        error: `Не удалось проверить ${providerNames[provider]}. Проверьте вкладку сервиса и повторите сбор.`,
+      }];
+    }
   }));
   const libraries = {};
   const statuses = {};
