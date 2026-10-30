@@ -69,3 +69,11 @@ Status: implemented against fixtures in `tests/zvuk-albums.test.js`; not live-ve
 ## Album write
 
 Albums are written with `execute-transfer` (see `ZVUK_TRANSFER.md`). The item type sent is the single constant `RELEASE_ITEM_TYPE = 'release'` in `zvuk-target-main-world.js`, chosen by analogy with the observed lowercase `'track'`; the enum value is not confirmed live. If the first live write is rejected, change only that constant (community clients use an upper-case `CollectionItemType`).
+
+## CSP warning from Zvuk analytics
+
+A user report from `https://zvuk.com/collection` showed the page blocking `https://cnt.rambler.ru/cnt/v2/` under its own `connect-src` policy. The policy text shown in the report contains the source `cnt.rambler.ru/cnt/v2` without a trailing slash, while the blocked request path ends in `/`; this is consistent with a page-side CSP path mismatch.
+
+The stack points to `chrome-extension/main-world.js`'s `patchedSend` because the connector wraps page XHR to inspect Zvuk GraphQL responses. For requests outside the same-origin `/api/v1/graphql` endpoint, the wrapper delegates directly to the original `XMLHttpRequest.send` without changing the URL, body, or headers. The Rambler request is therefore a Zvuk analytics request, not an importer API call. Adding a Rambler host permission to the extension would not override the page's CSP and is not an appropriate fix.
+
+This warning alone does not indicate that library scanning failed. Diagnose a scan failure from the importer status or a separate `read-error` for a Zvuk GraphQL operation. Assessment is based on the pasted browser report and static source inspection; no live retry was performed.
