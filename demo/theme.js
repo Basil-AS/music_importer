@@ -17,7 +17,9 @@
     if (themeColor) themeColor.content = theme === 'light' ? '#f5f5f7' : '#101114';
     const toggle = document.querySelector('#themeToggle');
     if (toggle) {
-      const label = theme === 'light' ? 'Переключить на тёмную тему' : 'Переключить на светлую тему';
+      const label = preference === 'system'
+        ? `Переключить на ${theme === 'light' ? 'тёмную' : 'светлую'} тему`
+        : `Вернуться к системной теме (сейчас ${theme === 'light' ? 'светлая' : 'тёмная'})`;
       toggle.setAttribute('aria-label', label);
       toggle.title = label;
     }
@@ -33,7 +35,10 @@
     if (!toggle) return;
     applyTheme();
     toggle.addEventListener('click', () => {
-      preference = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      const activeTheme = document.documentElement.dataset.theme;
+      preference = preference === 'system'
+        ? (activeTheme === 'light' ? 'dark' : 'light')
+        : 'system';
       try {
         window.localStorage.setItem(preferenceKey, preference);
       } catch {
