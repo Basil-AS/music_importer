@@ -33,7 +33,7 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
         payload: JSON.parse(body || '{}'),
       };
       requests.push(request);
-      const result = respond(request);
+      const result = respond?.(request);
       const payload = result?.payload || result;
       this.responseURL = this.url;
       this.status = Number(result?.statusCode || 200);
