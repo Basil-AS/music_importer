@@ -58,6 +58,9 @@ function bootWorker(storageState, tabs = [], options = {}) {
       async query(query) {
         if (!query.url) return tabs;
         const patterns = Array.isArray(query.url) ? query.url : [query.url];
+        if (options.tabQueryErrorHosts?.some((host) => patterns.some((pattern) => String(pattern).includes(host)))) {
+          throw new Error('Simulated tabs.query failure');
+        }
         return tabs.filter((tab) => patterns.some((pattern) => {
           const expression = new RegExp(`^${String(pattern).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')}$`);
           return expression.test(tab.url);
@@ -705,6 +708,18 @@ test('one-click library scan returns all complete snapshots and marks missing se
   assert.equal(response.statuses.zvuk.status, 'ready');
   assert.equal(response.statuses['yandex-music'].status, 'unavailable');
   assert.equal(response.libraries.spotify.tracks.length, 3);
+});
+
+test('a provider tab-query failure does not discard statuses for the other services', async () => {
+  const app = bootWorker({}, [], { tabQueryErrorHosts: ['open.spotify.com'] });
+  const response = await app.call({ type: 'music-importer:get-all-libraries', refresh: true });
+  assert.equal(response.error, undefined);
+  assert.deepEqual(Object.keys(response.statuses).sort(), ['apple-music', 'spotify', 'yandex-music', 'zvuk']);
+  assert.equal(response.statuses.spotify.status, 'failed');
+  assert.match(response.statuses.spotify.message, /Не удалось проверить Spotify/);
+  assert.ok(response.statuses['apple-music']);
+  assert.ok(response.statuses['yandex-music']);
+  assert.ok(response.statuses.zvuk);
 });
 
 test('a provider snapshot older than the automatic refresh window is returned as stale', async () => {
