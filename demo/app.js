@@ -316,7 +316,7 @@
       const badgeClass = track.searchError ? 'error' : track.match ? '' : !track.userExcluded && track.searched && track.matches.length ? 'review' : 'pending';
       const targetName = ({ 'apple-music': 'Apple Music', 'yandex-music': 'Яндекс.Музыка', spotify: 'Spotify', zvuk: 'Сбер.Звук' })[state.targetProvider] || state.targetProvider;
       const options = track.matches.map((match) => `<option value="${escapeHTML(match.trackId)}" ${String(track.match?.trackId || '') === String(match.trackId) ? 'selected' : ''}>${escapeHTML(match.artistName)} — ${escapeHTML(match.trackName)}${match.collectionName ? ` · ${escapeHTML(match.collectionName)}` : ''}</option>`).join('');
-      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.accountLibraryMatch ? `Уже в библиотеке аккаунта · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Из локального кэша · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
+      const matchControl = `<input class="track-query" data-index="${index}" aria-label="Поисковый запрос для ${title}" value="${escapeHTML(track.query || `${track.title} ${track.artist}`)}" ${state.searching ? 'disabled' : ''}><button class="track-search" type="button" data-index="${index}" aria-label="Искать совпадение для ${title}" ${state.searching ? 'disabled' : ''}>Искать</button>${track.matches.length ? `<select class="track-match" data-index="${index}" aria-label="Совпадение ${targetName} для ${title}"><option value="">${track.match && track.autoMatched ? 'Автоматическое совпадение · изменить' : 'Выберите версию…'}</option>${options}</select>${track.match ? `<a href="${escapeHTML(track.match.trackViewUrl)}" target="_blank" rel="noopener noreferrer">Открыть в ${targetName} ↗</a><div class="confidence ${track.autoMatched ? '' : 'review'}">${track.accountLibraryMatch ? `Уже в библиотеке аккаунта · ${Math.round(track.matchConfidence * 100)}%` : track.cachedMatch ? `Из локального кэша · ${Math.round(track.matchConfidence * 100)}%` : track.autoMatched ? `Автосопоставление · ${Math.round(track.matchConfidence * 100)}%` : 'Выбрано вручную'}</div>` : '<div class="confidence review">Нужно проверить: неоднозначное совпадение</div>'}` : `<div class="quiet ${track.searchError ? 'search-error' : ''}">${track.searchError ? (track.errorMessage || 'Повторите поиск') : track.searched ? 'В каталоге ничего не найдено' : 'Результаты появятся здесь'}</div>`}`;
       const collection = state.collectionType === 'library' ? `<div class="track-artist">${track.sourceCollectionType === 'favorites' ? 'Любимое' : escapeHTML(track.sourceCollectionName || 'Плейлист')}</div>` : '';
       const album = track.album || track.match?.collectionName || track.matches[0]?.collectionName || '';
       const duration = formatDuration(track.durationMs || track.match?.trackTimeMillis || track.matches[0]?.trackTimeMillis);
@@ -1291,7 +1291,16 @@
     const section = $('#albumSection');
     if (!section) return;
     section.hidden = !state.albums.length && !state.albumsSkipped;
-    if (section.hidden) return;
+    if (section.hidden) {
+      $('#albumNotice').hidden = true;
+      $('#albumCount').textContent = '0 альбомов';
+      $('#albumPageStatus').textContent = '';
+      $('#albumPages').hidden = true;
+      $('#previousAlbumPage').disabled = true;
+      $('#nextAlbumPage').disabled = true;
+      $('#albumList').innerHTML = '';
+      return;
+    }
     $('#albumNotice').hidden = !state.albumsSkipped;
     const pageCount = Math.max(1, Math.ceil(state.albums.length / albumPageSize));
     albumPage = Math.min(albumPage, pageCount - 1);
@@ -1317,7 +1326,7 @@
       const details = [album.trackCount ? `${album.trackCount} тр.` : '', year, album.upc ? `UPC ${album.upc}` : ''].filter(Boolean).map(escapeHTML).join(' · ');
       const artworkUrl = normalizeArtworkUrl(album.artworkUrl);
       const cover = artworkUrl ? `<img class="cover-image" src="${escapeHTML(artworkUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span aria-hidden="true">◉</span>';
-      return `<div class="track album" data-album-index="${index}"><div class="cover" aria-hidden="true">${cover}</div><div><div class="track-name">${title}</div><div class="track-artist">${escapeHTML(album.artist)}</div>${details ? `<div class="track-artist">${details}</div>` : ''}</div><div class="match">${control}<button class="track-search album-search" type="button" data-album-index="${index}" ${state.searching ? 'disabled' : ''}>Искать</button></div><span class="badge ${badgeClass}">${status}</span><input class="album-include" type="checkbox" aria-label="Включить альбом ${title}" data-album-index="${index}" ${album.selected && album.match ? 'checked' : ''} ${album.match ? '' : 'disabled'}></div>`;
+      return `<div class="track album" data-album-index="${index}"><div class="cover" aria-hidden="true">${cover}</div><div><div class="track-name">${title}</div><div class="track-artist">${escapeHTML(album.artist)}</div>${details ? `<div class="track-artist">${details}</div>` : ''}</div><div class="match">${control}<button class="track-search album-search" type="button" data-album-index="${index}" aria-label="Искать совпадение для альбома ${title}" ${state.searching ? 'disabled' : ''}>Искать</button></div><span class="badge ${badgeClass}">${status}</span><input class="album-include" type="checkbox" aria-label="Включить альбом ${title}" data-album-index="${index}" ${album.selected && album.match ? 'checked' : ''} ${album.match ? '' : 'disabled'}></div>`;
     }).join('');
     $$('#albumList .cover-image').forEach((image) => image.addEventListener('error', () => {
       const fallback = document.createElement('span');
@@ -2071,12 +2080,13 @@
     trackPage = 0;
     state.loaded = false;
     state.report = null;
+    $('#trackStatusFilter').value = 'all';
+    $('#trackSort').value = 'source';
     $('#report').classList.remove('show');
     $('#searchStatus').textContent = 'Поиск не запускался';
     $('#reviewSub').textContent = 'Загрузите список и найдите версии песен';
-    $('#trackList').innerHTML = '<div class="empty">Загрузите пример или свой список треков</div>';
     setStep(1);
-    updateCounts();
+    renderTracks();
     toast('Список сброшен');
   });
 

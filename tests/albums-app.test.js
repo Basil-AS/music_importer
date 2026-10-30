@@ -73,6 +73,7 @@ test('albums are a selectable scope with counts next to likes', async () => {
   assert.match(harness.$('#reviewSub').textContent, /1 треков · 2 альбомов/);
   assert.equal(harness.$('#albumSection').hidden, false);
   assert.equal(harness.$('#albumCount').textContent, '2 альбомов');
+  assert.match(harness.$('#albumList').innerHTML, /aria-label="Искать совпадение для альбома Discovery"/);
   assert.equal(harness.cards.find((card) => card.dataset.provider === 'apple-music').querySelector('.source-collections').textContent,
     'Лайки: 1 · Альбомы: 2 · Плейлисты: 0');
 });
@@ -93,6 +94,24 @@ test('review filters and sorting update the visible track page', async () => {
   await filter.emit('change');
   assert.equal(harness.$('#trackList').innerHTML.includes('В каталоге ничего не найдено'), false);
   assert.match(harness.$('#trackList').innerHTML, /Ненайденных треков нет/);
+});
+
+test('reset clears album rows, pagination and restores the default track view', async () => {
+  const harness = createAppHarness({ libraries: { 'apple-music': appleLibrary() }, handler: async () => ({ ok: true }) });
+  await openSource(harness, 'Apple Music');
+  harness.$('#trackStatusFilter').value = 'excluded';
+  harness.$('#trackSort').value = 'title';
+
+  await harness.$('#resetBtn').emit('click');
+
+  assert.equal(harness.$('#trackStatusFilter').value, 'all');
+  assert.equal(harness.$('#trackSort').value, 'source');
+  assert.equal(harness.$('#trackTools').hidden, true);
+  assert.match(harness.$('#trackList').innerHTML, /Загрузите пример или свой список треков/);
+  assert.equal(harness.$('#albumSection').hidden, true);
+  assert.equal(harness.$('#albumCount').textContent, '0 альбомов');
+  assert.equal(harness.$('#albumList').innerHTML, '');
+  assert.equal(harness.$('#albumPages').hidden, true);
 });
 
 test('a unique exact UPC with contradictory album metadata is left for manual review', () => {
