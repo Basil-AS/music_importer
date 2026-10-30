@@ -1,0 +1,47 @@
+# Spotify Web Player connector
+
+## Назначение и статус
+
+Chrome MV3 connector читает персональную библиотеку из уже открытого Spotify Web Player: Liked Songs и каталог пользовательских плейлистов с их треками. Подключение локальное; тот же page-session connector теперь поддерживает экспериментальный writer (см. [`SPOTIFY_TRANSFER.md`](SPOTIFY_TRANSFER.md)). У Spotify используется внутренний Pathfinder/GraphQL контракт Web Player, поэтому это исследовательский adapter без публичного API SLA; код не является проверенным production adapter. До live проверки на аккаунте не обещаем полноту или стабильность.
+
+## Поток данных
+
+1. Пользователь открывает Spotify Web Player и входит обычным способом. Можно одновременно открыть вкладки остальных поддерживаемых сервисов.
+2. Нажимает кнопку **Music Importer** в панели Chrome. Приложение внутри расширения автоматически запускает общий скан всех открытых сервисов; отдельно выбирать Spotify для начала чтения не нужно.
+3. Extension bridge просит уже открытую вкладку прочитать текущую библиотеку. Если вкладка не получила content script после установки/обновления расширения, service worker перезагрузит её один раз и повторит запуск.
+4. Main-world observer получает только нужные request headers из fetch вызовов самой страницы Spotify. Заголовки остаются в closure страницы и не отправляются в Chrome storage, popup, app, журнал или локальный HTTP сервер.
+5. Page connector постранично читает Liked Songs (`fetchLibraryTracks`), список playlists (`libraryV3`) и содержимое каждого playlist (`fetchPlaylistContents`). Изолированный bridge передаёт только нормализованный snapshot.
+6. Service worker принимает сообщения только от extension content script с origin `https://open.spotify.com`, проверяет полноту каталога, избранного и каждого playlist, хранит последний snapshot локально и отдаёт его Music Importer app. Выберите Spotify как источник или цель после завершения общего сканирования.
+
+## Полнота и сохранение данных
+
+- Liked Songs и содержимое плейлистов читаются страницами по 50 элементов до provider `totalCount`. Смещение следующей страницы берётся из offset ответа и фактического числа элементов на странице, поэтому короткая страница не пропускается; пустая страница до конца и несовпавший итог останавливают неполный snapshot. HTTP 429 обрабатывается с `Retry-After` и backoff.
+- При несовпадении totals, пустой ранней странице, повторном изменении totals или неполном playlist scan snapshot не подтверждается и импорт блокируется.
+- Favorites проверяются на уникальность Spotify track URI. Playlist items сохраняются по порядку и с повторениями, пустые playlists сохраняются.
+- PathFinder persisted-query hashes сначала обновляются по наблюдаемым запросам Player, затем сверяются с доступными Web Player bundle; если Spotify явно вернул `PersistedQueryNotFound`, выполняется одна попытка обновить hash.
+- Перед каждым разделом и страницей показывается актуальный этап. Один сетевой запрос ограничен 45 секундами; загрузка Web Player bundle для поиска hash — 15 секундами. Во время `Retry-After` скан сообщает оставшееся ожидание, чтобы inactivity watchdog не принял активный backoff за зависание.
+- Pathfinder запросы отправляются из страницы Spotify с `credentials: include`, как при браузерной авторизованной сессии. В snapshot передаются Spotify URI, title, artists, album, ISRC если есть, duration и playlist positions. OAuth tokens, cookies, session headers и raw request bodies в app не попадают.
+
+## Ограничения
+
+- Это private Web Player API, который Spotify может менять в любой момент. HTTP 401/403, GraphQL errors и неизвестная схема завершают сбор явной ошибкой. Последний live read вернул HTTP 401 на `fetchLibraryTracks`, поэтому complete snapshot не получен.
+- Для первого запроса Web Player должен уже выполнить запрос Pathfinder в текущей вкладке. Если заголовки ещё не наблюдались, откройте Spotify раздел с вашей библиотекой и повторите.
+- Комплект проверен только статически и mock/syntax проверками; пользовательский Spotify аккаунт и live endpoints в этой итерации не вызывались. В README и UI этот путь следует считать экспериментальным до live read-only sweep.
+- Предыдущий smoke scan дошёл до конца Liked Songs и завис до подтверждённого snapshot; повторное чтение уже завершилось явным HTTP 401. Таймауты и progress прошли fixture-тесты, но не устраняют текущий live auth/API отказ.
+- Все Spotify API paths остаются экспериментальными. Fixtures не доказывают live поиск или запись в аккаунт. Автоматический matcher и пакетная orchestration существуют, но точность и скорость на тысячах треков ещё не измерены.
+
+## Recovery after HTTP 401
+
+Version `0.13.38` waits up to eight seconds for the Spotify page to issue a newer Pathfinder request after one 401. It retries once only if the page supplied a fresh session snapshot; otherwise it surfaces the original sanitized 401 and does not replay stale credentials. Header values remain in page memory and never enter diagnostics. This is a recovery hypothesis covered by fixtures, not a live-confirmed fix.
+
+## Последняя live-проверка
+
+2026-10-28: read-only refresh на открытой странице Liked Songs завершился `fetchLibraryTracks: HTTP 401`; полный snapshot не создан. На странице не было видимых кнопок входа, но это не доказывает, что private Pathfinder-запрос принимает текущую сессию. Точный ответ сервера, заголовки, cookies и токены не извлекались. Причина 401 не установлена; каталоговые запросы и playlist items после ошибки не запускались. Требуется повторная проверка после явного обновления/входа в Spotify, без вывода о работоспособности по одному заголовку вкладки.
+
+## Локальный запуск
+
+Установите unpacked extension из `chrome-extension/` в Chrome Developer Mode. После изменения extension нажмите Reload на странице `chrome://extensions`, затем снова откройте Spotify Web Player и нажмите кнопку Music Importer в панели Chrome. Основной интерфейс открывается внутри расширения и не требует localhost-разрешения. Данные остаются локально; если пользовательский snapshot не подтверждён, его не передаём в matcher.
+
+## Saved albums (fixture-only, not live-verified)
+
+The scan also reads saved albums with `GET https://api.spotify.com/v1/me/albums` (limit 50) using the page's session headers, with the same rate-limit, 401 recovery and timeout handling as Pathfinder calls. The snapshot gets `collections: [{ type: 'albums', completeness: { confirmed, total, count }, items }]`, where each item has `providerId` (`spotify:album:{id}`), `title`, `artists`, `upc`, `trackCount`, `releaseDate` and `artworkUrl`. Completeness requires `count === total`, unique IDs and page offsets that advance by the returned rows. If the album route fails, the rest of the scan still succeeds and `completeness.albumsConfirmed` is `false` with `albumsError`. Only fixture tests cover this; the route has not been run against a live account.

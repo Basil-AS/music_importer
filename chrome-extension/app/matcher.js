@@ -1,0 +1,363 @@
+/* Provider-neutral matching helpers shared by future service adapters. */
+(() => {
+  const normalizeText = (value) => String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+  const cyrillicToLatin = {
+    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z',
+    и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r',
+    с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch',
+    ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+    і: 'i', ї: 'yi', є: 'ye', ґ: 'g', ў: 'u',
+  };
+
+  function romanize(value) {
+    return Array.from(String(value || '').normalize('NFKC').toLowerCase(), (character) => (
+      Object.hasOwn(cyrillicToLatin, character) ? cyrillicToLatin[character] : character
+    )).join('');
+  }
+
+  function detransliterate(value) {
+    const source = String(value || '').normalize('NFKC').toLowerCase();
+    if (!source || /[\u0400-\u04ff]/u.test(source) || !/[a-z]/i.test(source)) return '';
+    if (!/(?:shch|zh|kh|ts|ch|sh|yo|yu|ya|ye|yi)/i.test(source)) return '';
+    const replacements = {
+      shch: 'щ', zh: 'ж', kh: 'х', ts: 'ц', ch: 'ч', sh: 'ш',
+      yo: 'ё', yu: 'ю', ya: 'я', ye: 'є', yi: 'ї',
+      a: 'а', b: 'б', v: 'в', g: 'г', d: 'д', e: 'е', z: 'з', i: 'и', y: 'й',
+      k: 'к', l: 'л', m: 'м', n: 'н', o: 'о', p: 'п', r: 'р', s: 'с', t: 'т',
+      u: 'у', f: 'ф',
+    };
+    const converted = source.replace(/shch|zh|kh|ts|ch|sh|yo|yu|ya|ye|yi|[a-z]/gi, (part) => replacements[part.toLowerCase()] || part);
+    if (/[a-z]/i.test(converted)) return '';
+    const comparable = (text) => String(text).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+    return comparable(romanize(converted)) === comparable(source) ? converted : '';
+  }
+
+  const normalizeISRC = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  function sourceRecordingKey(track, provider) {
+    const service = String(provider || track?.provider || '');
+    if (!service || !track) return '';
+    const isrc = normalizeISRC(track.isrc || track.ISRC || track.externalIds?.isrc);
+    if (/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) {
+      const versionKey = [...versions(`${track.title || track.name || ''} ${track.album || track.collectionName || ''}`)].sort().join(',');
+      return `${service}:isrc:${isrc}${versionKey ? `:version:${versionKey}` : ''}`;
+    }
+    const providerId = String(track.sourceId || track.providerId || track.id || '').trim();
+    return providerId ? `${service}:id:${providerId}` : '';
+  }
+
+  function sourceSearchGroupKey(track, provider) {
+    if (track?.manualQuery) return '';
+    return sourceRecordingKey(track, provider);
+  }
+
+  function catalogSearchGroupKey(track, sourceProvider, targetProvider, storefront, fallbackQuery) {
+    const sourceKey = sourceSearchGroupKey(track, sourceProvider);
+    const fallback = String(fallbackQuery || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+    const identity = sourceKey ? `source:${sourceKey}` : `query:${fallback}`;
+    const target = String(targetProvider || '');
+    const region = target === 'apple-music' ? `:${String(storefront || '').toUpperCase()}` : '';
+    return `${target}${region}:${identity}`;
+  }
+
+  function propagateSourceMatch(tracks, track, provider) {
+    const key = sourceRecordingKey(track, provider);
+    if (!key) return [track];
+    const duplicates = tracks.filter((candidate) => sourceRecordingKey(candidate, provider) === key);
+    const fields = [
+      'matches', 'match', 'matchConfidence', 'matchReason', 'autoMatched', 'cachedMatch',
+      'cachedResults', 'accountLibraryMatch', 'searched', 'searchError', 'errorMessage', 'searchExpansionComplete',
+      'userExcluded', 'selected',
+    ];
+    for (const duplicate of duplicates) {
+      if (duplicate === track) continue;
+      for (const field of fields) duplicate[field] = track[field];
+    }
+    return duplicates;
+  }
+
+  function buildSearchQueries(track) {
+    const artists = Array.isArray(track.artists)
+      ? track.artists.map((artist) => typeof artist === 'string' ? artist : artist?.name || artist?.title).filter(Boolean).join(', ')
+      : String(track.artist || '');
+    const title = String(track.title || track.name || '').trim();
+    const album = String(track.album || track.collectionName || '').trim();
+    const broad = [title, artists].filter(Boolean).join(' ').trim();
+    const primary = String(track.query || [title, artists, album].filter(Boolean).join(' ')).trim();
+    return {
+      primary,
+      fallback: !track.manualQuery && primary !== broad ? broad : '',
+    };
+  }
+
+  const versionGroups = {
+    live: ['live'],
+    remix: ['remix', 'remixed'],
+    remaster: ['remaster', 'remastered'],
+    acoustic: ['acoustic'],
+    instrumental: ['instrumental'],
+    karaoke: ['karaoke'],
+    radio_edit: ['radio edit'],
+    extended_mix: ['extended mix', 'extended version'],
+    sped_up: ['sped up', 'speed up'],
+    slowed: ['slowed', 'slowed down'],
+    mono: ['mono'],
+    stereo: ['stereo'],
+    demo: ['demo'],
+    edit: ['edit'],
+  };
+
+  function versions(value) {
+    const text = normalizeText(value);
+    return new Set(Object.entries(versionGroups)
+      .filter(([, markers]) => markers.some((marker) => (` ${text} `).includes(` ${marker} `)))
+      .map(([group]) => group));
+  }
+
+  function similarityNormalized(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const aTokens = new Set(a.split(' '));
+    const bTokens = new Set(b.split(' '));
+    const overlap = [...aTokens].filter((token) => bTokens.has(token)).length;
+    const tokenScore = (2 * overlap) / (aTokens.size + bTokens.size);
+    const maxLength = Math.max(a.length, b.length);
+    let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+    for (let row = 1; row <= a.length; row += 1) {
+      const current = [row];
+      for (let column = 1; column <= b.length; column += 1) {
+        current[column] = Math.min(
+          current[column - 1] + 1,
+          previous[column] + 1,
+          previous[column - 1] + (a[row - 1] === b[column - 1] ? 0 : 1),
+        );
+      }
+      previous = current;
+    }
+    const editScore = 1 - previous[b.length] / maxLength;
+    return Math.max(tokenScore, editScore);
+  }
+
+  function similarity(left, right) {
+    const direct = similarityNormalized(normalizeText(left), normalizeText(right));
+    const romanized = similarityNormalized(normalizeText(romanize(left)), normalizeText(romanize(right)));
+    return Math.max(direct, romanized);
+  }
+
+  function titleWithoutFeatureCredits(value) {
+    return String(value || '')
+      .replace(/[([{]\s*(?:feat\.?|featuring|ft\.?|with)\s+[^)\]}]*[)\]}]/gi, ' ')
+      .replace(/\s+(?:feat\.?|featuring|ft\.?)\s+.*$/i, ' ');
+  }
+
+  function featuredArtistCredit(value) {
+    const match = String(value || '').match(/\b(?:feat\.?|featuring|ft\.?)\s+(.+?)(?=[)\]}]|$)/i);
+    return match?.[1]?.trim() || '';
+  }
+
+  function featuredArtistConflict(sourceTitle, targetTitle) {
+    const names = (value) => featuredArtistCredit(value).split(/\s*(?:,|;|&|\band\b|\bwith\b)\s*/i)
+      .map(normalizeText).filter(Boolean);
+    const sourceCredits = names(sourceTitle);
+    const targetCredits = names(targetTitle);
+    if (!sourceCredits.length || !targetCredits.length) return false;
+    const contains = (namesToFind, credits) => namesToFind.every((name) => credits.some((credit) => similarity(name, credit) >= 0.82));
+    return !contains(sourceCredits, targetCredits) || !contains(targetCredits, sourceCredits);
+  }
+
+  function splitArtistCredits(value) {
+    const names = Array.isArray(value)
+      ? value.map((item) => typeof item === 'string' ? item : item?.name || item?.title || '')
+      : [String(value || '')];
+    return names.flatMap((name) => String(name).split(/\s+(?:feat\.?|featuring|ft\.?|with|and)\s+|,|;|\s*&\s*/i))
+      .map(normalizeText).filter(Boolean);
+  }
+
+  function uncreditedArtistConflict(sourceArtist, candidateArtist, sourceTitle, candidateTitle) {
+    const source = splitArtistCredits(sourceArtist);
+    const candidate = splitArtistCredits(candidateArtist);
+    if (!source.length || !candidate.length) return false;
+
+    const hasSimilarCredit = (name, credits) => credits.some((credit) => similarity(name, credit) >= 0.82);
+    const extraSource = source.filter((name) => !hasSimilarCredit(name, candidate));
+    const extraCandidate = candidate.filter((name) => !hasSimilarCredit(name, source));
+    if (!extraSource.length && !extraCandidate.length) return false;
+
+    // Catalogs may omit a featured artist from their artist field. Accept that
+    // variance only if a title on either side explicitly identifies each extra
+    // credit as featured; unexplained extra credits remain review-only.
+    const creditValues = [sourceArtist, candidateArtist]
+      .flatMap((value) => Array.isArray(value) ? value : [value])
+      .map((item) => typeof item === 'string' ? item : item?.name || item?.title || '');
+    const declaredFeatures = [sourceTitle, candidateTitle, ...creditValues]
+      .map(featuredArtistCredit)
+      .flatMap((credit) => credit.split(/\s*(?:,|;|&|\band\b|\bwith\b)\s*/i))
+      .map(normalizeText).filter(Boolean);
+    const isDeclaredFeature = (name) => hasSimilarCredit(name, declaredFeatures);
+    return extraSource.some((name) => !isDeclaredFeature(name))
+      || extraCandidate.some((name) => !isDeclaredFeature(name));
+  }
+
+  function titleSearchKeys(value) {
+    const original = String(value || '');
+    const withoutFeatures = titleWithoutFeatureCredits(original);
+    return [...new Set([
+      normalizeText(original),
+      normalizeText(romanize(original)),
+      normalizeText(withoutFeatures),
+      normalizeText(romanize(withoutFeatures)),
+    ].filter(Boolean))];
+  }
+
+  function artistScore(sourceArtist, candidateArtist) {
+    const source = splitArtistCredits(sourceArtist);
+    const candidate = splitArtistCredits(candidateArtist);
+    if (!source.length || !candidate.length) return 0;
+    const matrix = source.map((name) => candidate.map((other) => similarity(name, other)));
+    if (source.length === 1 || candidate.length === 1) {
+      // Providers frequently omit featured artists in one catalog. A lone
+      // credit on either side should match the strongest corresponding name.
+      return Math.max(...matrix.flat());
+    }
+    const sourceCoverage = matrix.map((scores) => Math.max(...scores));
+    const candidateCoverage = matrix[0].map((_, candidateIndex) => Math.max(...matrix.map((scores) => scores[candidateIndex])));
+    const allCoverage = [...sourceCoverage, ...candidateCoverage];
+    return allCoverage.reduce((sum, score) => sum + score, 0) / allCoverage.length;
+  }
+
+  function durationScore(source, candidate) {
+    const left = Number(source.durationMs || source.trackTimeMillis || 0);
+    const right = Number(candidate.durationMs || candidate.trackTimeMillis || 0);
+    if (!left || !right) return null;
+    const delta = Math.abs(left - right);
+    if (delta <= 2000) return 1;
+    if (delta <= 5000) return 0.82;
+    if (delta <= 10000) return 0.58;
+    if (delta <= 20000) return 0.25;
+    return 0;
+  }
+
+  function hasVersionConflict(source, candidate) {
+    const sourceVersions = versions(`${source.title || ''} ${source.album || source.collectionName || ''}`);
+    const candidateVersions = versions(`${candidate.trackName || candidate.title || candidate.name || ''} ${candidate.collectionName || candidate.album || ''}`);
+    return [...sourceVersions].some((marker) => !candidateVersions.has(marker))
+      || [...candidateVersions].some((marker) => !sourceVersions.has(marker));
+  }
+
+  function scoreCandidate(source, candidate) {
+    const candidateTitle = candidate.trackName || candidate.title || candidate.name;
+    const featuredConflict = featuredArtistConflict(source.title || source.name, candidateTitle);
+    const collaboratorConflict = uncreditedArtistConflict(
+      source.artist || source.artists,
+      candidate.artistName || candidate.artist || candidate.artists,
+      source.title || source.name,
+      candidateTitle,
+    );
+    const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
+    const candidateISRC = normalizeISRC(candidate.isrc || candidate.ISRC || candidate.externalIds?.isrc);
+    const title = similarity(
+      titleWithoutFeatureCredits(source.title || source.name),
+      titleWithoutFeatureCredits(candidateTitle),
+    );
+    const artist = artistScore(source.artist || source.artists, candidate.artistName || candidate.artist || candidate.artists);
+    const duration = durationScore(source, candidate);
+    const titleConflict = Boolean((source.title || source.name) && candidateTitle && title < 0.72);
+    const artistConflict = Boolean((source.artist || source.artists) && (candidate.artistName || candidate.artist || candidate.artists) && artist < 0.72);
+    const durationConflict = duration === 0;
+    const isrcMetadataConflict = Boolean(sourceISRC && candidateISRC && sourceISRC === candidateISRC
+      && (titleConflict || artistConflict || durationConflict));
+    if (sourceISRC && candidateISRC && sourceISRC === candidateISRC) {
+      return {
+        score: 1, exactISRC: true, isrcConflict: false, isrcMetadataConflict,
+        versionConflict: hasVersionConflict(source, candidate), featuredConflict, collaboratorConflict,
+        titleScore: title, artistScore: artist, durationScore: duration,
+      };
+    }
+    const isrcConflict = Boolean(sourceISRC && candidateISRC && sourceISRC !== candidateISRC);
+
+    const sourceAlbum = source.album || '';
+    const candidateAlbum = candidate.collectionName || candidate.album || '';
+    const album = sourceAlbum && candidateAlbum ? similarity(sourceAlbum, candidateAlbum) : null;
+    const versionConflict = hasVersionConflict(source, candidate);
+
+    let total = title * 0.53 + artist * 0.39;
+    let weight = 0.92;
+    if (album !== null) { total += album * 0.04; weight += 0.04; }
+    if (duration !== null) { total += duration * 0.04; weight += 0.04; }
+    const score = Math.max(0, Math.min(0.98, total / weight - (versionConflict ? 0.2 : 0)));
+    return { score, exactISRC: false, isrcConflict, isrcMetadataConflict: false, versionConflict, featuredConflict, collaboratorConflict, titleScore: title, artistScore: artist, albumScore: album, durationScore: duration };
+  }
+
+  function candidateISRC(candidate) {
+    return normalizeISRC(candidate?.isrc || candidate?.ISRC || candidate?.externalIds?.isrc);
+  }
+
+  function sameMetadataRecording(source, candidate) {
+    const evidence = scoreCandidate(source, candidate);
+    const sourceAlbum = normalizeText(source.album || source.collectionName || '');
+    const candidateAlbum = normalizeText(candidate.collectionName || candidate.album || '');
+    const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
+    const targetISRC = candidateISRC(candidate);
+    if (sourceISRC && targetISRC && sourceISRC !== targetISRC) return false;
+    return !evidence.versionConflict
+      && evidence.titleScore === 1
+      && evidence.artistScore === 1
+      && Boolean(sourceAlbum && candidateAlbum && sourceAlbum === candidateAlbum)
+      && evidence.durationScore === 1;
+  }
+
+  function suggestBestMatch(source, candidates) {
+    const sourceISRC = normalizeISRC(source.isrc || source.ISRC || source.externalIds?.isrc);
+    const ranked = candidates.map((candidate) => ({ candidate, ...scoreCandidate(source, candidate) }))
+      .sort((left, right) => {
+        if (sourceISRC) {
+          const exactPriority = (entry) => entry.exactISRC
+            ? (entry.versionConflict || entry.isrcMetadataConflict ? 2 : 3)
+            : 1;
+          const priorityDelta = exactPriority(right) - exactPriority(left);
+          if (priorityDelta) return priorityDelta;
+        }
+        return right.score - left.score;
+      });
+    const best = ranked[0] || null;
+    const runnerUp = ranked[1] || null;
+    const margin = best ? best.score - (runnerUp?.score ?? 0) : 0;
+    const bestISRC = candidateISRC(best?.candidate);
+    const closeRivals = best ? ranked.filter((candidate) => best.score - candidate.score < 0.035) : [];
+    const sameISRCDuplicates = Boolean(bestISRC && closeRivals.length > 1
+      && closeRivals.every((candidate) => candidateISRC(candidate.candidate) === bestISRC
+        && !candidate.versionConflict && !candidate.isrcMetadataConflict));
+    const metadataDuplicates = Boolean(!bestISRC && closeRivals.length > 1
+      && closeRivals.every((candidate) => !candidateISRC(candidate.candidate) && sameMetadataRecording(source, candidate.candidate)));
+    const sameRecordingDuplicates = sameISRCDuplicates || metadataDuplicates;
+    const corroboratedMetadata = Boolean(best && best.titleScore >= 0.98 && best.artistScore >= 0.95
+      && ((best.albumScore ?? 0) >= 0.92 || (best.durationScore ?? 0) >= 0.9));
+    const automatic = Boolean(best && !best.versionConflict && !best.isrcConflict && !best.isrcMetadataConflict && !best.featuredConflict && !best.collaboratorConflict && (best.exactISRC
+      || ((corroboratedMetadata || sameRecordingDuplicates) && best.score >= 0.96 && (margin >= 0.035 || sameRecordingDuplicates))));
+    return {
+      best: best?.candidate || null,
+      confidence: best?.score || 0,
+      automatic,
+      reason: !best ? 'no_candidates' : (best.versionConflict || best.isrcConflict || best.featuredConflict) ? 'manual_review'
+        : best.isrcMetadataConflict ? 'isrc_metadata_conflict'
+          : best.collaboratorConflict ? 'manual_review'
+        : best.exactISRC ? 'exact_isrc'
+        : sameISRCDuplicates && automatic ? 'catalog_duplicates_same_isrc'
+          : metadataDuplicates && automatic ? 'catalog_duplicates_same_metadata'
+            : automatic ? 'high_confidence_metadata' : 'manual_review',
+      ranked,
+      margin,
+    };
+  }
+
+  window.MusicMatcher = { normalizeText, normalizeISRC, sourceRecordingKey, sourceSearchGroupKey, catalogSearchGroupKey, propagateSourceMatch, romanize, detransliterate, titleSearchKeys, buildSearchQueries, scoreCandidate, suggestBestMatch, similarity };
+})();

@@ -1,0 +1,87 @@
+{
+  "manifest_version": 3,
+  "name": "Music Importer — local account connector",
+  "version": "0.14.1",
+  "description": "Read and transfer signed-in music libraries locally for Music Importer.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "minimum_chrome_version": "111",
+  "permissions": ["storage", "unlimitedStorage"],
+  "host_permissions": ["https://zvuk.com/*", "https://open.spotify.com/*", "https://music.yandex.ru/*", "https://api.music.yandex.ru/*", "https://music.apple.com/*", "https://itunes.apple.com/*", "https://basil-as.github.io/*"],
+  "optional_host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "action": {
+    "default_title": "Открыть Music Importer",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "popup.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://zvuk.com/favorites*", "https://zvuk.com/collection*", "https://zvuk.com/playlist/*"],
+      "js": ["main-world.js", "zvuk-target-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://zvuk.com/favorites*", "https://zvuk.com/collection*", "https://zvuk.com/playlist/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://open.spotify.com/*"],
+      "js": ["spotify-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://open.spotify.com/*"],
+      "js": ["spotify-bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://music.yandex.ru/*"],
+      "js": ["yandex-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://music.yandex.ru/*"],
+      "js": ["yandex-bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://music.apple.com/*"],
+      "js": ["apple-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://music.apple.com/*"],
+      "js": ["apple-bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*", "https://basil-as.github.io/music_importer/*"],
+      "js": ["local-app-bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ]
+}

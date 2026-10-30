@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Music Importer</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><span class="logo">♫</span><div><strong>Music Importer</strong><small>Подключение аккаунтов</small></div></header>
+    <p class="privacy">Пароли и значения cookies не читаются. Нормализованные библиотеки сохраняются локально в профиле Chrome; поиск и перенос обращаются напрямую к выбранным сервисам. <a href="app/privacy.html" target="_blank">Данные и приватность</a></p>
+    <section class="connections" aria-live="polite">
+      <div class="connection" data-provider="apple-music"><div class="connection-title"><img src="app/assets/providers/apple-music.png" alt=""><b>Apple Music</b></div><span id="appleStatus">Проверяем вкладку…</span></div>
+      <div class="connection" data-provider="spotify"><div class="connection-title"><img src="app/assets/providers/spotify.png" alt=""><b>Spotify</b></div><span id="spotifyStatus">Проверяем вкладку…</span></div>
+      <div class="connection" data-provider="yandex-music"><div class="connection-title"><img src="app/assets/providers/yandex-music.png" alt=""><b>Яндекс.Музыка</b></div><span id="yandexStatus">Проверяем вкладку…</span></div>
+      <div class="connection" data-provider="zvuk"><div class="connection-title"><img src="app/assets/providers/zvuk.png" alt=""><b>Сбер.Звук</b></div><span id="zvukStatus">Проверяем вкладку…</span></div>
+    </section>
+    <section class="app-connection" aria-live="polite">
+      <b id="appConnectionStatus">Проверяем приложение…</b>
+      <span id="appConnectionHelp">Откройте Music Importer на этом компьютере.</span>
+      <button id="connectAppBtn" hidden>Разрешить доступ и подключить</button>
+      <button id="openAppBtn">Открыть Music Importer</button>
+    </section>
+    <p class="hint">«Вкладка открыта» не подтверждает вход в аккаунт. После подключения приложения авторизованные страницы будут просканированы автоматически.</p>
+    <details class="zvuk-tools">
+      <summary>Экспорт библиотеки Сбер.Звука в JSON</summary>
+      <p class="hint">Резервный экспорт для ручной загрузки. Основной перенос выполняется в приложении Music Importer.</p>
+    <section class="status" aria-live="polite">
+      <div class="metric"><b id="trackCount">0</b><span>уникальных треков</span></div>
+      <div class="metric"><b id="playlistCount">0</b><span>плейлистов найдено</span></div>
+      <p id="completeness">Откройте <b>zvuk.com/favorites</b>.</p>
+    </section>
+    <div class="actions">
+      <button class="primary" id="startBtn">Собрать библиотеку целиком</button>
+      <button id="runPlaylistsBtn" disabled>Собрать треки всех плейлистов</button>
+      <button id="stopBtn">Остановить</button>
+      <button id="exportLibraryBtn" disabled>Скачать лайки и плейлисты одним файлом</button>
+      <button id="exportFavoritesBtn" disabled>Скачать избранное JSON</button>
+      <button id="exportPlaylistsBtn" disabled>Скачать плейлисты JSON</button>
+      <button class="danger" id="clearBtn" disabled>Очистить локальные данные</button>
+    </div>
+    <p class="hint">Откройте страницу Сбер.Звука, войдите и начните сбор. Расширение пройдёт избранное, каталог плейлистов и страницы плейлистов. Экспорт останется на этом устройстве.</p>
+    <p class="error" id="error" hidden></p>
+    </details>
+  </main>
+</body>
+</html>

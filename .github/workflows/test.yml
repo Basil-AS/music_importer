@@ -1,0 +1,47 @@
+name: Verify Music Importer
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - develop
+      - master
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Check JavaScript syntax
+        run: |
+          for file in demo/*.js chrome-extension/*.js tests/*.js; do
+            node --check "$file"
+          done
+      - name: Validate extension manifest
+        run: node -e "JSON.parse(require('node:fs').readFileSync('chrome-extension/manifest.json', 'utf8'))"
+      - name: Check extension app bundle
+        run: node scripts/build-extension-app.mjs --check
+      - name: Run fixtures
+        run: node --test tests/*.test.js
+      - name: Package macOS first-run helper
+        run: |
+          mkdir -p distribution
+          cp -R chrome-extension distribution/chrome-extension
+          cp INSTALL-MACOS.command distribution/INSTALL-MACOS.command
+          mkdir -p edge-store-package
+          cp -R chrome-extension/. edge-store-package/
+          (cd edge-store-package && zip -qr ../distribution/music-importer-edge-addons.zip .)
+          rm -rf edge-store-package
+      - name: Upload installable extension package
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-importer-chrome-extension
+          path: distribution/
+          if-no-files-found: error
+          retention-days: 30

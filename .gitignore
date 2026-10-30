@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+*.log
+.env
+.env.*
+*.har
+distribution/
+edge-store-package/
+.claude/settings.local.json
+.claude/worktrees/

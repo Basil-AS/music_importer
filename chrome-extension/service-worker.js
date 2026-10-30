@@ -1,0 +1,1448 @@
+const STORAGE_KEY = 'zvukFavoriteCapture';
+const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
+const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
+// No complete cheap pulse has been verified for every provider; auto-refresh full snapshots at most twice a day.
+const LIBRARY_AUTO_REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
+let providerStateMutationQueue = Promise.resolve();
+let zvukStateMutationQueue = Promise.resolve();
+const SERIALIZED_STATE_MESSAGE_TYPES = new Set([
+  'music-importer:get-all-libraries', 'music-importer:get-library', 'music-importer:clear-library-snapshots',
+  'zvuk:state', 'zvuk:start-library', 'zvuk:start', 'zvuk:stop', 'zvuk:clear', 'zvuk:run-playlists',
+  'zvuk:favorite-page', 'zvuk:favorites-scroll-end', 'zvuk:favorites-scroll-stall', 'zvuk:collection-count',
+  'zvuk:scan-progress', 'zvuk:playlist-list-page', 'zvuk:playlist-metadata', 'zvuk:playlist-track-page',
+  'zvuk:release-list-page', 'zvuk:release-metadata',
+  'zvuk:playlist-scroll-end', 'zvuk:collection-scroll-end', 'zvuk:collection-scroll-stall', 'zvuk:read-error',
+]);
+const APP_TAB_URLS = [
+  'http://127.0.0.1:8000/*', 'http://127.0.0.1:8001/*',
+  'http://localhost:8000/*', 'http://localhost:8001/*',
+  'https://basil-as.github.io/music_importer/*',
+];
+const APP_ORIGINS = new Set([
+  'http://127.0.0.1:8000', 'http://127.0.0.1:8001',
+  'http://localhost:8000', 'http://localhost:8001',
+  'https://basil-as.github.io',
+]);
+const extensionAppUrl = chrome.runtime.getURL?.('app/index.html') || '';
+const extensionAppPorts = new Set();
+const pendingProgressAcks = new Map();
+let providerBridgeRepairTask = null;
+
+function acknowledgeTransferCheckpoint(id, ok) {
+  const settle = pendingProgressAcks.get(String(id || ''));
+  if (!settle || ok !== true) return false;
+  pendingProgressAcks.delete(String(id));
+  settle(true);
+  return true;
+}
+
+function isAppSender(sender) {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (extensionAppUrl && sender.url === extensionAppUrl) return true;
+  try {
+    const url = new URL(sender.url || '');
+    if (!APP_ORIGINS.has(url.origin)) return false;
+    if (url.origin === 'https://basil-as.github.io') return ['/music_importer/', '/music_importer/index.html'].includes(url.pathname);
+    return url.pathname === '/';
+  }
+  catch { return false; }
+}
+
+async function forwardTransferProgress(provider, requestId, progress) {
+  const checkpointAckId = String(progress?.checkpointId || '');
+  let ackTimer;
+  const ackPromise = checkpointAckId ? new Promise((resolve) => {
+    pendingProgressAcks.set(checkpointAckId, resolve);
+    ackTimer = setTimeout(() => {
+      pendingProgressAcks.delete(checkpointAckId);
+      resolve(false);
+    }, 15000);
+  }) : null;
+  const extensionMessage = { type: 'transfer-progress', provider, requestId: String(requestId || ''), progress: progress || null };
+  if (checkpointAckId) extensionMessage.checkpointAckId = checkpointAckId;
+  for (const port of extensionAppPorts) {
+    try { port.postMessage(extensionMessage); } catch { extensionAppPorts.delete(port); }
+  }
+  const appTabs = await chrome.tabs.query({ url: APP_TAB_URLS }).catch(() => []);
+  await Promise.all(appTabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id, {
+    type: `music-importer:${provider}-progress`,
+    requestId: extensionMessage.requestId,
+    progress: extensionMessage.progress,
+    ...(checkpointAckId ? { checkpointAckId } : {}),
+  }).catch(() => null)));
+  if (!ackPromise) return true;
+  const acknowledged = await ackPromise;
+  clearTimeout(ackTimer);
+  return acknowledged;
+}
+
+chrome.runtime.onConnect?.addListener((port) => {
+  if (port.name !== 'music-importer-app') return;
+  if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== extensionAppUrl) {
+    port.disconnect();
+    return;
+  }
+  extensionAppPorts.add(port);
+  port.onMessage.addListener((message) => {
+    if (message?.type === 'transfer-progress-ack') acknowledgeTransferCheckpoint(message.checkpointAckId, message.ok === true);
+  });
+  port.onDisconnect.addListener(() => extensionAppPorts.delete(port));
+});
+
+async function openImporterApp() {
+  if (!extensionAppUrl) return;
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find((tab) => tab.url === extensionAppUrl);
+  if (existing?.id) {
+    await chrome.tabs.update(existing.id, { active: true });
+    return;
+  }
+  await chrome.tabs.create({ url: extensionAppUrl });
+}
+
+chrome.runtime.onInstalled?.addListener(async (details) => {
+  if (!['install', 'update'].includes(details?.reason) || !extensionAppUrl) return;
+  // Existing provider pages do not receive newly installed content scripts
+  // until they navigate. Repair them on first install as well as updates.
+  await repairStaleProviderTabs();
+  await openImporterApp().catch(() => {});
+});
+
+// A browser restart can leave provider tabs around with content scripts from a
+// previous extension context. Check their bridge protocol before the next scan.
+chrome.runtime.onStartup?.addListener(() => repairStaleProviderTabs());
+
+chrome.action?.onClicked?.addListener(() => {
+  return openImporterApp().catch(() => {});
+});
+
+void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
+
+async function readState() {
+  const stored = await chrome.storage.local.get(STORAGE_KEY);
+  return {
+    service: 'zvuk',
+    collection: 'favorites',
+    tracks: [],
+    pagesSeen: 0,
+    receivedCount: 0,
+    expectedCount: null,
+    hasMore: null,
+    playlists: [],
+    playlistPagesSeen: 0,
+    expectedPlaylistCount: null,
+    playlistListHasMore: null,
+    albums: [],
+    albumPagesSeen: 0,
+    expectedAlbumCount: null,
+    albumListHasMore: null,
+    favoritesScanFinished: false,
+    collectionScrollFinished: false,
+    scan: { active: false, phase: 'idle', tabId: null, startedAt: null },
+    automation: { active: false, tabId: null, currentPlaylistId: null, startedAt: null },
+    captureEnabled: false,
+    updatedAt: null,
+    error: null,
+    ...(stored[STORAGE_KEY] || {}),
+    tracks: Array.isArray(stored[STORAGE_KEY]?.tracks) ? stored[STORAGE_KEY].tracks : [],
+    albums: Array.isArray(stored[STORAGE_KEY]?.albums) ? stored[STORAGE_KEY].albums : [],
+    playlists: Array.isArray(stored[STORAGE_KEY]?.playlists) ? stored[STORAGE_KEY].playlists : [],
+  };
+}
+
+// Saved Zvuk releases count as albums only when the unique hydrated IDs equal the independent
+// getCollectionIds total and the cursor is exhausted; anything else fails closed.
+function zvukAlbumsStatus(state) {
+  const albums = Array.isArray(state.albums) ? state.albums : [];
+  const unique = new Set(albums.map((album) => album.id)).size;
+  if (state.albumListHasMore !== false) return { confirmed: false, error: 'release_list_incomplete' };
+  if (!Number.isInteger(state.expectedAlbumCount)) return { confirmed: false, error: 'release_count_unavailable' };
+  if (unique !== albums.length || unique !== state.expectedAlbumCount) return { confirmed: false, error: 'release_count_mismatch' };
+  return { confirmed: true, error: '' };
+}
+
+function createLibraryPayload(state) {
+  const albumsStatus = zvukAlbumsStatus(state);
+  const favoritesConfirmed = state.favoritesScanFinished && state.hasMore === false
+    && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+  const catalogConfirmed = state.playlistListHasMore === false
+    && Number.isInteger(state.expectedPlaylistCount) && state.expectedPlaylistCount === state.playlists.length;
+  const playlistItemsConfirmed = state.playlists.every((playlist) => playlist.complete === true);
+  return {
+    schemaVersion: 1,
+    service: 'zvuk',
+    snapshotCachedAt: state.scan?.phase === 'complete' ? (state.scan.finishedAt || state.updatedAt || null) : null,
+    collection: { type: 'library', name: 'Вся библиотека' },
+    completeness: {
+      confirmed: state.scan?.phase === 'complete' && favoritesConfirmed && catalogConfirmed && playlistItemsConfirmed,
+      favoritesConfirmed,
+      favoritesCount: state.tracks.length,
+      catalogConfirmed,
+      playlistItemsConfirmed,
+      playlistItemsTotal: state.playlists.length,
+      albumsConfirmed: albumsStatus.confirmed,
+      albumsCount: albumsStatus.confirmed ? state.albums.length : null,
+      ...(albumsStatus.confirmed ? {} : { albumsError: albumsStatus.error }),
+    },
+    collections: albumsStatus.confirmed ? [{
+      type: 'albums',
+      name: 'Альбомы',
+      completeness: { confirmed: true, total: state.albums.length, count: state.albums.length },
+      items: state.albums.map((album) => ({
+        providerId: album.id, title: album.title, artists: album.artists, upc: '',
+        trackCount: album.trackCount, releaseDate: album.releaseDate, artworkUrl: album.artworkUrl,
+      })),
+    }] : [],
+    tracks: state.tracks,
+    playlists: state.playlists,
+  };
+}
+
+function snapshotIsStale(snapshot, fallbackTimestamp = null) {
+  const timestamp = Date.parse(snapshot?.snapshotCachedAt || fallbackTimestamp || '');
+  return !Number.isFinite(timestamp) || timestamp > Date.now() || Date.now() - timestamp >= LIBRARY_AUTO_REFRESH_AFTER_MS;
+}
+
+function sanitizeZvukRelease(release) {
+  const id = String(release?.id || '');
+  const title = String(release?.title || '').trim();
+  if (!id || !title) return null;
+  return {
+    id, title,
+    artists: (Array.isArray(release.artists) ? release.artists : [])
+      .map((artist) => String(typeof artist === 'string' ? artist : artist?.title || artist?.name || '').trim()).filter(Boolean),
+    trackCount: Number.isInteger(release.trackCount) && release.trackCount >= 0 ? release.trackCount : null,
+    releaseDate: String(release.releaseDate || ''),
+    artworkUrl: String(release.artworkUrl || ''),
+  };
+}
+
+function mergeZvukReleases(state, releases) {
+  const byId = new Map(state.albums.map((album) => [album.id, album]));
+  for (const incoming of Array.isArray(releases) ? releases : []) {
+    const release = sanitizeZvukRelease(incoming);
+    if (!release) continue;
+    const prior = byId.get(release.id);
+    byId.set(release.id, prior ? {
+      ...prior, ...release,
+      artists: release.artists.length ? release.artists : prior.artists,
+      trackCount: release.trackCount ?? prior.trackCount,
+      releaseDate: release.releaseDate || prior.releaseDate,
+      artworkUrl: release.artworkUrl || prior.artworkUrl,
+    } : release);
+  }
+  state.albums = [...byId.values()];
+}
+
+async function advancePlaylistAutomation(state) {
+  const automation = state.automation;
+  if (!automation?.active || !Number.isInteger(automation.tabId)) return;
+  const next = state.playlists.find((playlist) => !playlist.complete && !playlist.itemsScanFinished);
+  if (!next) {
+    state.automation = { ...automation, active: false, currentPlaylistId: null, finishedAt: new Date().toISOString() };
+    state.captureEnabled = false;
+    const favoritesConfirmed = state.favoritesScanFinished && state.hasMore === false
+      && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+    const playlistCatalogConfirmed = state.playlistListHasMore === false
+      && Number.isInteger(state.expectedPlaylistCount) && state.expectedPlaylistCount === state.playlists.length;
+    const playlistsConfirmed = state.playlists.every((playlist) => playlist.complete);
+    if (state.scan?.active) {
+      state.scan = {
+        ...state.scan,
+        active: false,
+        phase: favoritesConfirmed && playlistCatalogConfirmed && playlistsConfirmed ? 'complete' : 'needs_review',
+        finishedAt: new Date().toISOString(),
+      };
+      if (state.scan.phase === 'complete') state.previousCompleteSnapshot = null;
+    }
+    state.updatedAt = new Date().toISOString();
+    await writeState(state);
+    return;
+  }
+  state.automation = { ...automation, currentPlaylistId: next.id };
+  await writeState(state);
+  await chrome.tabs.update(automation.tabId, {
+    url: `https://zvuk.com/playlist/${encodeURIComponent(next.id)}?music_importer_capture=1`,
+  });
+}
+
+async function advanceAccountScan(state) {
+  if (!state.scan?.active) return;
+  if (state.scan.phase === 'favorites' && state.favoritesScanFinished) {
+    if (!Number.isInteger(state.expectedCount)) return;
+    const favoritesConfirmed = state.hasMore === false
+      && Number.isInteger(state.expectedCount) && state.expectedCount === state.tracks.length;
+    if (!favoritesConfirmed) {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Число избранных не совпало с независимым списком ID.' };
+      state.captureEnabled = false;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      return;
+    }
+    state.scan = { ...state.scan, phase: 'playlists' };
+    state.updatedAt = new Date().toISOString();
+    await writeState(state);
+    await chrome.tabs.update(state.scan.tabId, { url: 'https://zvuk.com/collection?music_importer_capture=1' });
+    return;
+  }
+  if (state.scan.phase === 'playlists' && state.collectionScrollFinished && state.playlistListHasMore === false) {
+    const catalogConfirmed = Number.isInteger(state.expectedPlaylistCount)
+      && state.expectedPlaylistCount === state.playlists.length;
+    if (!catalogConfirmed) {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Число найденных плейлистов не совпало с независимым списком ID.' };
+      state.captureEnabled = false;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      return;
+    }
+    const tab = await chrome.tabs.get(state.scan.tabId).catch(() => null);
+    if (!tab || pageKind(tab.url) !== 'collection') {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Не удалось открыть список плейлистов в Сбер.Звуке.' };
+      await writeState(state);
+      return;
+    }
+    state.scan = { ...state.scan, phase: 'playlists_items' };
+    state.automation = { active: true, tabId: state.scan.tabId, currentPlaylistId: null, startedAt: new Date().toISOString() };
+    state.playlists.forEach((playlist) => { playlist.itemsScanFinished = Boolean(playlist.complete); });
+    await writeState(state);
+    await advancePlaylistAutomation(state);
+  }
+}
+
+async function startAccountScan(tabId, { forceRefresh = false } = {}) {
+  const numericTabId = Number(tabId);
+  const tab = Number.isInteger(numericTabId) ? await chrome.tabs.get(numericTabId).catch(() => null) : null;
+  let origin = '';
+  try { origin = new URL(tab?.url || '').origin; } catch { /* Invalid or unavailable tab URL. */ }
+  if (!tab || origin !== 'https://zvuk.com') return { ok: false, error: 'Войдите в Сбер.Звук в этой вкладке и повторите запуск.' };
+  const state = await readState();
+  if (state.scan?.active) return { ok: false, error: 'Сбор библиотеки Сбер.Звука уже выполняется.' };
+  if ((state.tracks.length || state.playlists.length || state.albums.length) && !forceRefresh) return { ok: false, error: 'Сначала экспортируйте или очистите предыдущий локальный сбор.' };
+  const currentSnapshot = createLibraryPayload(state);
+  if (currentSnapshot.completeness.confirmed) state.previousCompleteSnapshot = currentSnapshot;
+  state.tracks = [];
+  state.playlists = [];
+  state.albums = [];
+  state.albumPagesSeen = 0;
+  state.expectedAlbumCount = null;
+  state.albumListHasMore = null;
+  state.pagesSeen = 0;
+  state.receivedCount = 0;
+  state.expectedCount = null;
+  state.hasMore = null;
+  state.playlistPagesSeen = 0;
+  state.expectedPlaylistCount = null;
+  state.playlistListHasMore = null;
+  state.favoritesScanFinished = false;
+  state.collectionScrollFinished = false;
+  state.automation = { active: false, tabId: null, currentPlaylistId: null, startedAt: null };
+  state.captureEnabled = true;
+  state.scan = { active: true, phase: 'favorites', tabId: numericTabId, startedAt: new Date().toISOString() };
+  state.updatedAt = new Date().toISOString();
+  state.error = null;
+  await writeState(state);
+  await chrome.tabs.update(numericTabId, { url: 'https://zvuk.com/favorites?music_importer_capture=1' });
+  return { ok: true };
+}
+
+async function beginPlaylistScan(state, tabId) {
+  const numericTabId = Number(tabId);
+  const tab = Number.isInteger(numericTabId) ? await chrome.tabs.get(numericTabId).catch(() => null) : null;
+  const catalogConfirmed = state.playlistPagesSeen > 0
+    && state.playlistListHasMore === false
+    && Number.isInteger(state.expectedPlaylistCount)
+    && state.expectedPlaylistCount === state.playlists.length;
+  if (!tab || pageKind(tab.url) !== 'collection' || !catalogConfirmed || !state.playlists.length) {
+    return { ok: false, error: 'Сначала завершите и подтвердите сбор списка плейлистов.' };
+  }
+  state.captureEnabled = true;
+  state.automation = { active: true, tabId: numericTabId, currentPlaylistId: null, startedAt: new Date().toISOString() };
+  state.playlists.forEach((playlist) => { playlist.itemsScanFinished = Boolean(playlist.complete); });
+  await writeState(state);
+  await advancePlaylistAutomation(state);
+  return { ok: true };
+}
+
+async function writeState(state) {
+  await chrome.storage.local.set({ [STORAGE_KEY]: state });
+}
+
+// Provider snapshots expose saved albums in different places: Spotify, Yandex and Zvuk put an
+// albums entry into `collections`, Apple Music adds `albumsCollection`.
+function albumsFromPayload(payload) {
+  const entry = (Array.isArray(payload?.collections) ? payload.collections.find((collection) => collection?.type === 'albums') : null)
+    || (payload?.albumsCollection?.type === 'albums' ? payload.albumsCollection : null);
+  const items = Array.isArray(entry?.items) ? entry.items : [];
+  const ids = items.map((item) => String(item?.providerId || item?.id || ''));
+  const consistent = Boolean(entry) && ids.every(Boolean) && new Set(ids).size === ids.length;
+  return { entry, items, confirmed: payload?.completeness?.albumsConfirmed === true && consistent };
+}
+
+// A provider that claims albumsConfirmed must back it with a matching, duplicate-free list;
+// otherwise the claim is withdrawn so the app never transfers a half-read album library.
+function withVerifiedAlbumsClaim(payload) {
+  if (payload?.completeness?.albumsConfirmed !== true) return payload;
+  const { entry, items, confirmed } = albumsFromPayload(payload);
+  const expected = payload.completeness.albumsCount;
+  if (confirmed && (!Number.isInteger(expected) || expected === items.length) && entry.completeness?.confirmed !== false
+    && entry.complete !== false) return payload;
+  return {
+    ...payload,
+    completeness: { ...payload.completeness, albumsConfirmed: false, albumsCount: null, albumsError: 'album_count_mismatch' },
+  };
+}
+
+async function readProviderState() {
+  const stored = await chrome.storage.local.get(PROVIDER_STORAGE_KEY);
+  return {
+    snapshots: stored[PROVIDER_STORAGE_KEY]?.snapshots || {},
+    scans: stored[PROVIDER_STORAGE_KEY]?.scans || {},
+    previousSnapshots: stored[PROVIDER_STORAGE_KEY]?.previousSnapshots || {},
+  };
+}
+
+async function writeProviderState(state) {
+  await chrome.storage.local.set({ [PROVIDER_STORAGE_KEY]: state });
+}
+
+function mutateProviderState(mutate) {
+  const update = providerStateMutationQueue.then(async () => {
+    const state = await readProviderState();
+    const result = await mutate(state);
+    await writeProviderState(state);
+    return { state, result };
+  });
+  providerStateMutationQueue = update.then(() => undefined, () => undefined);
+  return update;
+}
+
+async function reloadTabForReader(tabId, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    let sawLoading = false;
+    let settled = false;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId) return;
+      if (changeInfo.status === 'loading') sawLoading = true;
+      if (sawLoading && changeInfo.status === 'complete') finish();
+    };
+    const timeout = setTimeout(() => finish(new Error('Вкладка музыкального сервиса не перезагрузилась вовремя.')), timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.reload(tabId).catch(finish);
+  });
+}
+
+async function waitForProviderTabReady(tabId, timeoutMs = 30000) {
+  const current = await chrome.tabs.get(tabId).catch(() => null);
+  if (!current || current.status !== 'loading') return;
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') finish();
+    };
+    const timeout = setTimeout(() => finish(new Error('Страница музыкального сервиса не загрузилась вовремя.')), timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    // Close the small race between the first status check and listener registration.
+    void chrome.tabs.get(tabId).then((latest) => {
+      if (!latest || latest.status !== 'loading') finish();
+    }).catch(finish);
+  });
+}
+
+function repairStaleProviderTabs() {
+  if (providerBridgeRepairTask) return providerBridgeRepairTask;
+  providerBridgeRepairTask = (async () => {
+    const patterns = [
+      'https://open.spotify.com/*',
+      'https://music.apple.com/*',
+      'https://music.yandex.ru/*',
+      'https://zvuk.com/favorites*',
+      'https://zvuk.com/collection*',
+      'https://zvuk.com/playlist/*',
+    ];
+    const tabs = await chrome.tabs.query({ url: patterns }).catch(() => []);
+    const results = await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
+      try {
+        const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
+        if (health?.ok === true && health.bridgeProtocol === 3) return { repaired: false, ok: true };
+      } catch {
+        // A stale content script loses its extension context after the worker update.
+      }
+      try {
+        await reloadTabForReader(tab.id);
+        const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
+        return { repaired: true, ok: health?.ok === true && health.bridgeProtocol === 3 };
+      } catch {
+        return { repaired: true, ok: false };
+      }
+    }));
+    return {
+      checked: results.length,
+      repaired: results.filter((result) => result.repaired && result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+    };
+  })().finally(() => { providerBridgeRepairTask = null; });
+  return providerBridgeRepairTask;
+}
+
+async function ensureCurrentProviderBridge(tabId) {
+  await waitForProviderTabReady(tabId);
+  let health = null;
+  try {
+    health = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
+  } catch { /* The tab may still host scripts from an earlier extension version. */ }
+  if (health?.ok === true && health.bridgeProtocol === 3) return;
+  await reloadTabForReader(tabId);
+  const reloadedHealth = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
+  if (reloadedHealth?.ok !== true || reloadedHealth.bridgeProtocol !== 3) {
+    throw new Error('Вкладка музыкального сервиса не подключилась после обновления.');
+  }
+}
+
+async function startProviderLibraryScan(tabId, startMessage) {
+  await ensureCurrentProviderBridge(tabId);
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: startMessage });
+    return;
+  } catch {
+    // Existing tabs do not receive newly installed/updated content scripts until navigation.
+    await reloadTabForReader(tabId);
+    await chrome.tabs.sendMessage(tabId, { type: startMessage });
+  }
+}
+
+async function requestProviderLibrary(provider, refresh) {
+  const providers = {
+    spotify: { tabPattern: 'https://open.spotify.com/*', origin: 'https://open.spotify.com', startMessage: 'spotify:start-library-scan' },
+    'yandex-music': { tabPattern: 'https://music.yandex.ru/*', origin: 'https://music.yandex.ru', startMessage: 'yandex:start-library-scan' },
+    'apple-music': { tabPattern: 'https://music.apple.com/*', origin: 'https://music.apple.com', startMessage: 'apple:start-library-scan' },
+  };
+  const providerConfig = providers[provider];
+  if (!providerConfig) return { error: `Для ${provider || 'этого сервиса'} пока нет сборщика библиотеки.` };
+  let state = await readProviderState();
+  let scan = state.scans[provider];
+  const lastUpdate = Date.parse(scan?.updatedAt || scan?.startedAt || '');
+  let lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+    .find((snapshot) => snapshot?.completeness?.confirmed === true);
+  if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > PROVIDER_SCAN_STALE_AFTER_MS) {
+    const staleMessage = 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.';
+    const update = await mutateProviderState((current) => {
+      const latest = current.scans[provider];
+      const latestAt = Date.parse(latest?.updatedAt || latest?.startedAt || '');
+      if (latest?.status !== 'reading' || !Number.isFinite(latestAt) || Date.now() - latestAt <= PROVIDER_SCAN_STALE_AFTER_MS) return false;
+      current.scans[provider] = { status: 'failed', message: staleMessage, updatedAt: new Date().toISOString() };
+      return true;
+    });
+    state = update.state;
+    scan = state.scans[provider];
+    lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+      .find((snapshot) => snapshot?.completeness?.confirmed === true);
+    if (update.result) {
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: staleMessage };
+      return { error: staleMessage, status: 'failed' };
+    }
+  }
+  if (refresh && scan?.status !== 'reading') {
+    const tabs = await chrome.tabs.query({ url: providerConfig.tabPattern });
+    const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+    const providerName = provider === 'spotify' ? 'Spotify Web Player' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс Музыку';
+    if (!tab?.id) {
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Откройте ${providerName}, чтобы обновить сохранённый снимок.` };
+      return { error: `Откройте ${providerName}, войдите и дождитесь загрузки библиотеки, затем повторите.` };
+    }
+    const start = await mutateProviderState((current) => {
+      if (current.scans[provider]?.status === 'reading') return false;
+      const currentLastGood = [current.snapshots[provider], current.previousSnapshots[provider]]
+        .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      current.previousSnapshots[provider] = currentLastGood || null;
+      current.snapshots[provider] = null;
+      current.scans[provider] = { status: 'reading', message: `Запускаем чтение ${providerName}…`, startedAt: new Date().toISOString() };
+      return true;
+    });
+    state = start.state;
+    if (!start.result) {
+      const currentSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+        .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      return { pending: true, progress: state.scans[provider]?.message || `Читаем ${providerName}…`, payload: currentSnapshot, cached: Boolean(currentSnapshot), stale: Boolean(currentSnapshot) };
+    }
+    try {
+      await startProviderLibraryScan(tab.id, providerConfig.startMessage);
+    } catch {
+      const failureMessage = `Не удалось подключить сборщик к ${providerName}. Проверьте вход и повторите сбор.`;
+      const failed = await mutateProviderState((current) => {
+        if (current.scans[provider]?.status === 'reading') {
+          current.scans[provider] = { status: 'failed', message: failureMessage, updatedAt: new Date().toISOString() };
+        }
+        return current.scans[provider];
+      });
+      state = failed.state;
+      lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
+        .find((snapshot) => snapshot?.completeness?.confirmed === true);
+      if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: failed.result.message };
+      return { error: failed.result.message, status: 'failed' };
+    }
+    return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+  }
+  if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, payload: lastGoodSnapshot, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+  if (scan?.status === 'failed') {
+    if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message || `Обновление ${provider} не завершилось.` };
+    return { error: scan.message || `Не удалось прочитать ${provider}.`, status: 'failed' };
+  }
+  const payload = state.snapshots[provider];
+  if (payload?.completeness?.confirmed === true) {
+    const cachedAt = payload.snapshotCachedAt || (scan?.status === 'complete' ? scan.updatedAt : null);
+    const stale = snapshotIsStale(payload, cachedAt);
+    return { payload, stale, cached: true, cachedAt, message: stale ? 'Снимок старше шести часов; обновите его.' : '' };
+  }
+  if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: `Сохранён последний полный снимок ${provider}.` };
+  return { error: 'Сбор Spotify не запускался. Повторите импорт из расширения.' };
+}
+
+async function requestZvukLibrary(refresh) {
+  const state = await readState();
+  const payload = createLibraryPayload(state);
+  const lastGoodSnapshot = payload.completeness.confirmed ? payload : state.previousCompleteSnapshot;
+  if (payload.completeness.confirmed && !refresh) {
+    const stale = snapshotIsStale(payload, state.scan?.finishedAt);
+    return { payload, stale, cached: true, cachedAt: payload.snapshotCachedAt || state.scan?.finishedAt || null,
+      message: stale ? 'Снимок старше шести часов; обновите его.' : '' };
+  }
+  if (state.scan?.active) {
+    const lastActivity = Date.parse(state.updatedAt || state.scan.startedAt || '');
+    if (Number.isFinite(lastActivity) && Date.now() - lastActivity > PROVIDER_SCAN_STALE_AFTER_MS) {
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Сбер.Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; повторите сканирование.' };
+      state.captureEnabled = false;
+      state.automation = { ...state.automation, active: false };
+      state.error = state.scan.error;
+      await writeState(state);
+      if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan.error };
+      return { error: state.scan.error, status: 'failed' };
+    }
+    return {
+      pending: true,
+      progress: state.scan.message || `Сбер.Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
+      payload: state.previousCompleteSnapshot || null,
+      cached: Boolean(state.previousCompleteSnapshot),
+      stale: Boolean(state.previousCompleteSnapshot),
+    };
+  }
+  if (!refresh && lastGoodSnapshot?.completeness?.confirmed === true) {
+    return { payload: lastGoodSnapshot, cached: true, stale: true, message: state.scan?.error || 'Сохранён последний полный снимок Сбер.Звука.' };
+  }
+  if (!refresh) return { error: state.error || 'Сбор библиотеки Сбер.Звука не запускался.', status: state.error ? 'failed' : 'unavailable' };
+  let tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
+  if (!tabs.length) tabs = await chrome.tabs.query({ url: 'https://zvuk.com/*' });
+  const tab = tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+  if (!tab?.id) {
+    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: 'Откройте Сбер.Звук, чтобы обновить сохранённый снимок.' };
+    return { error: 'Откройте Сбер.Звук в Chrome и войдите в аккаунт.' };
+  }
+  const result = await startAccountScan(tab.id, { forceRefresh: true });
+  if (!result?.ok) {
+    if (lastGoodSnapshot?.completeness?.confirmed === true) return { payload: lastGoodSnapshot, cached: true, stale: true, message: result?.error || 'Не удалось обновить Сбер.Звук; сохранён последний полный снимок.' };
+    return { error: result?.error || 'Не удалось запустить сбор библиотеки Сбер.Звука.', status: 'failed' };
+  }
+  return {
+    pending: true,
+    progress: 'Сбер.Звук: собираем лайки, каталог и содержимое плейлистов.',
+    payload: lastGoodSnapshot?.completeness?.confirmed === true ? lastGoodSnapshot : null,
+    cached: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
+    stale: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
+  };
+}
+
+async function requestAllLibraries(refresh, refreshProviders = null) {
+  const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+  if (refresh === true) {
+    const providersToOpen = Array.isArray(refreshProviders) ? refreshProviders : providers;
+    await openMissingProviderTabs(providersToOpen, { activateFirst: false }).catch(() => {});
+  }
+  const outcomes = await Promise.all(providers.map(async (provider) => {
+    const refreshProvider = refresh === true && (!Array.isArray(refreshProviders) || refreshProviders.includes(provider));
+    const result = provider === 'zvuk'
+      ? await requestZvukLibrary(refreshProvider)
+      : await requestProviderLibrary(provider, refreshProvider);
+    return [provider, result || { error: 'Сервис не вернул состояние.' }];
+  }));
+  const libraries = {};
+  const statuses = {};
+  let pending = false;
+  for (const [provider, result] of outcomes) {
+    if (result.pending) {
+      pending = true;
+      if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) libraries[provider] = result.payload;
+      statuses[provider] = {
+        status: 'scanning',
+        message: String(result.progress || `Сканируем ${provider}…`),
+        cached: result.cached === true,
+      };
+    } else if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) {
+      libraries[provider] = result.payload;
+      statuses[provider] = {
+        status: result.stale ? 'stale' : 'ready',
+        trackCount: result.payload.tracks.length,
+        playlistCount: result.payload.playlists.length,
+        albumCount: albumsFromPayload(result.payload).confirmed ? albumsFromPayload(result.payload).items.length : null,
+        cached: result.cached === true,
+        snapshotCachedAt: result.payload.snapshotCachedAt || result.cachedAt || null,
+        message: result.message || '',
+      };
+    } else {
+      statuses[provider] = {
+        status: result.status === 'failed' ? 'failed' : 'unavailable',
+        message: String(result.error || 'Полная библиотека пока недоступна.'),
+      };
+    }
+  }
+  return { libraries, statuses, pending };
+}
+
+async function openMissingProviderTabs(providerIds = null, { activateFirst = true, focusProviderId = null } = {}) {
+  const allProviders = [
+    { id: 'zvuk', pattern: 'https://zvuk.com/*', url: 'https://zvuk.com/favorites' },
+    { id: 'spotify', pattern: 'https://open.spotify.com/*', url: 'https://open.spotify.com/collection/tracks' },
+    { id: 'yandex-music', pattern: 'https://music.yandex.ru/*', url: 'https://music.yandex.ru/home' },
+    { id: 'apple-music', pattern: 'https://music.apple.com/*', url: 'https://music.apple.com/library' },
+  ];
+  if (providerIds !== null && (!Array.isArray(providerIds)
+    || providerIds.length === 0
+    || providerIds.some((id) => !allProviders.some((provider) => provider.id === id)))) {
+    return { ok: false, error: 'Выберите один или несколько поддерживаемых сервисов.' };
+  }
+  const providers = providerIds === null
+    ? allProviders
+    : allProviders.filter((provider) => providerIds.includes(provider.id));
+  const opened = [];
+  const alreadyOpen = [];
+  for (const provider of providers) {
+    const tabs = await chrome.tabs.query({ url: provider.pattern });
+    const existingTab = tabs.find((tab) => tab.id);
+    if (existingTab) {
+      alreadyOpen.push(provider.id);
+      if (provider.id === focusProviderId) await chrome.tabs.update(existingTab.id, { active: true });
+      continue;
+    }
+    await chrome.tabs.create({ url: provider.url, active: activateFirst && opened.length === 0 });
+    opened.push(provider.id);
+  }
+  return { ok: true, opened, alreadyOpen };
+}
+
+function pageKind(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== 'https://zvuk.com') return '';
+    if (parsed.pathname === '/favorites') return 'favorites';
+    if (parsed.pathname === '/collection' || parsed.pathname.startsWith('/collection/')) return 'collection';
+    if (/^\/playlist\/[^/]+/.test(parsed.pathname)) return 'playlist';
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+function messageMatchesPage(type, kind) {
+  if (type === 'zvuk:favorite-page') return kind === 'favorites';
+  if (type === 'zvuk:favorites-scroll-end' || type === 'zvuk:favorites-scroll-stall') return kind === 'favorites';
+  if (type === 'zvuk:scan-progress') return kind === 'favorites';
+  if (type === 'zvuk:playlist-list-page') return kind === 'collection';
+  if (type === 'zvuk:playlist-metadata') return kind === 'collection' || kind === 'playlist';
+  if (type === 'zvuk:release-list-page') return kind === 'collection';
+  if (type === 'zvuk:release-metadata') return kind === 'collection';
+  if (type === 'zvuk:playlist-track-page') return kind === 'playlist';
+  if (type === 'zvuk:collection-scroll-end') return kind === 'collection';
+  if (type === 'zvuk:collection-scroll-stall') return kind === 'collection';
+  if (type === 'zvuk:playlist-scroll-end') return kind === 'playlist';
+  return type === 'zvuk:collection-count' || type === 'zvuk:read-error';
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const handleMessage = () => (async () => {
+    if (message?.type === 'music-importer:progress-ack') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false });
+        return;
+      }
+      const acknowledged = acknowledgeTransferCheckpoint(message.checkpointAckId, message.ok === true);
+      sendResponse({ ok: acknowledged });
+      return;
+    }
+
+    if (message?.type === 'music-importer:open-provider-tabs') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
+        return;
+      }
+      try {
+        const focusProviderId = message.focusProviderId ?? null;
+        const allowedIds = new Set(['zvuk', 'spotify', 'yandex-music', 'apple-music']);
+        if (focusProviderId !== null
+          && (typeof focusProviderId !== 'string' || !allowedIds.has(focusProviderId)
+            || (Array.isArray(message.providerIds) && !message.providerIds.includes(focusProviderId)))) {
+          sendResponse({ ok: false, error: 'Некорректный сервис для входа.' });
+          return;
+        }
+        sendResponse(await openMissingProviderTabs(message.providerIds ?? null, { focusProviderId }));
+      } catch {
+        sendResponse({ ok: false, error: 'Не удалось открыть вкладки музыкальных сервисов.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'music-importer:repair-provider-bridges') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
+        return;
+      }
+      try {
+        sendResponse({ ok: true, ...(await repairStaleProviderTabs()) });
+      } catch {
+        sendResponse({ ok: false, error: 'Не удалось восстановить соединение с открытыми сервисами.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'zvuk:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://zvuk.com') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const acknowledged = await forwardTransferProgress('zvuk', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
+      return;
+    }
+
+    if (message?.type === 'music-importer:zvuk-command') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      if (!/^[a-z0-9-]{16,80}$/i.test(String(message.requestId || '')) || !['search-tracks', 'search-album-tracks', 'search-albums', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Некорректная команда Сбер.Звука.' });
+        return;
+      }
+      if (message.action === 'execute-transfer') {
+        const plan = message.plan;
+        if (plan?.type !== 'music-transfer-plan' || plan?.target?.provider !== 'zvuk'
+          || !Array.isArray(plan.operations)
+          || plan.operations.some((operation) => operation?.target?.provider !== 'zvuk' || !operation?.target?.providerId)
+          || !Array.isArray(plan.completeness?.source) || !plan.completeness.source.length
+          || plan.completeness.source.some((status) => status?.confirmed !== true)) {
+          sendResponse({ ok: false, error: 'План Сбер.Звука неполный или содержит другую цель.' });
+          return;
+        }
+      }
+      const tabs = await chrome.tabs.query({ url: ['https://zvuk.com/favorites*', 'https://zvuk.com/collection*', 'https://zvuk.com/playlist/*'] });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте вкладку Сбер.Звука и войдите в аккаунт, затем повторите.' });
+        return;
+      }
+      try {
+        await ensureCurrentProviderBridge(tab.id);
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'zvuk:command',
+          requestId: String(message.requestId),
+          action: message.action,
+          query: String(message.query || '').slice(0, 400),
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
+          plan: message.action === 'execute-transfer' ? message.plan : undefined,
+        });
+        sendResponse(response || { ok: false, error: 'Сбер.Звук не вернул результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Сбер.Звука. Перезагрузите её и повторите.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'spotify:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://open.spotify.com') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const acknowledged = await forwardTransferProgress('spotify', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
+      return;
+    }
+
+    if (message?.type === 'music-importer:spotify-command') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      const requestId = String(message.requestId || '');
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'write-albums', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Некорректная команда Spotify.' });
+        return;
+      }
+      if (message.action === 'write-albums'
+        && (!Array.isArray(message.targets) || !message.targets.length || message.targets.length > 500
+          || message.targets.some((target) => target?.provider !== 'spotify' || !String(target?.providerId || '')))) {
+        sendResponse({ ok: false, error: 'Список альбомов Spotify пуст или содержит другую цель.' });
+        return;
+      }
+      if (message.action === 'execute-transfer') {
+        const plan = message.plan;
+        if (plan?.type !== 'music-transfer-plan' || plan?.target?.provider !== 'spotify'
+          || !Array.isArray(plan.operations)
+          || plan.operations.some((operation) => operation?.target?.provider !== 'spotify' || !operation?.target?.providerId)
+          || !Array.isArray(plan.completeness?.source) || !plan.completeness.source.length
+          || plan.completeness.source.some((status) => status?.confirmed !== true)) {
+          sendResponse({ ok: false, error: 'План Spotify неполный или содержит другую цель.' });
+          return;
+        }
+      }
+      const tabs = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте Spotify Web Player, войдите в аккаунт и повторите.' });
+        return;
+      }
+      try {
+        await ensureCurrentProviderBridge(tab.id);
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'spotify:command', requestId, action: message.action,
+          query: String(message.query || '').slice(0, 400),
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
+          upc: String(message.upc || '').replace(/[^0-9]/g, '').slice(0, 20),
+          ids: Array.isArray(message.ids) ? message.ids.slice(0, 500).map((id) => String(id).slice(0, 80)) : undefined,
+          targets: message.action === 'write-albums' ? message.targets : undefined,
+          plan: message.action === 'execute-transfer' ? message.plan : undefined,
+        });
+        sendResponse(response || { ok: false, error: 'Spotify не вернул результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Spotify. Перезагрузите её и повторите.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'apple:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://music.apple.com') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const acknowledged = await forwardTransferProgress('apple', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
+      return;
+    }
+
+    if (message?.type === 'music-importer:apple-command') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      const requestId = String(message.requestId || '');
+      if (!/^[a-z0-9-]{16,80}$/i.test(requestId) || !['search-tracks', 'search-album-tracks', 'search-albums', 'read-library-albums', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Некорректная команда Apple Music.' });
+        return;
+      }
+      if (message.action === 'execute-transfer'
+        && (message.plan?.type !== 'music-transfer-plan' || message.plan?.target?.provider !== 'apple-music')) {
+        sendResponse({ ok: false, error: 'План не предназначен для Apple Music.' });
+        return;
+      }
+      const tabs = await chrome.tabs.query({ url: 'https://music.apple.com/*' });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте Apple Music, войдите в аккаунт и дождитесь загрузки библиотеки.' });
+        return;
+      }
+      try {
+        await ensureCurrentProviderBridge(tab.id);
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'apple:command',
+          requestId,
+          action: message.action,
+          query: String(message.query || '').slice(0, 400),
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
+          upc: String(message.upc || '').replace(/[^0-9]/g, '').slice(0, 20),
+          storefront: String(message.storefront || '').slice(0, 2),
+          plan: message.action === 'execute-transfer' ? message.plan : undefined,
+        });
+        sendResponse(response || { ok: false, error: 'Apple Music не вернул результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Apple Music. Перезагрузите её и повторите.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'yandex:transfer-progress') {
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== 'https://music.yandex.ru') {
+        sendResponse({ ok: false });
+        return;
+      }
+      const acknowledged = await forwardTransferProgress('yandex', message.requestId, message.progress);
+      sendResponse({ ok: acknowledged, error: acknowledged ? null : 'Checkpoint не сохранён приложением.' });
+      return;
+    }
+
+    if (message?.type === 'music-importer:yandex-command') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      if (!['search-tracks', 'search-album-tracks', 'search-albums', 'read-albums', 'execute-transfer'].includes(message.action)) {
+        sendResponse({ ok: false, error: 'Неизвестная команда Яндекс.Музыки.' });
+        return;
+      }
+      const tabs = await chrome.tabs.query({ url: 'https://music.yandex.ru/*' });
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs.find((candidate) => candidate.id === activeTab?.id)
+        || tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Откройте Яндекс Музыку и войдите в аккаунт, затем повторите.' });
+        return;
+      }
+      try {
+        await ensureCurrentProviderBridge(tab.id);
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'yandex:command',
+          action: message.action,
+          requestId: String(message.requestId || ''),
+          query: message.query,
+          album: String(message.album || '').slice(0, 200),
+          artist: String(message.artist || '').slice(0, 200),
+          plan: message.plan,
+        });
+        sendResponse(response || { ok: false, error: 'Расширение Яндекс.Музыки не вернуло результат.' });
+      } catch {
+        sendResponse({ ok: false, error: 'Расширение не подключено к вкладке Яндекс.Музыки. Перезагрузите её.' });
+      }
+      return;
+    }
+
+    if (message?.type === 'music-importer:get-library') {
+      if (message.provider && message.provider !== 'zvuk') {
+        sendResponse(await requestProviderLibrary(message.provider, message.refresh === true));
+        return;
+      }
+      const state = await readState();
+      const payload = createLibraryPayload(state);
+      if (!payload.completeness.confirmed) {
+        sendResponse({ error: 'Сначала завершите полный сбор Сбер.Звука и дождитесь подтверждения лайков и всех плейлистов.' });
+        return;
+      }
+      sendResponse({ payload });
+      return;
+    }
+
+    if (message?.type === 'music-importer:get-all-libraries') {
+      if (!isAppSender(sender)) {
+        sendResponse({ error: 'Команда доступна только локальному приложению.' });
+        return;
+      }
+      const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+      if (message.refreshProviders !== undefined && message.refreshProviders !== null
+        && (!Array.isArray(message.refreshProviders) || message.refreshProviders.some((provider) => !providers.includes(provider)))) {
+        sendResponse({ error: 'Некорректный список сервисов для обновления.' });
+        return;
+      }
+      sendResponse(await requestAllLibraries(message.refresh === true, message.refreshProviders ?? null));
+      return;
+    }
+
+    if (message?.type === 'music-importer:clear-library-snapshots') {
+      if (!isAppSender(sender)) {
+        sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
+        return;
+      }
+      const [providerState, zvukState] = await Promise.all([readProviderState(), readState()]);
+      const scanRunning = Object.values(providerState.scans).some((scan) => ['reading', 'scanning'].includes(scan?.status))
+        || zvukState.scan?.active === true || zvukState.automation?.active === true;
+      if (scanRunning) {
+        sendResponse({ ok: false, error: 'Сначала дождитесь завершения или остановите сбор библиотек.' });
+        return;
+      }
+      try {
+        await chrome.storage.local.remove([STORAGE_KEY, PROVIDER_STORAGE_KEY]);
+        sendResponse({ ok: true });
+      } catch {
+        sendResponse({ ok: false, error: 'Chrome не смог удалить локальные снимки. Повторите попытку.' });
+      }
+      return;
+    }
+
+    const providerMessage = /^(spotify|yandex|apple):(?:scan-progress|library-snapshot|scan-error)$/.exec(String(message?.type || ''));
+    if (providerMessage) {
+      const provider = providerMessage[1] === 'yandex' ? 'yandex-music' : providerMessage[1] === 'apple' ? 'apple-music' : 'spotify';
+      const expectedOrigin = provider === 'spotify' ? 'https://open.spotify.com' : provider === 'apple-music' ? 'https://music.apple.com' : 'https://music.yandex.ru';
+      let origin = '';
+      try { origin = new URL(sender.tab?.url || sender.url || '').origin; } catch { /* Invalid sender URL. */ }
+      if (sender.id !== chrome.runtime.id || origin !== expectedOrigin) {
+        sendResponse({ ok: false });
+        return;
+      }
+      await mutateProviderState((state) => {
+        if (message.type.endsWith(':scan-progress')) {
+          state.scans[provider] = { status: 'reading', message: String(message.message || `Читаем ${provider}…`).slice(0, 240), updatedAt: new Date().toISOString() };
+        } else if (message.type.endsWith(':scan-error')) {
+          state.scans[provider] = { status: 'failed', message: String(message.error || `Не удалось прочитать ${provider}.`).slice(0, 500), updatedAt: new Date().toISOString() };
+        } else {
+          const payload = message.payload;
+          const valid = payload?.service === provider
+            && payload?.collection?.type === 'library'
+            && payload?.completeness?.confirmed === true
+            && payload?.completeness?.favoritesConfirmed === true
+            && payload?.completeness?.catalogConfirmed === true
+            && (provider !== 'apple-music' || payload?.completeness?.librarySongsConfirmed === true)
+            && (provider !== 'yandex-music' || payload?.completeness?.playlistCatalogKindsConfirmed === true)
+            && payload?.completeness?.playlistItemsConfirmed === true
+            && Array.isArray(payload?.tracks)
+            && payload?.completeness?.favoritesCount === payload.tracks.length
+            && Array.isArray(payload?.playlists)
+            && payload?.completeness?.playlistItemsTotal === payload.playlists.length
+            && payload.playlists.every((playlist) => playlist.complete === true && Array.isArray(playlist.tracks)
+              && playlist.trackCount === playlist.tracks.length
+              && playlist.tracks.every((track, position) => String(track.id || track.providerId || '') !== ''
+                && (track.position === undefined || track.position === position)));
+          if (!valid) {
+            state.scans[provider] = { status: 'failed', message: `${provider} не подтвердил полноту каталога, лайков и плейлистов.`, updatedAt: new Date().toISOString() };
+          } else {
+            const snapshotCachedAt = new Date().toISOString();
+            const stored = { ...withVerifiedAlbumsClaim(payload), snapshotCachedAt };
+            state.snapshots[provider] = stored;
+            delete state.previousSnapshots[provider];
+            const albums = albumsFromPayload(stored);
+            state.scans[provider] = { status: 'complete', message: `Собрано ${payload.tracks.length} лайков, ${payload.playlists.length} плейлистов${albums.confirmed ? ` и ${albums.items.length} альбомов` : ''}.`, updatedAt: snapshotCachedAt, snapshotCachedAt };
+          }
+        }
+      });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:state') {
+      sendResponse(await readState());
+      return;
+    }
+
+    if (message?.type === 'zvuk:start-library') {
+      sendResponse(await startAccountScan(message.tabId));
+      return;
+    }
+
+    if (message?.type === 'zvuk:start') {
+      const state = await readState();
+      state.captureEnabled = true;
+      state.error = null;
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:stop') {
+      const state = await readState();
+      state.captureEnabled = false;
+      state.automation = { ...state.automation, active: false };
+      state.scan = { ...state.scan, active: false, phase: 'stopped', finishedAt: new Date().toISOString() };
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:clear') {
+      const state = await readState();
+      state.tracks = [];
+      state.previousCompleteSnapshot = null;
+      state.pagesSeen = 0;
+      state.receivedCount = 0;
+      state.expectedCount = null;
+      state.hasMore = null;
+      state.playlists = [];
+      state.albums = [];
+      state.albumPagesSeen = 0;
+      state.expectedAlbumCount = null;
+      state.albumListHasMore = null;
+      state.playlistPagesSeen = 0;
+      state.expectedPlaylistCount = null;
+      state.playlistListHasMore = null;
+      state.favoritesScanFinished = false;
+      state.collectionScrollFinished = false;
+      state.scan = { active: false, phase: 'idle', tabId: null, startedAt: null };
+      state.automation = { active: false, tabId: null, currentPlaylistId: null, startedAt: null };
+      state.captureEnabled = false;
+      state.updatedAt = null;
+      state.error = null;
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:run-playlists') {
+      const state = await readState();
+      sendResponse(await beginPlaylistScan(state, message.tabId));
+      return;
+    }
+
+    const kind = pageKind(sender.url);
+    if (sender.id !== chrome.runtime.id || !kind || !messageMatchesPage(message?.type, kind)) {
+      sendResponse({ ok: false });
+      return;
+    }
+    const state = await readState();
+    if (!state.captureEnabled) {
+      sendResponse({ ok: false });
+      return;
+    }
+
+    if (message?.type === 'zvuk:favorite-page') {
+      const byId = new Map(state.tracks.map((track) => [track.id, track]));
+      for (const track of message.tracks || []) {
+        if (track?.id && track?.title) byId.set(String(track.id), track);
+      }
+      state.tracks = [...byId.values()];
+      state.pagesSeen += 1;
+      state.receivedCount += (message.tracks || []).length;
+      state.hasMore = Boolean(message.hasMore);
+      state.updatedAt = new Date().toISOString();
+      state.error = null;
+      await writeState(state);
+      sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:favorites-scroll-end') {
+      state.favoritesScanFinished = true;
+      state.hasMore = false;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:favorites-scroll-stall') {
+      const reason = String(message.reason || '').trim().slice(0, 240);
+      const error = reason
+        ? `Загрузка избранного остановилась до последней страницы. Причина: ${reason}`
+        : 'Загрузка избранного остановилась до последней страницы.';
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error };
+      state.captureEnabled = false;
+      state.error = error;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:collection-count') {
+      state.expectedCount = Number.isInteger(message.uniqueTrackCount) ? message.uniqueTrackCount : null;
+      state.expectedPlaylistCount = Number.isInteger(message.uniquePlaylistCount) ? message.uniquePlaylistCount : state.expectedPlaylistCount;
+      state.expectedAlbumCount = Number.isInteger(message.uniqueReleaseCount) ? message.uniqueReleaseCount : state.expectedAlbumCount;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:scan-progress') {
+      state.scan = { ...state.scan, message: String(message.message || 'Сканируем библиотеку Сбер.Звука.').slice(0, 240) };
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:playlist-list-page' || message?.type === 'zvuk:playlist-metadata') {
+      const byId = new Map(state.playlists.map((playlist) => [playlist.id, playlist]));
+      for (const incoming of message.playlists || []) {
+        if (!incoming?.id || !incoming?.title) continue;
+        const prior = byId.get(String(incoming.id)) || { id: String(incoming.id), title: String(incoming.title), tracks: [], pagesSeen: 0, offsetsSeen: [] };
+        const updated = {
+          ...prior,
+          title: String(incoming.title),
+          trackCount: Number.isInteger(incoming.trackCount) ? incoming.trackCount : prior.trackCount ?? null,
+        };
+        updated.complete = Number.isInteger(updated.trackCount)
+          && updated.tracks.length === updated.trackCount
+          && updated.tracks.every((item, position) => item.position === position);
+        byId.set(String(incoming.id), updated);
+      }
+      state.playlists = [...byId.values()];
+      if (message.type === 'zvuk:playlist-list-page') {
+        state.playlistPagesSeen += 1;
+        state.playlistListHasMore = Boolean(message.hasMore);
+      }
+      state.updatedAt = new Date().toISOString();
+      state.error = null;
+      await writeState(state);
+      sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:release-list-page' || message?.type === 'zvuk:release-metadata') {
+      mergeZvukReleases(state, message.releases);
+      if (message.type === 'zvuk:release-list-page') {
+        state.albumPagesSeen += 1;
+        state.albumListHasMore = Boolean(message.hasMore);
+      }
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:playlist-track-page') {
+      const playlistId = String(message.playlistId || '');
+      if (!playlistId) { sendResponse({ ok: false }); return; }
+      let playlist = state.playlists.find((item) => item.id === playlistId);
+      if (!playlist) {
+        playlist = { id: playlistId, title: `Плейлист ${playlistId}`, trackCount: null, tracks: [], pagesSeen: 0, offsetsSeen: [] };
+        state.playlists.push(playlist);
+      }
+      const offset = Math.max(0, Number(message.offset) || 0);
+      const limit = Math.max(0, Number(message.limit) || 0);
+      const pageTracks = Array.isArray(message.tracks) ? message.tracks : [];
+      const itemsByPosition = new Map(playlist.tracks.map((item) => [item.position, item]));
+      pageTracks.forEach((track, index) => {
+        if (track?.id && track?.title) itemsByPosition.set(offset + index, { ...track, position: offset + index });
+      });
+      playlist.tracks = [...itemsByPosition.values()].sort((left, right) => left.position - right.position);
+      playlist.pagesSeen = Number(playlist.pagesSeen || 0) + 1;
+      playlist.offsetsSeen = [...new Set([...(playlist.offsetsSeen || []), offset])].sort((left, right) => left - right);
+      playlist.lastOffset = offset;
+      playlist.lastPageSize = pageTracks.length;
+      playlist.lastPageHasMore = playlist.trackCount === null || playlist.trackCount === undefined
+        ? (limit > 0 && pageTracks.length >= limit)
+        : offset + pageTracks.length < playlist.trackCount;
+      playlist.complete = Number.isInteger(playlist.trackCount)
+        && playlist.tracks.length === playlist.trackCount
+        && playlist.tracks.every((item, position) => item.position === position);
+      const atAutomationPlaylist = state.automation?.active
+        && state.automation.tabId === sender.tab?.id
+        && state.automation.currentPlaylistId === playlistId;
+      const pageEnded = playlist.trackCount !== null && playlist.trackCount !== undefined
+        ? offset + pageTracks.length >= playlist.trackCount
+        : limit > 0 && pageTracks.length < limit;
+      if (atAutomationPlaylist && pageEnded) playlist.itemsScanFinished = true;
+      if (atAutomationPlaylist && pageEnded && !playlist.complete) playlist.incompleteReason = 'Количество полученных элементов не сошлось с trackCount/порядком страниц.';
+      state.updatedAt = new Date().toISOString();
+      state.error = null;
+      await writeState(state);
+      sendResponse({ ok: true });
+      if (atAutomationPlaylist && pageEnded) await advancePlaylistAutomation(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:playlist-scroll-end') {
+      const playlistId = String(message.playlistId || '');
+      const playlist = state.playlists.find((item) => item.id === playlistId);
+      const atAutomationPlaylist = state.automation?.active
+        && state.automation.tabId === sender.tab?.id
+        && state.automation.currentPlaylistId === playlistId;
+      if (playlist) {
+        playlist.itemsScanFinished = true;
+        if (!playlist.complete) playlist.incompleteReason = 'Прокрутка страницы остановилась до подтверждения всех элементов.';
+      }
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      if (atAutomationPlaylist) await advancePlaylistAutomation(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:collection-scroll-end') {
+      state.collectionScrollFinished = true;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      await advanceAccountScan(state);
+      return;
+    }
+
+    if (message?.type === 'zvuk:collection-scroll-stall') {
+      const operation = ['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(message.operation)
+        ? message.operation : '';
+      const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
+        ? message.httpStatus : null;
+      const error = status
+        ? `Каталог плейлистов: ${operation || 'запрос'} вернул HTTP ${status}. Проверьте вход в Сбер.Звук и повторите сбор.`
+        : operation
+          ? `Каталог плейлистов: запрос ${operation} ${message.graphqlError === true ? 'вернул GraphQL-ошибку' : message.invalidJson === true ? 'вернул не JSON' : message.invalidPagination === true ? 'вернул неполную пагинацию' : message.invalidShape === true ? 'вернул неожиданный формат' : 'не вернул ожидаемую страницу'}. Возможно, сервис изменил формат ответа.`
+          : message.reason === 'pagination-stalled'
+            ? 'Загрузка каталога остановилась до следующей страницы. Повторите сбор; если повторится, пришлите диагностику.'
+            : 'Каталог не ответил за минуту. Проверьте, что Сбер.Звук загрузился, и повторите сбор.';
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error };
+      state.captureEnabled = false;
+      state.error = error;
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === 'zvuk:read-error') {
+      const operation = ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(message.operation)
+        ? message.operation : 'запрос чтения';
+      const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
+        ? message.httpStatus : null;
+      state.error = status
+        ? `Сбер.Звук: ${operation} вернул HTTP ${status}. Проверьте вход и повторите сбор.`
+        : message.graphqlError === true
+          ? `Сбер.Звук вернул GraphQL-ошибку при запросе ${operation}. Повторите сбор; при повторе потребуется обновить коннектор.`
+          : message.invalidJson === true
+            ? `Сбер.Звук вернул не JSON при запросе ${operation}. Возможно, изменился API.`
+            : message.invalidPagination === true
+              ? `Сбер.Звук вернул неполную пагинацию при запросе ${operation}. Возможно, изменился API.`
+            : `Сбер.Звук вернул неподдерживаемый ответ при запросе ${operation}. Возможно, изменился API.`;
+      const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
+      const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;
+      if (state.scan?.active && state.scan.tabId === sender.tab?.id && state.scan.phase !== 'playlists_items') {
+        state.scan = { ...state.scan, active: false, phase: 'needs_review', error: state.error };
+        state.captureEnabled = false;
+      }
+      if (current && atAutomationPlaylist) {
+        current.itemsScanFinished = true;
+        current.incompleteReason = 'Сервис вернул ошибку при чтении playlist page.';
+      }
+      state.updatedAt = new Date().toISOString();
+      await writeState(state);
+      sendResponse({ ok: true });
+      if (atAutomationPlaylist) await advancePlaylistAutomation(state);
+      return;
+    }
+    sendResponse({ ok: false });
+  })().catch(() => sendResponse({ ok: false, error: 'Не удалось обновить локальное состояние.' }));
+  if (SERIALIZED_STATE_MESSAGE_TYPES.has(message?.type)) {
+    const update = zvukStateMutationQueue.then(handleMessage, handleMessage);
+    zvukStateMutationQueue = update.then(() => undefined, () => undefined);
+  } else {
+    void handleMessage();
+  }
+  return true;
+});
