@@ -29,7 +29,7 @@ test('evaluate distinguishes missing, fresh, check and stale snapshots', () => {
   assert.equal(cache.evaluate({ cachedSnapshot: snapshot(), lastCheckedAt: new Date(now - 60000).toISOString(), now }), 'fresh');
   assert.equal(cache.evaluate({ cachedSnapshot: snapshot(), lastCheckedAt: new Date(now - 7 * hour).toISOString(), now }), 'check');
   assert.equal(cache.evaluate({ cachedSnapshot: snapshot({ completeness: { confirmed: false } }), now }), 'stale');
-  assert.equal(cache.evaluate({ cachedSnapshot: snapshot({ exportedAt: new Date(now - 8 * 24 * hour).toISOString() }), now }), 'stale');
+  assert.equal(cache.evaluate({ cachedSnapshot: snapshot({ exportedAt: new Date(now - 8 * 24 * hour).toISOString(), snapshotCachedAt: new Date(now - 8 * 24 * hour).toISOString() }), now }), 'stale');
 });
 
 test('diffAgainstPulse re-reads only changed, new or unconfirmed collections', () => {
