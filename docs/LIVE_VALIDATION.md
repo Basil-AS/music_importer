@@ -1,5 +1,14 @@
 # Live validation log
 
+## 2026-10-30 — read-only scan in the user's existing Chrome profile
+
+- Used the user's ordinary Chrome profile only; no separate profile was created. The Music Importer extension UI and signed-in provider tabs were already present. No cookies, access tokens, authorization headers, track names, or playlist names were read or copied.
+- With the user's approval, triggered the app's **Обновить открытые аккаунты** action. This was a read-only refresh; no catalog search or account write was run.
+- Yandex Music paginated Liked Songs and reported progress through 4,525 of 4,981 items, then the aggregate scan ended with `Нет подтверждённого состава плейлиста «Понравилось на Кинопоиске»`. The importer did not accept a complete Yandex snapshot.
+- Zvuk returned a sanitized unsupported-response error for `getPaginatedCollectionAll`. Spotify stalled while checking for a refreshed page session and timed out without saving a partial snapshot. Apple Music reported that it could not confirm favorite status for 341 songs and rejected the incomplete snapshot.
+- Result: the current installed build does **not** successfully load complete libraries from any of the four accounts in this live check. Fixture success must not be represented as live service success. No route was written or read back.
+- The user approved temporarily enabling Chrome's **View → Developer → Allow JavaScript from Apple Events** for this read-only check. macOS denied UI automation of System Events (`-1743`), so the menu toggle could not be restored by automation. The Chrome preference currently reads `browser.allow_javascript_apple_events: true`; it remains enabled pending a manual click on that menu item. Do not close/relaunch Chrome to restore it, because the existing Spotify tab should not be reloaded as a side effect.
+
 ## 2026-10-30 — responsive, contrast, and stage accessibility pass
 
 - A temporary Chrome profile rendered the local UI with six demo tracks. At CSS viewport widths 320, 375, 390, 820, 821, 900, 960, and 1280 px, document/body widths matched the viewport and no track row exceeded its card. The sidebar stacks before the track grid becomes cramped.
