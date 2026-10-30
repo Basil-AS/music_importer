@@ -89,7 +89,13 @@ function makePage(path = '/favorites', respond = null, timerScale = 1) {
         });
         return payload;
       };
-      return { ok: status >= 200 && status < 300, status, json: readPayload, clone: () => ({ json: readPayload }) };
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        headers: { get: (name) => result?.headers?.[String(name).toLowerCase()] || null },
+        json: readPayload,
+        clone: () => ({ json: readPayload }),
+      };
     },
   };
   const context = {
@@ -220,6 +226,28 @@ test('Zvuk catalog reader follows playlist cursors and confirms every saved page
   assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
 });
 
+test('Zvuk catalog falls back to the root cursor when the nested playlist page is empty', async () => {
+  const page = makePage('/collection', ({ payload }) => {
+    const cursor = payload.variables?.after || null;
+    if (!cursor) return { data: { paginatedCollectionAll: {
+      playlists: { items: [{ id: 'playlist-first', title: 'First', trackCount: 0 }], page: {} },
+      page: { endCursor: 'root-next', hasNextPage: true },
+    } } };
+    return { data: { paginatedCollectionAll: {
+      playlists: { items: [{ id: 'playlist-second', title: 'Second', trackCount: 0 }], page: { endCursor: null, hasNextPage: false } },
+      page: { endCursor: null, hasNextPage: false },
+    } } };
+  });
+
+  await page.request('getPaginatedCollectionAll', { first: 100, after: null, withPlaylists: true });
+  await page.waitForMessage('collection-scroll-end');
+  assert.deepEqual(page.messages.filter((message) => message.type === 'playlist-list-page')
+    .flatMap((message) => message.playlists.map((playlist) => playlist.id)), ['playlist-first', 'playlist-second']);
+  assert.deepEqual(page.requests.filter((request) => request.payload.operationName === 'getPaginatedCollectionAll')
+    .map((request) => request.payload.variables.after), [null, 'root-next']);
+  assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
+});
+
 test('Zvuk paginates playlist and release sections with their independent cursors', async () => {
   const release = (id) => ({ id, title: `Album ${id}`, artists: [{ title: 'Artist' }], trackCount: 1 });
   const page = makePage('/collection', ({ payload }) => {
@@ -255,7 +283,7 @@ test('Zvuk release-only collection uses the root cursor without claiming playlis
   const page = makePage('/collection', ({ payload }) => {
     const after = payload.variables?.after || '';
     if (!after) return { data: { paginatedCollectionAll: {
-      releases: { items: [release('r1')] },
+      releases: { items: [release('r1')], page: {} },
       page: { endCursor: 'release-next', hasNextPage: true },
     } } };
     return { data: { paginatedCollectionAll: {
@@ -397,12 +425,12 @@ test('Zvuk catalog reports a repeated cursor as an incomplete page walk', async 
 });
 
 test('Zvuk catalog reports only the HTTP status when a cursor replay fails', async () => {
-  const page = makePage('/collection', ({ payload }) => payload.variables?.after
+  const page = makePage('/collection', ({ payload }) => (payload.variables?.after
     ? { statusCode: 503, payload: { errors: [{ message: 'private provider response' }] } }
     : { data: { paginatedCollection: { playlists: {
       items: [{ id: 'playlist-first', title: 'Playlist', trackCount: 0 }],
       page: { endCursor: 'playlist-next-cursor', hasNextPage: true },
-    } } } });
+    } } } }), 0.001);
 
   await page.request('getPaginatedCollectionAll', { first: 100, after: null, withPlaylists: true });
   const error = await page.waitForMessage('read-error');
@@ -410,6 +438,36 @@ test('Zvuk catalog reports only the HTTP status when a cursor replay fails', asy
   assert.equal(error.operation, 'getPaginatedCollectionAll');
   assert.equal(JSON.stringify(error).includes('private provider response'), false);
   assert.equal(page.messages.some((message) => message.type === 'collection-scroll-end'), false);
+});
+
+test('Zvuk retries a rate-limited catalog cursor using Retry-After and keeps progress visible', async () => {
+  let cursorAttempts = 0;
+  const page = makePage('/collection', ({ payload }) => {
+    const cursor = payload.variables?.after || null;
+    if (!cursor) return { data: { paginatedCollectionAll: { playlists: {
+      items: [{ id: 'playlist-first', title: 'First', trackCount: 0 }],
+      page: { endCursor: 'playlist-next', hasNextPage: true },
+    } } } };
+    cursorAttempts += 1;
+    if (cursorAttempts === 1) return {
+      statusCode: 429,
+      headers: { 'retry-after': '0.001' },
+      payload: { errors: [{ message: 'private rate-limit response' }] },
+    };
+    return { data: { paginatedCollectionAll: { playlists: {
+      items: [{ id: 'playlist-second', title: 'Second', trackCount: 0 }],
+      page: { endCursor: null, hasNextPage: false },
+    } } } };
+  }, 0.001);
+
+  await page.request('getPaginatedCollectionAll', { first: 100, after: null, withPlaylists: true });
+  await page.waitForMessage('collection-scroll-end');
+  assert.equal(cursorAttempts, 2);
+  assert.deepEqual(page.messages.filter((message) => message.type === 'playlist-list-page')
+    .flatMap((message) => message.playlists.map((playlist) => playlist.id)), ['playlist-first', 'playlist-second']);
+  assert.ok(page.messages.some((message) => message.type === 'scan-progress' && /повтор 1 из 2/.test(message.message)));
+  assert.equal(page.messages.some((message) => message.type === 'read-error'), false);
+  assert.ok(!JSON.stringify(page.messages).includes('private rate-limit response'));
 });
 
 test('Zvuk catalog prefers explicit hasNextPage over cursor presence', async () => {

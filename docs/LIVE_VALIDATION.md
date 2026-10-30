@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — reader pagination recovery fixtures
+
+- Zvuk now falls back to a valid root collection cursor when the nested playlist/release `page` object is empty. Cursor reads retry bounded network, 408/429, and 5xx failures; `Retry-After` is capped at 60 seconds and emits progress while waiting. Diagnostics continue to omit response bodies. Regression fixtures walk both pages and cover a 429 retry.
+- Yandex now uses a valid pager total when a virtual playlist's list/detail `trackCount` is stale; revision, page sequence, pager consistency, and final hydrated track count still have to agree. A regression fixture models stale counts while verifying all rows.
+- Focused Yandex and Zvuk source suites pass **42/42**. This is fixture evidence only. Live scan status is unchanged until the rebuilt extension is used for a read-only rescan in the existing Chrome profile.
+
 ## 2026-10-31 — target writers stop after favorite read-back failures
 
 - Added mixed-plan fixtures for Apple Music, Яндекс.Музыка, and Сбер.Звук where the favorite write request is accepted but its read-back omits the requested track. Each test asserts the command returns `partial_failure` and sends no playlist write.
