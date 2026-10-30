@@ -1488,12 +1488,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'zvuk:collection-scroll-stall') {
       const operation = ['getPaginatedCollectionAll', 'getPaginatedCollectionAllSections'].includes(message.operation)
         ? message.operation : '';
+      const section = message.section === 'playlists' ? 'плейлисты' : message.section === 'releases' ? 'альбомы' : '';
+      const pageOrdinal = Number.isInteger(message.pageOrdinal) && message.pageOrdinal > 0 ? message.pageOrdinal : null;
+      const pageContext = section && pageOrdinal ? ` (раздел «${section}», страница ${pageOrdinal})` : '';
       const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
         ? message.httpStatus : null;
       const error = status
-        ? `Каталог плейлистов: ${operation || 'запрос'} вернул HTTP ${status}. Проверьте вход в Сбер.Звук и повторите сбор.`
+        ? `Каталог ${section || 'плейлистов'}: ${operation || 'запрос'}${pageContext} вернул HTTP ${status}. Проверьте вход в Сбер.Звук и повторите сбор.`
         : operation
-          ? `Каталог плейлистов: запрос ${operation} ${message.graphqlError === true ? 'вернул GraphQL-ошибку' : message.invalidJson === true ? 'вернул не JSON' : message.invalidPagination === true ? 'вернул неполную пагинацию' : message.invalidShape === true ? 'вернул неожиданный формат' : 'не вернул ожидаемую страницу'}. Возможно, сервис изменил формат ответа.`
+          ? `Каталог ${section || 'плейлистов'}: запрос ${operation}${pageContext} ${message.graphqlError === true ? 'вернул GraphQL-ошибку' : message.invalidJson === true ? 'вернул не JSON' : message.invalidPagination === true ? 'вернул неполную пагинацию' : message.invalidShape === true ? 'вернул неожиданный формат' : 'не вернул ожидаемую страницу'}. Возможно, сервис изменил формат ответа.`
           : message.reason === 'pagination-stalled'
             ? 'Загрузка каталога остановилась до следующей страницы. Повторите сбор; если повторится, пришлите диагностику.'
             : 'Каталог не ответил за минуту. Проверьте, что Сбер.Звук загрузился, и повторите сбор.';
@@ -1509,19 +1512,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'zvuk:read-error') {
       const operation = ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(message.operation)
         ? message.operation : 'запрос чтения';
+      const section = message.section === 'playlists' ? 'плейлисты' : message.section === 'releases' ? 'альбомы' : '';
+      const pageOrdinal = Number.isInteger(message.pageOrdinal) && message.pageOrdinal > 0 ? message.pageOrdinal : null;
+      const pageContext = section && pageOrdinal ? ` (раздел «${section}», страница ${pageOrdinal})` : '';
       const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
         ? message.httpStatus : null;
       state.error = status
-        ? `Сбер.Звук: ${operation} вернул HTTP ${status}. Проверьте вход и повторите сбор.`
+        ? `Сбер.Звук: ${operation}${pageContext} вернул HTTP ${status}. Проверьте вход и повторите сбор.`
         : message.graphqlError === true
-          ? `Сбер.Звук вернул GraphQL-ошибку при запросе ${operation}. Повторите сбор; при повторе потребуется обновить коннектор.`
+          ? `Сбер.Звук вернул GraphQL-ошибку при запросе ${operation}${pageContext}. Повторите сбор; при повторе потребуется обновить коннектор.`
           : message.invalidJson === true
-            ? `Сбер.Звук вернул не JSON при запросе ${operation}. Возможно, изменился API.`
+            ? `Сбер.Звук вернул не JSON при запросе ${operation}${pageContext}. Возможно, изменился API.`
             : message.invalidPagination === true
-              ? `Сбер.Звук вернул неполную пагинацию при запросе ${operation}. Возможно, изменился API.`
+              ? `Сбер.Звук вернул неполную пагинацию при запросе ${operation}${pageContext}. Возможно, изменился API.`
               : message.paginationFailed === true
-                ? `Не удалось получить следующую страницу каталога Сбер.Звука (${operation}). Проверьте соединение и повторите сбор.`
-            : `Сбер.Звук вернул неподдерживаемый ответ при запросе ${operation}. Возможно, изменился API.`;
+                ? `Не удалось получить следующую страницу каталога Сбер.Звука (${operation}${pageContext}). Проверьте соединение и повторите сбор.`
+            : `Сбер.Звук вернул неподдерживаемый ответ при запросе ${operation}${pageContext}. Возможно, изменился API.`;
       const current = state.playlists.find((playlist) => playlist.id === state.automation?.currentPlaylistId);
       const atAutomationPlaylist = state.automation?.active && state.automation.tabId === sender.tab?.id;
       if (state.scan?.active && state.scan.tabId === sender.tab?.id && state.scan.phase !== 'playlists_items') {

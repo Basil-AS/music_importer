@@ -415,9 +415,10 @@ test('Zvuk reader error is shown with safe operation and HTTP status metadata', 
   const worker = bootWorker(storage, [{ id: 1, url: 'https://zvuk.com/collection', status: 'complete' }]);
   await worker.pageMessage({
     type: 'zvuk:read-error', operation: 'getPaginatedCollectionAll', httpStatus: 401, graphqlError: true,
+    section: 'playlists', pageOrdinal: 2, cursorPresent: true, cursor: 'must-not-be-displayed',
     authorization: 'must-not-be-displayed',
   }, 1);
-  assert.match(storage[ZVUK_KEY].error, /getPaginatedCollectionAll.*HTTP 401/);
+  assert.match(storage[ZVUK_KEY].error, /getPaginatedCollectionAll.*раздел «плейлисты», страница 2.*HTTP 401/);
   assert.ok(!storage[ZVUK_KEY].error.includes('must-not-be-displayed'));
   assert.equal(storage[ZVUK_KEY].captureEnabled, false);
 });

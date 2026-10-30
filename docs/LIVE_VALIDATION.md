@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — safe catalog page diagnostics
+
+- Zvuk catalog failures now include the collection section, page ordinal, and cursor-present/repeated flags. Cursor contents, request headers, response bodies, and account-specific IDs remain outside the diagnostic.
+- The app surfaces section and page ordinal alongside HTTP/API errors so repeated reader failures can be narrowed down from the visible UI.
+- Focused service-worker and Zvuk source suite passes **77/77**. This is fixture evidence; no authenticated page was read during this change.
+
 ## 2026-10-31 — reader pagination recovery fixtures
 
 - Zvuk now falls back to a valid root collection cursor when the nested playlist/release `page` object is empty. Cursor reads retry bounded network, 408/429, and 5xx failures; `Retry-After` is capped at 60 seconds and emits progress while waiting. Diagnostics continue to omit response bodies. Regression fixtures walk both pages and cover a 429 retry.
