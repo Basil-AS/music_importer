@@ -1,5 +1,13 @@
 # Live validation log
 
+## 2026-10-30 — final resilience and responsive smoke checks
+
+- The hero artwork now sits below the copy on narrow screens while the text fills the available width. Disabled provider buttons and inactive steps use muted colors instead of success green.
+- In an isolated temporary Chrome profile, the UI was measured at 320 px and 390 px CSS viewport widths. At both widths, document and body scroll widths matched the viewport and no element extended past the right edge. A dark-theme 390 × 844 screenshot was visually inspected.
+- The full fixture suite passed **327/327**. JavaScript syntax checks, manifest JSON validation, generated extension app bundle parity, and `git diff --check` passed.
+- The fixtures cover provider pagination and completeness, timeout/rate-limit/error recovery, checkpoint recovery, and synthetic favorite/playlist transfer across all 12 provider directions. They do not prove behavior against today's authenticated service sessions.
+- No account session, cookie, token, or library data was accessed in these checks, and no account was written. Live library reads and source-to-target read-back remain unverified in this pass.
+
 ## 2026-10-30 — visual layout check
 
 - The demo UI was rendered in a temporary headless Chrome profile in light and dark desktop modes, then measured at actual 320 px and 390 px CSS viewports through the Chrome DevTools Protocol.

@@ -159,7 +159,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   display:flex;
   gap:11px;
   align-items:center;
-  color:#676770;
+  color:var(--muted);
   font-size:12px
 }
 
@@ -341,7 +341,8 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 }
 
 .connect:disabled {
-  color:var(--green);
+  color:var(--muted);
+  opacity:.82;
   cursor:default
 }
 
@@ -893,12 +894,17 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   }
 
   .hero {
-    padding:37px 0 26px
+    padding:37px 0 26px;
+    align-items:stretch;
+    flex-direction:column;
+    gap:12px
   }
 
   .hero-art {
+    align-self:flex-end;
     width:82px;
-    height:82px
+    height:82px;
+    margin-top:-4px
   }
 
   .disc {
