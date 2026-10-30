@@ -171,6 +171,37 @@ test('Spotify writer skips existing likes, batches new likes and verifies read-b
   assert.deepEqual(JSON.parse(JSON.stringify(response.result.favorites)), { requested: 82, added: 81, alreadyPresent: 1, verified: 82 });
 });
 
+test('Spotify writer stops before playlist writes when favorite read-back is incomplete', async () => {
+  let playlistWrites = 0;
+  const page = makePage((request) => {
+    const operation = request.payload?.operationName;
+    if (request.url.startsWith('https://api-partner.spotify.com/')) {
+      if (operation === 'fetchLibraryTracks') return libraryTracks([]);
+      if (operation === 'addToLibrary') return { payload: { data: { addToLibrary: true } } };
+      if (operation === 'addToPlaylist' || operation === 'fetchPlaylistContents') playlistWrites += 1;
+    }
+    if (request.url.startsWith('https://spclient.wg.spotify.com/playlist/')) playlistWrites += 1;
+    throw new Error(`Unexpected request after failed favorite verification: ${request.url}`);
+  });
+  await page.captureSession();
+  const response = await page.command('execute-transfer', { plan: {
+    type: 'music-transfer-plan', target: { provider: 'spotify' },
+    completeness: { source: [{ confirmed: true }] },
+    collectionMappings: [{ sourceId: 'source-list', sourceName: 'Road', targetName: 'Road' }],
+    operations: [
+      { operation: 'add_to_favorites', target: { provider: 'spotify', providerId: 'spotify:track:like1' } },
+      { operation: 'add_to_playlist', source: { collectionId: 'source-list', collectionName: 'Road', position: 0 }, target: { provider: 'spotify', providerId: 'spotify:track:playlist1' } },
+    ],
+  } });
+
+  assert.equal(response.ok, false);
+  assert.match(response.error, /не подтвердил часть добавленных лайков/);
+  assert.equal(response.report.status, 'partial_failure');
+  assert.deepEqual(JSON.parse(JSON.stringify(response.report.favorites)), { requested: 1, added: 1, alreadyPresent: 0, verified: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(response.report.playlists)), []);
+  assert.equal(playlistWrites, 0);
+});
+
 test('Spotify writer creates playlists, appends batches, and checks repeated items and order', async () => {
   let favoriteUris = [];
   let playlistUris = [];

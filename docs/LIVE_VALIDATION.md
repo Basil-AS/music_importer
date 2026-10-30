@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — read-only refresh after UI polish
+
+- Reused the user's existing Chrome profile and the open `http://127.0.0.1:8001/` tab. Triggered **Обновить открытые аккаунты**; no destination was selected, no catalog search was run, and no account was written.
+- The UI again reported that Zvuk stopped before confirming its next page. Spotify showed the existing no-progress timeout; this refresh did not produce a new complete Spotify snapshot. Yandex finished reading its liked tracks but rejected the full library because a playlist's catalog count did not match its detail evidence. Apple continued to show a previously saved snapshot; this pass did not confirm a new Apple snapshot.
+- No cookies, tokens, authorization headers, raw service responses, or account-specific library contents were collected. This is a live UI observation only; the installed extension version was not independently verified, so it cannot confirm the latest connector recovery changes.
+
 ## 2026-10-31 — reloaded the unpacked extension in the existing Chrome profile
 
 - Confirmed the installed unpacked extension points to this repository's `chrome-extension/` directory. Reloaded it there and used its extension-hosted app; no new Chrome profile was created.
@@ -286,3 +292,9 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Zvuk now walks playlist and saved-release cursors independently, replaying each with only its corresponding `withPlaylists` or `withReleases` flag. A release-only response uses the root cursor for releases and cannot accidentally claim playlist pagination. Fixtures cover distinct cursors and release-only root pagination; live API behavior remains unconfirmed.
 - Final local verification: `node --test --test-concurrency=1 --test-reporter=spec tests/*.test.js` passed **361/361**. Bundle parity, JavaScript syntax, manifest JSON, and `git diff --check` also passed. These are local fixtures/unit checks; they do not establish live service scanning or transfers.
 - No account writes or reads were run after these code changes. The existing Chrome extension still needs a manual reload before any live retest.
+
+## 2026-10-31 — Spotify transfer fails fast after an unverified like
+
+- Spotify now stops before creating or appending any playlist when a requested favorite is missing from the immediate read-back. The partial report preserves favorite counts and leaves `playlists` empty so the user can retry safely without extra writes.
+- A mixed-plan fixture makes the favorite write appear successful while the subsequent library read omits it, then asserts no playlist creation, append, or read request occurs.
+- Focused Spotify target tests pass **10/10**; the full suite passes **365/365**. `git diff --check` passes. This is fixture verification only; no live Spotify account write was performed.
