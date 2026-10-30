@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — deterministic retry fixture and installer wording
+
+- A `develop` CI run exposed a timing race in the Zvuk retry fixture: it polled with `setImmediate` and could finish before the retry timer fired. The fixture helper now yields through a 1 ms timer while waiting for asynchronous messages.
+- The full suite using the same default concurrency as CI passes **373/373** locally. The preceding develop run passed **372/373**; its only failure was the retry fixture timing out before `read-error` was posted.
+- README now describes the CI download as a free unpacked installation, clarifies that only the artifact expires after 30 days, and updates the manifest version to **0.15.2**.
+
 ## 2026-10-31 — safe catalog page diagnostics
 
 - Zvuk catalog failures now include the collection section, page ordinal, and cursor-present/repeated flags. Cursor contents, request headers, response bodies, and account-specific IDs remain outside the diagnostic.
