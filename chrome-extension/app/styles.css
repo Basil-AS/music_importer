@@ -370,9 +370,13 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 }
 
 .primary:disabled {
-  opacity:.45;
+  background:#343a31;
+  border:1px solid #4d5746;
+  color:#b9c0ad;
+  opacity:1;
   cursor:not-allowed;
-  transform:none
+  transform:none;
+  filter:none
 }
 
 .secondary {
@@ -822,7 +826,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 .track-search {
   border:0;
   background:none;
-  color:#c2b5ff;
+  color:var(--purple);
   padding:1px 0 5px;
   font-size:10px;
   text-decoration:underline;
@@ -852,7 +856,7 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   color:var(--red)
 }
 
-@media(max-width:820px) {
+@media(max-width:960px) {
   .layout {
     grid-template-columns:1fr
   }
@@ -931,12 +935,18 @@ button:focus-visible,select:focus-visible,a:focus-visible {
   }
 
   .step {
-    font-size:0;
+    flex-direction:column;
     justify-content:center;
-    gap:0
+    gap:5px;
+    text-align:center;
+    white-space:normal;
+    font-size:10px;
+    line-height:1.2
   }
 
   .step-num {
+    width:22px;
+    height:22px;
     font-size:11px
   }
 
@@ -1043,12 +1053,6 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 }
 
 @media(max-width:360px) {
-  .hero {
-    align-items:flex-start;
-    flex-direction:column;
-    gap:12px
-  }
-
   .hero-art {
     align-self:flex-end;
     width:68px;
@@ -1457,7 +1461,14 @@ button:focus-visible,select:focus-visible,a:focus-visible {
 :root[data-theme="light"] .connect:disabled { color:#666772; opacity:1 }
 :root[data-theme="light"] .step:not(.active) { color:#666772 }
 :root[data-theme="light"] .check-row { color:#45454e }
-:root[data-theme="light"] .primary:disabled { color:#fff; opacity:.58 }
+:root[data-theme="light"] .track-search { color:var(--purple) }
+:root[data-theme="light"] .primary:disabled {
+  background:#e7ebdf;
+  border:1px solid #cfd7c3;
+  color:#47523b;
+  opacity:1;
+  filter:none
+}
 @media(max-width:580px) {
   .track-filters { align-items:stretch; gap:8px }
   .track-filters label { min-width:calc(50% - 4px); flex:1 }

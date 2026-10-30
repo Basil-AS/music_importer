@@ -1,5 +1,14 @@
 # Live validation log
 
+## 2026-10-30 — responsive, contrast, and stage accessibility pass
+
+- A temporary Chrome profile rendered the local UI with six demo tracks. At CSS viewport widths 320, 375, 390, 820, 821, 900, 960, and 1280 px, document/body widths matched the viewport and no track row exceeded its card. The sidebar stacks before the track grid becomes cramped.
+- Dark and light mobile views at 390 × 844 were visually inspected. At 320 px, all five workflow labels fit and remain visible; the active step is exposed with `aria-current="step"`. The app updates that attribute as the workflow advances, covered by `tests/ui-accessibility.test.js`.
+- Light-theme search text measured 6.52:1 against white; the disabled light-theme primary action measured 6.83:1. The dark-theme disabled action now has its own muted color pair instead of fading text and background together.
+- Full fixture suite: **328/328 passed**. JavaScript syntax, manifest JSON, generated extension bundle parity, and `git diff --check` passed.
+- These are local UI and simulated connector checks. The temporary profile had no provider sessions; no account data or credentials were read and no account was written. Live service scans and route read-back remain outstanding.
+- Read-only inspection of the native Chrome front window found only `about:blank`. A harmless `1+1` AppleScript probe was rejected because Chrome's **View → Developer → Allow JavaScript from Apple Events** setting is disabled. I left the setting unchanged; no live provider page or session was inspected.
+
 ## 2026-10-30 — final resilience and responsive smoke checks
 
 - The hero artwork now sits below the copy on narrow screens while the text fills the available width. Disabled provider buttons and inactive steps use muted colors instead of success green.

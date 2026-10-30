@@ -7,6 +7,7 @@ const vm = require('node:vm');
 function makeElement(selector, registry) {
   const listeners = {};
   const classes = new Set();
+  const attributes = new Map();
   const element = {
     selector, dataset: {}, style: {}, hidden: false, disabled: false, value: '', textContent: '', innerHTML: '', checked: false, open: false,
     options: [],
@@ -19,6 +20,9 @@ function makeElement(selector, registry) {
     get selectedOptions() { return element.options.filter((option) => option.value === element.value); },
     addEventListener(type, handler) { (listeners[type] ||= []).push(handler); },
     removeEventListener() {},
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    removeAttribute(name) { attributes.delete(name); },
+    getAttribute(name) { return attributes.get(name) ?? null; },
     querySelector: (child) => registry.get(`${selector} ${child}`),
     querySelectorAll: () => [],
     closest: () => null,
@@ -41,6 +45,8 @@ function createAppHarness({ libraries, handler, statuses = {} }) {
     card.querySelector = (child) => (child === '.connect' ? card.connect : registry.get(`${provider} ${child}`));
     return card;
   });
+  const steps = Array.from({ length: 5 }, (_, index) => registry.get(`.step[data-step="${index + 1}"]`));
+  steps[0].setAttribute('aria-current', 'step');
   const target = registry.get('#targetProvider');
   target.options = [{ value: '', disabled: false }, ...['zvuk', 'spotify', 'yandex-music', 'apple-music'].map((value) => ({ value, disabled: false }))];
   registry.get('#storefront').value = 'US';
@@ -49,7 +55,7 @@ function createAppHarness({ libraries, handler, statuses = {} }) {
   const progressPorts = [];
   const document = {
     querySelector: (selector) => registry.get(selector),
-    querySelectorAll: (selector) => (selector === '.source' ? cards : selector === '.source .connect' ? cards.map((card) => card.connect) : []),
+    querySelectorAll: (selector) => (selector === '.source' ? cards : selector === '.source .connect' ? cards.map((card) => card.connect) : selector === '.step' ? steps : []),
     addEventListener() {},
     createElement: (tag) => makeElement(`<${tag}>`, registry),
     visibilityState: 'visible',
@@ -102,7 +108,7 @@ function createAppHarness({ libraries, handler, statuses = {} }) {
   window.MusicProviderConnectionFlow = context.MusicProviderConnectionFlow; // attached to globalThis, not window
   vm.runInContext(fs.readFileSync(require.resolve('../../demo/app.js'), 'utf8'), context, { filename: 'app.js' });
   return {
-    $: (selector) => registry.get(selector), window, sent, cards,
+    $: (selector) => registry.get(selector), window, sent, cards, steps,
     async waitFor(predicate, label = 'condition') {
       for (let attempt = 0; attempt < 2000; attempt += 1) {
         if (predicate()) return;
