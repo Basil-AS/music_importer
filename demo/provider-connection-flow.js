@@ -6,6 +6,11 @@
       || ['unavailable', 'stale'].includes(statuses?.[provider]?.status));
   };
 
+  const providersForAutomaticRefresh = (providers, queuedProviders = []) => {
+    const queued = new Set(queuedProviders);
+    return [...new Set(providers)].filter((provider) => provider !== 'spotify' || queued.has(provider));
+  };
+
   const sourceAction = ({ extensionAvailable, snapshot, status, providerName, selected, opening }) => {
     if (opening) return { action: 'opening', disabled: true, label: 'Открываем…', title: '' };
     if (status?.status === 'scanning') return { action: 'none', disabled: true, label: 'Сканируем…', title: status.message || '' };
@@ -20,10 +25,18 @@
       if (/войд|авторизац|сесси|http\s*(401|403)|\b(401|403)\b/i.test(String(status.message || ''))) {
         return { action: 'login', disabled: false, label: 'Войти / открыть', title: status.message || `Проверьте вход в ${providerName || 'музыкальный сервис'}.` };
       }
+      if (providerName === 'Spotify') {
+        return {
+          action: 'retry',
+          disabled: false,
+          label: 'Проверить Spotify',
+          title: 'Запущу чтение Spotify по нажатию. Если мост расширения устарел, вкладка Spotify перезагрузится.',
+        };
+      }
       return { action: 'retry', disabled: false, label: 'Повторить сбор', title: status.message || '' };
     }
     return { action: 'login', disabled: false, label: 'Войти / открыть', title: `Откроется страница входа в ${providerName || 'музыкальный сервис'}.` };
   };
 
-  root.MusicProviderConnectionFlow = Object.freeze({ providersForFocusRefresh, sourceAction });
+  root.MusicProviderConnectionFlow = Object.freeze({ providersForAutomaticRefresh, providersForFocusRefresh, sourceAction });
 })(globalThis);

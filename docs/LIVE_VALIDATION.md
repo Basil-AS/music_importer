@@ -9,6 +9,12 @@
 - Result: the current installed build does **not** successfully load complete libraries from any of the four accounts in this live check. Fixture success must not be represented as live service success. No route was written or read back.
 - The user approved temporarily enabling Chrome's **View → Developer → Allow JavaScript from Apple Events** for this read-only check. macOS denied UI automation of System Events (`-1743`), so the user switched the menu setting off manually after the scan. The Chrome preference was rechecked as `browser.allow_javascript_apple_events: false`; the existing Chrome session was left open.
 
+## 2026-10-30 — Spotify bridge refresh requires a user action
+
+- The Spotify page has previously sent two first-party `DELETE` requests during Web Player navigation; their effect on device/playback state is not established. Automatic bridge repair on extension install/update, browser startup, and the app's initial scan now skips Spotify. The other three providers continue through automatic recovery.
+- The Spotify card starts a read only after the user clicks it; its action text says that an outdated bridge may reload the Spotify tab. Opening Spotify for login also queues a scan after the user returns to the importer.
+- Worker fixtures cover install/update, browser startup, and app repair with a stale Spotify bridge, plus the explicit all-provider repair path. This change does not verify Spotify library reading or transfer; no new Chrome profile or account operation was used for these fixtures.
+
 ## 2026-10-30 — Zvuk collection response shape regression
 
 - Comparing the live error with `docs/providers/zvuk-api-inventory.md` revealed that the observed `getPaginatedCollectionAll` payload uses `data.paginatedCollection`, while the reader accepted only `paginatedCollectionAll` and `paginatedCollectionAllSections`. This matches the live unsupported-response error and the gap in prior fixtures.

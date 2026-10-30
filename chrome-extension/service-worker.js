@@ -105,13 +105,15 @@ chrome.runtime.onInstalled?.addListener(async (details) => {
   if (!['install', 'update'].includes(details?.reason) || !extensionAppUrl) return;
   // Existing provider pages do not receive newly installed content scripts
   // until they navigate. Repair them on first install as well as updates.
-  await repairStaleProviderTabs();
+  // Spotify's web player can issue device-state DELETEs on navigation, so leave
+  // that tab untouched until the user explicitly starts a Spotify action.
+  await repairStaleProviderTabs(['spotify']);
   await openImporterApp().catch(() => {});
 });
 
 // A browser restart can leave provider tabs around with content scripts from a
 // previous extension context. Check their bridge protocol before the next scan.
-chrome.runtime.onStartup?.addListener(() => repairStaleProviderTabs());
+chrome.runtime.onStartup?.addListener(() => repairStaleProviderTabs(['spotify']));
 
 chrome.action?.onClicked?.addListener(() => {
   return openImporterApp().catch(() => {});
@@ -465,7 +467,7 @@ async function waitForProviderTabReady(tabId, timeoutMs = 30000) {
   });
 }
 
-function repairStaleProviderTabs() {
+function repairStaleProviderTabs(skipProviders = []) {
   if (providerBridgeRepairTask) return providerBridgeRepairTask;
   providerBridgeRepairTask = (async () => {
     const patterns = [
@@ -477,7 +479,9 @@ function repairStaleProviderTabs() {
       'https://zvuk.com/playlist/*',
     ];
     const tabs = await chrome.tabs.query({ url: patterns }).catch(() => []);
-    const results = await Promise.all(tabs.filter((tab) => tab.id).map(async (tab) => {
+    const skipped = new Set(skipProviders);
+    const candidates = tabs.filter((tab) => tab.id && !isSkippedProviderTab(tab, skipped));
+    const results = await Promise.all(candidates.map(async (tab) => {
       try {
         const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
         if (health?.ok === true && health.bridgeProtocol === 3) return { repaired: false, ok: true };
@@ -499,6 +503,19 @@ function repairStaleProviderTabs() {
     };
   })().finally(() => { providerBridgeRepairTask = null; });
   return providerBridgeRepairTask;
+}
+
+function isSkippedProviderTab(tab, skippedProviders) {
+  if (!skippedProviders.size) return false;
+  try {
+    const url = new URL(tab.url || '');
+    if (skippedProviders.has('spotify') && url.hostname === 'open.spotify.com') return true;
+    if (skippedProviders.has('apple-music') && url.hostname === 'music.apple.com') return true;
+    if (skippedProviders.has('yandex-music') && url.hostname === 'music.yandex.ru') return true;
+    if (skippedProviders.has('zvuk') && url.hostname === 'zvuk.com'
+      && /^\/(favorites|collection|playlist)(\/|$)/.test(url.pathname)) return true;
+  } catch { /* Ignore tabs with an invalid or unavailable URL. */ }
+  return false;
 }
 
 async function ensureCurrentProviderBridge(tabId) {
@@ -826,8 +843,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'Команда доступна только приложению Music Importer.' });
         return;
       }
+      const supportedProviders = new Set(['zvuk', 'spotify', 'yandex-music', 'apple-music']);
+      const skipProviders = message.skipProviders ?? [];
+      if (!Array.isArray(skipProviders) || skipProviders.some((provider) => !supportedProviders.has(provider))) {
+        sendResponse({ ok: false, error: 'Некорректный список сервисов для проверки.' });
+        return;
+      }
       try {
-        sendResponse({ ok: true, ...(await repairStaleProviderTabs()) });
+        sendResponse({ ok: true, ...(await repairStaleProviderTabs(skipProviders)) });
       } catch {
         sendResponse({ ok: false, error: 'Не удалось восстановить соединение с открытыми сервисами.' });
       }

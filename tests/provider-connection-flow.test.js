@@ -55,6 +55,19 @@ test('unavailable account cards offer a login action only after the extension co
   });
 });
 
+test('Spotify retry explains that an explicit read may refresh its tab', () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(loadFlow().sourceAction({
+    extensionAvailable: true,
+    providerName: 'Spotify',
+    status: { status: 'failed', message: 'Сбор Spotify не запускался.' },
+  }))), {
+    action: 'retry',
+    disabled: false,
+    label: 'Проверить Spotify',
+    title: 'Запущу чтение Spotify по нажатию. Если мост расширения устарел, вкладка Spotify перезагрузится.',
+  });
+});
+
 test('a provider opened for login stays queued for refresh when the app regains focus', () => {
   const { providersForFocusRefresh } = loadFlow();
   const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
@@ -65,8 +78,18 @@ test('a provider opened for login stays queued for refresh when the app regains 
   assert.deepEqual(JSON.parse(JSON.stringify(providersForFocusRefresh(providers, snapshots, { spotify: { status: 'ready' } }))), ['zvuk', 'yandex-music', 'apple-music']);
 });
 
+test('automatic refresh skips Spotify unless the user opened it for a login or explicitly queued it', () => {
+  const { providersForAutomaticRefresh } = loadFlow();
+  const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
+  assert.deepEqual(JSON.parse(JSON.stringify(providersForAutomaticRefresh(providers))), ['zvuk', 'yandex-music', 'apple-music']);
+  assert.deepEqual(JSON.parse(JSON.stringify(providersForAutomaticRefresh(providers, new Set(['spotify'])))), providers);
+});
+
 test('account cards call the selected-provider opener and focus refresh includes its pending queue', () => {
   const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
+  assert.match(app, /repair-provider-bridges', skipProviders: \['spotify'\]/);
+  assert.match(app, /providersForAutomaticRefresh\(providersToRefresh, state\.pendingLoginProviders\)/);
+  assert.match(app, /providersForAutomaticRefresh\(window\.MusicProviderConnectionFlow\.providersForFocusRefresh/);
   assert.match(app, /requestOpenProviderTabs\(\[provider\], provider\)/);
   assert.match(app, /state\.pendingLoginProviders\.add\(provider\)/);
   assert.match(app, /providersForFocusRefresh\([\s\S]*state\.pendingLoginProviders/);
