@@ -576,9 +576,18 @@ async function requestProviderLibrary(provider, refresh) {
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
   if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > staleAfterMs) {
     const providerName = provider === 'spotify' ? 'Spotify' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс.Музыка';
+    const phaseNames = {
+      reading: 'чтение библиотеки',
+      favorites: 'чтение лайков',
+      playlists: 'чтение каталога плейлистов',
+      'playlist-items': 'чтение содержимого плейлиста',
+      albums: 'чтение альбомов',
+      retry: 'повтор запроса',
+    };
+    const lastPhase = phaseNames[scan?.phase] || '';
     const staleMessage = provider === 'spotify' && scan.phase === 'auth-refresh'
       ? 'Spotify не обновил сессию после HTTP 401. Проверьте вход.'
-      : `${providerName}: нет прогресса 2 минуты. Снимок не сохранён.`;
+      : `${providerName}: нет прогресса 2 минуты.${lastPhase ? ` Последний этап — ${lastPhase}.` : ''} Снимок не сохранён.`;
     const update = await mutateProviderState((current) => {
       const latest = current.scans[provider];
       const latestAt = Date.parse(latest?.updatedAt || latest?.startedAt || '');

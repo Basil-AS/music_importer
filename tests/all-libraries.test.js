@@ -574,7 +574,7 @@ test('a provider scan with no progress times out without blocking independently 
     [PROVIDER_KEY]: {
       snapshots: {},
       scans: {
-        spotify: { status: 'reading', message: 'Old progress', updatedAt: startedAt },
+        spotify: { status: 'reading', phase: 'favorites', message: 'Old progress', updatedAt: startedAt },
         'yandex-music': { status: 'reading', phase: 'playlists', message: 'Яндекс читает плейлисты', updatedAt: new Date().toISOString() },
       },
       previousSnapshots: {},
@@ -589,6 +589,7 @@ test('a provider scan with no progress times out without blocking independently 
   assert.equal(response.pending, false);
   assert.equal(response.statuses.spotify.status, 'failed');
   assert.match(response.statuses.spotify.message, /нет прогресса 2 минуты/i);
+  assert.match(response.statuses.spotify.message, /Последний этап — чтение лайков/i);
   assert.doesNotMatch(response.statuses.spotify.message, /кнопкой|карточке/);
   assert.equal(response.statuses['yandex-music'].status, 'scanning');
   assert.equal(response.statuses['apple-music'].status, 'unavailable');

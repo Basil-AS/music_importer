@@ -365,3 +365,9 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Desktop and mobile screenshots were inspected through Chrome DevTools MCP. The mobile viewport had no horizontal overflow. The scan toolbar outline/padding was removed so the primary refresh button does not sit in an empty status panel.
 - The currently installed extension still reports the older Zvuk error text, Spotify times out after two minutes, and Yandex continues its existing likes scan before playlist validation. No complete four-service live refresh is proven; the updated reader scripts still require an extension reload and another live read.
 - Focused app/progress/accessibility checks pass **20/20**. Chrome DevTools MCP Lighthouse snapshot scored **100/100** for accessibility, best practices, SEO, and agentic browsing on both desktop and mobile (31/31 audits each). The built bundle full suite passes **385/385**.
+
+## 2026-10-31 — retain the last provider phase on watchdog timeout
+
+- The worker now includes the last confirmed safe phase in a two-minute provider watchdog error (for example, Spotify likes versus playlist catalog). It does not include a track or playlist name. This distinguishes an idle phase without claiming that phase caused the stall.
+- Worker fixture verifies the last phase remains visible in the status; app fixture verifies the card displays it. Focused worker/app tests pass **66/66**; the full suite passes **386/386**.
+- In the currently installed Chrome extension, Spotify and Zvuk still show older error text. Chrome DevTools MCP again refused `chrome://extensions/`; this diagnostic code needs the unpacked extension reloaded before it can help the live diagnosis.
