@@ -25,6 +25,7 @@ const assets = [
   'assets/providers/apple-music.png',
   'assets/providers/yandex-music.png',
   'assets/providers/zvuk.png',
+  'assets/favicon.svg',
 ];
 const checkOnly = process.argv.includes('--check');
 const staleAssets = [];
