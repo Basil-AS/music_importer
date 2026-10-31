@@ -10,7 +10,6 @@
 <body>
   <main>
     <header><span class="logo">♫</span><div><strong>Music Importer</strong><small>Подключение аккаунтов</small></div></header>
-    <p class="privacy">Пароли и значения cookies не читаются. Нормализованные библиотеки сохраняются локально в профиле Chrome; поиск и перенос обращаются напрямую к выбранным сервисам. <a href="app/privacy.html" target="_blank">Данные и приватность</a></p>
     <section class="connections" aria-live="polite">
       <div class="connection" data-provider="apple-music"><div class="connection-title"><img src="app/assets/providers/apple-music.png" alt=""><b>Apple Music</b></div><span id="appleStatus">Проверяем вкладку…</span></div>
       <div class="connection" data-provider="spotify"><div class="connection-title"><img src="app/assets/providers/spotify.png" alt=""><b>Spotify</b></div><span id="spotifyStatus">Проверяем вкладку…</span></div>
@@ -23,10 +22,8 @@
       <button id="connectAppBtn" hidden>Разрешить доступ и подключить</button>
       <button id="openAppBtn">Открыть Music Importer</button>
     </section>
-    <p class="hint">«Вкладка открыта» не подтверждает вход в аккаунт. После подключения приложения авторизованные страницы будут просканированы автоматически.</p>
     <details class="zvuk-tools">
       <summary>Экспорт библиотеки Сбер.Звука в JSON</summary>
-      <p class="hint">Резервный экспорт для ручной загрузки. Основной перенос выполняется в приложении Music Importer.</p>
     <section class="status" aria-live="polite">
       <div class="metric"><b id="trackCount">0</b><span>уникальных треков</span></div>
       <div class="metric"><b id="playlistCount">0</b><span>плейлистов найдено</span></div>
@@ -41,7 +38,6 @@
       <button id="exportPlaylistsBtn" disabled>Скачать плейлисты JSON</button>
       <button class="danger" id="clearBtn" disabled>Очистить локальные данные</button>
     </div>
-    <p class="hint">Откройте страницу Сбер.Звука, войдите и начните сбор. Расширение пройдёт избранное, каталог плейлистов и страницы плейлистов. Экспорт останется на этом устройстве.</p>
     <p class="error" id="error" hidden></p>
     </details>
   </main>

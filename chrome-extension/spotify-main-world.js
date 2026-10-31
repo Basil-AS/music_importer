@@ -981,7 +981,9 @@
       lastScanDiagnostic = null;
       await waitForSession();
       await discoverHashes(['fetchLibraryTracks', 'libraryV3', 'fetchPlaylistContents']);
-      const [favorites, playlistCatalog] = await Promise.all([readFavorites(), readPlaylists()]);
+      const favorites = await readFavorites();
+      await providerProgress('playlists', `Лайки Spotify сверены: ${favorites.total}. Читаем каталог плейлистов…`);
+      const playlistCatalog = await readPlaylists();
       const playlists = [];
       for (const [index, playlist] of playlistCatalog.entries()) {
         await providerProgress('playlist-items', `Плейлист ${index + 1} из ${playlistCatalog.length}: ${playlist.title}.`);

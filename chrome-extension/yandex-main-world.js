@@ -318,6 +318,57 @@
     return { total, page, perPage };
   }
 
+  async function readFullPlaylistDetail({ uid, ownerId, kind, playlistUuid, title, expectedRevision }) {
+    const uuid = String(playlistUuid || '').trim();
+    if (!uuid) throw new Error(`У плейлиста «${title}» нет ID для запроса полной карточки.`);
+    let result;
+    try {
+      result = await libraryRequest(`/playlist/${encodeURIComponent(uuid)}?resumeStream=false&richTracks=false`);
+    } catch (error) {
+      const status = Number(error?.status);
+      throw new Error(`Не удалось получить полную карточку плейлиста «${title}»${status ? ` (HTTP ${status})` : ''}.`);
+    }
+    const detail = Array.isArray(result) ? result[0] : result?.playlist || result;
+    const refs = asArray(detail);
+    const detailOwner = detail?.uid === null || detail?.uid === undefined ? String(ownerId) : String(detail.uid);
+    const detailKind = detail?.kind === null || detail?.kind === undefined ? String(kind) : String(detail.kind);
+    const detailUuid = String(detail?.playlistUuid || uuid);
+    const detailTitle = String(detail?.title || '').trim();
+    const revision = detail?.revision === null || detail?.revision === undefined ? '' : String(detail.revision);
+    const total = Number(detail?.trackCount ?? detail?.track_count);
+    const pagerTotal = detail?.pager?.total === null || detail?.pager?.total === undefined
+      ? null : Number(detail.pager.total);
+    if (!detail || detail.available === false || !refs
+      || detailOwner !== String(ownerId) || detailKind !== String(kind) || detailUuid !== uuid
+      || !detailTitle || detailTitle.toLocaleLowerCase() !== String(title).toLocaleLowerCase()
+      || !revision || revision !== String(expectedRevision)
+      || !Number.isInteger(total) || total < 0 || refs.length !== total
+      || (pagerTotal !== null && (!Number.isInteger(pagerTotal) || pagerTotal !== total))) {
+      throw new Error(`Полная карточка плейлиста «${title}» не подтвердила владельца, ревизию и число треков.`);
+    }
+    const ids = refs.map(trackId);
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+      throw new Error(`Полная карточка плейлиста «${title}» содержит пустые или повторные ID треков.`);
+    }
+    const rows = refs.every((row) => (row?.track || row)?.title && (row?.track || row)?.artists)
+      ? refs.map((row) => row?.track || row)
+      : await hydrate(ids, `Плейлист ${title}`);
+    const tracks = rows.map((row, position) => normalizeLibraryTrack(row, position));
+    if (tracks.length !== total || tracks.some((track, index) => track.position !== index)) {
+      throw new Error(`Полная карточка плейлиста «${title}» не подтвердила порядок треков.`);
+    }
+    post('scan-progress', { phase: 'playlists', message: `Плейлист «${title}»: полная карточка сверена, ${tracks.length} из ${total}.` });
+    return {
+      id: `yandex:${ownerId}:${kind}`,
+      title: detailTitle,
+      trackCount: total,
+      revision,
+      complete: true,
+      tracks,
+      metadataIncompleteCount: tracks.filter((track) => !track.metadataComplete).length,
+    };
+  }
+
   async function readPlaylist(uid, playlist) {
     const ownerId = String(playlist.uid ?? playlist.owner?.uid ?? uid);
     const kind = String(playlist.kind ?? playlist.id ?? '');
@@ -363,7 +414,16 @@
       if (!pageInfo || page >= maxPlaylistPages) throw new Error(`Не удалось дочитать все страницы плейлиста «${title}».`);
       page += 1;
       const next = await getPage(page);
-      if (!next.refs || !next.refs.length) throw new Error(`Страница ${page} плейлиста «${title}» оказалась пустой до конца списка.`);
+      if (!next.refs || !next.refs.length) {
+        const playlistUuid = next.detail?.playlistUuid || first.detail?.playlistUuid
+          || playlist.uuid || playlist.playlistUuid || playlist.playlist_uuid;
+        try {
+          post('scan-progress', { phase: 'playlists', message: `Страница ${page} плейлиста «${title}» пуста; сверяем полную карточку.` });
+          return await readFullPlaylistDetail({ uid, ownerId, kind, playlistUuid, title, expectedRevision: revision });
+        } catch (error) {
+          throw new Error(`Страница ${page} плейлиста «${title}» пуста, полная карточка не подтвердила состав. ${error.message}`);
+        }
+      }
       const nextRevisionValue = next.detail?.revision;
       const nextRevision = nextRevisionValue === null || nextRevisionValue === undefined ? '' : String(nextRevisionValue);
       if (!nextRevision || nextRevision !== revision) {

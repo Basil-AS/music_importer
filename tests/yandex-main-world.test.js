@@ -175,6 +175,73 @@ test('Yandex trusts stable pager and hydrated rows when virtual detail trackCoun
   assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => track.id), ['virtual-1', 'virtual-2', 'virtual-3']);
 });
 
+test('Yandex falls back to a complete UUID playlist detail when a virtual page is empty', async () => {
+  const page = makePage(async ({ url, init }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [
+      { uid: 42, kind: 33, uuid: 'fixture-playlist-uuid', title: 'Понравилось на Кинопоиске', trackCount: 0 },
+    ] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [33] };
+    if (parsed.pathname === '/users/42/playlists/33') {
+      const requestedPage = Number(parsed.searchParams.get('page'));
+      return { result: { playlist: {
+        uid: 42, kind: 33, uuid: 'fixture-playlist-uuid', playlistUuid: 'fixture-playlist-uuid',
+        title: 'Понравилось на Кинопоиске', revision: 'revision-8', trackCount: 0,
+        pager: { total: 1, page: requestedPage, perPage: 100 }, tracks: [],
+      } } };
+    }
+    if (parsed.pathname === '/playlist/fixture-playlist-uuid') return { result: {
+      uid: 42, kind: 33, playlistUuid: 'fixture-playlist-uuid', title: 'Понравилось на Кинопоиске',
+      revision: 'revision-8', trackCount: 1, pager: { total: 1 }, tracks: [{ id: 'kinopoisk-track' }],
+    } };
+    if (parsed.pathname === '/tracks' && init.method === 'POST') return { result: [song('kinopoisk-track', 'Recovered track')] };
+    if (parsed.pathname === '/users/42/likes/albums') return { result: [] };
+    throw new Error(`Unexpected Yandex request: ${init.method || 'GET'} ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  const snapshot = page.messages.find((message) => message.type === 'library-snapshot')?.payload;
+  assert.ok(snapshot, JSON.stringify(page.messages));
+  assert.equal(snapshot.completeness.confirmed, true);
+  assert.equal(snapshot.playlists[0].trackCount, 1);
+  assert.equal(snapshot.playlists[0].revision, 'revision-8');
+  assert.deepEqual(Array.from(snapshot.playlists[0].tracks, (track) => [track.id, track.title, track.position]), [
+    ['kinopoisk-track', 'Recovered track', 0],
+  ]);
+  assert.ok(page.requests.some((request) => request.url.includes('/playlist/fixture-playlist-uuid?resumeStream=false&richTracks=false')));
+});
+
+test('Yandex rejects a UUID detail fallback when its revision or playlist identity differs', async () => {
+  const page = makePage(async ({ url }) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/account/status') return { result: { account: { uid: 42 } } };
+    if (parsed.pathname === '/users/42/likes/tracks') return { result: { library: { revision: 7, tracks: [] } } };
+    if (parsed.pathname === '/users/42/playlists/list') return { result: { playlists: [
+      { uid: 42, kind: 34, uuid: 'fixture-mismatch-uuid', title: 'Kinopoisk', trackCount: 0 },
+    ] } };
+    if (parsed.pathname === '/users/42/playlists/list/kinds') return { result: [34] };
+    if (parsed.pathname === '/users/42/playlists/34') {
+      const requestedPage = Number(parsed.searchParams.get('page'));
+      return { result: { playlist: {
+        uid: 42, kind: 34, uuid: 'fixture-mismatch-uuid', playlistUuid: 'fixture-mismatch-uuid',
+        title: 'Kinopoisk', revision: 'revision-8', trackCount: 0,
+        pager: { total: 1, page: requestedPage, perPage: 100 }, tracks: [],
+      } } };
+    }
+    if (parsed.pathname === '/playlist/fixture-mismatch-uuid') return { result: {
+      uid: 42, kind: 34, playlistUuid: 'fixture-mismatch-uuid', title: 'Kinopoisk',
+      revision: 'different-revision', trackCount: 1, pager: { total: 1 }, tracks: [{ id: 'track-1' }],
+    } };
+    throw new Error(`Unexpected Yandex request: ${parsed.pathname}`);
+  });
+
+  await page.dispatch('start-library-scan');
+  assert.ok(page.messages.some((message) => message.type === 'scan-error' && /полная карточка не подтвердила состав/i.test(message.error)));
+  assert.equal(page.messages.some((message) => message.type === 'library-snapshot'), false);
+});
+
 test('Yandex source reader refuses an unsafe favorites revision before saving a partial snapshot', async () => {
   const page = makePage(async ({ url }) => {
     const parsed = new URL(url);

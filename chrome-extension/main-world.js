@@ -272,6 +272,9 @@
   }
 
   async function fetchCollectionCursorPage(url, init, requestBody, cursor, section) {
+    const transientGraphqlCodes = new Set([
+      'DOWNSTREAM_SERVICE_ERROR', 'INTERNAL_SERVER_ERROR', 'SERVICE_UNAVAILABLE', 'UPSTREAM_SERVICE_ERROR',
+    ]);
     const retryAfterMs = (value) => {
       const raw = String(value || '').trim();
       if (!raw) return null;
@@ -320,8 +323,12 @@
         }
         const payload = await response.json();
         if (payload?.errors?.length) {
+          const codes = payload.errors.map((item) => String(item?.extensions?.code || '').toUpperCase());
+          const graphqlErrorCode = codes.find((code) => transientGraphqlCodes.has(code)) || 'GRAPHQL_ERROR';
           const error = new Error('Звук вернул GraphQL-ошибку для следующей страницы.');
           error.graphqlError = true;
+          error.graphqlErrorCode = graphqlErrorCode;
+          error.retryableGraphql = transientGraphqlCodes.has(graphqlErrorCode);
           throw error;
         }
         if (!payload?.data) {
@@ -337,7 +344,7 @@
         const status = Number(error?.httpStatus);
         const retryableStatus = status === 408 || status === 429 || status >= 500;
         const retryableNetwork = !error?.httpStatus && !error?.graphqlError && !error?.invalidShape;
-        if (attempt < 2 && (retryableStatus || retryableNetwork)) {
+        if (attempt < 2 && (retryableStatus || retryableNetwork || error?.retryableGraphql === true)) {
           const retryAfter = status === 429 ? retryAfterMs(error?.retryAfter) : null;
           await waitWithProgress(retryAfter ?? 500 * (2 ** attempt), attempt);
           continue;
@@ -447,6 +454,8 @@
         operation: 'getPaginatedCollectionAll',
         httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : null,
         graphqlError: error?.graphqlError === true,
+        graphqlErrorCode: ['DOWNSTREAM_SERVICE_ERROR', 'INTERNAL_SERVER_ERROR', 'SERVICE_UNAVAILABLE', 'UPSTREAM_SERVICE_ERROR', 'GRAPHQL_ERROR'].includes(error?.graphqlErrorCode)
+          ? error.graphqlErrorCode : null,
         invalidPagination: error?.invalidPagination === true,
         invalidShape: error?.invalidShape === true,
         paginationFailed: error?.paginationFailed === true,
@@ -469,6 +478,10 @@
         ? operationName : 'unknown',
       httpStatus: Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? httpStatus : null,
       graphqlError: Boolean(payload?.errors?.length),
+      graphqlErrorCode: Array.isArray(payload?.errors)
+        ? (payload.errors.map((item) => String(item?.extensions?.code || '').toUpperCase())
+          .find((code) => ['DOWNSTREAM_SERVICE_ERROR', 'INTERNAL_SERVER_ERROR', 'SERVICE_UNAVAILABLE', 'UPSTREAM_SERVICE_ERROR'].includes(code)) || null)
+        : null,
     };
     if (!enabled || !payload || payload.errors?.length || (Number.isInteger(httpStatus) && httpStatus >= 400)) {
       if (enabled && ['getPaginatedCollection', 'getPaginatedCollectionAll', 'getPaginatedCollectionAllSections', 'getPlaylistTracks'].includes(operationName)) {

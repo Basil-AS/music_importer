@@ -1522,10 +1522,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const pageContext = section && pageOrdinal ? ` (раздел «${section}», страница ${pageOrdinal})` : '';
       const status = Number.isInteger(message.httpStatus) && message.httpStatus >= 400 && message.httpStatus <= 599
         ? message.httpStatus : null;
+      const graphqlErrorCode = ['DOWNSTREAM_SERVICE_ERROR', 'INTERNAL_SERVER_ERROR', 'SERVICE_UNAVAILABLE', 'UPSTREAM_SERVICE_ERROR', 'GRAPHQL_ERROR'].includes(message.graphqlErrorCode)
+        ? message.graphqlErrorCode : '';
       state.error = status
         ? `Сбер.Звук: ${operation}${pageContext} вернул HTTP ${status}. Проверьте вход и повторите сбор.`
         : message.graphqlError === true
-          ? `Сбер.Звук вернул GraphQL-ошибку при запросе ${operation}${pageContext}. Повторите сбор; при повторе потребуется обновить коннектор.`
+          ? `Сбер.Звук вернул ${graphqlErrorCode || 'GraphQL-ошибку'} при запросе ${operation}${pageContext}. Повторите сбор.`
           : message.invalidJson === true
             ? `Сбер.Звук вернул не JSON при запросе ${operation}${pageContext}. Возможно, изменился API.`
             : message.invalidPagination === true
