@@ -258,10 +258,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   align-items:center;
   gap:12px;
   margin:12px 0;
-  padding:10px 12px;
-  border:1px solid var(--line);
-  border-radius:11px;
-  background:#ffffff04
+  padding:0;
+  border:0;
+  background:transparent
 }
 
 .library-scan-toolbar #extensionImportBtn { flex:0 0 auto }
@@ -1490,7 +1489,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 :root[data-theme="light"] .source-status.partial { color:#8b5e00 }
 :root[data-theme="light"] .connect:disabled { color:#666772; opacity:1 }
 :root[data-theme="light"] .source-retry { border-color:#51862477; color:#344a22; background:#84bd4f12 }
-:root[data-theme="light"] .library-scan-toolbar { background:#f6f7f8 }
+:root[data-theme="light"] .library-scan-toolbar { background:transparent }
 :root[data-theme="light"] .step:not(.active) { color:#666772 }
 :root[data-theme="light"] .check-row { color:#45454e }
 :root[data-theme="light"] .track-search { color:var(--purple) }

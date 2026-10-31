@@ -117,3 +117,35 @@ test('active library progress is shown on each provider card without a shared to
   assert.equal(spotify.progress.getAttribute('max'), '3');
   assert.equal(yandex.progress.getAttribute('max'), '5');
 });
+
+test('completed scans keep each provider result in its card without an aggregate status or toast', async () => {
+  const snapshot = {
+    service: 'spotify',
+    snapshotCachedAt: new Date().toISOString(),
+    collection: { type: 'library', name: 'Library' },
+    completeness: { confirmed: true, favoritesConfirmed: true, favoritesCount: 1, catalogConfirmed: true, playlistItemsConfirmed: true, playlistItemsTotal: 0 },
+    tracks: [{ id: 'spotify:track:one', title: 'One', artists: ['Artist'] }],
+    playlists: [],
+  };
+  const harness = createAppHarness({
+    libraries: { spotify: snapshot },
+    statuses: {
+      spotify: { status: 'ready', message: 'Библиотека Spotify загружена.' },
+      zvuk: { status: 'failed', message: 'Ошибка чтения коллекции.' },
+      'yandex-music': { status: 'unavailable', message: 'Войдите в аккаунт Яндекс.Музыки.' },
+      'apple-music': { status: 'failed', message: 'Не удалось прочитать плейлист.' },
+    },
+    handler: async () => ({ ok: true }),
+  });
+
+  await harness.waitFor(() => (
+    harness.sent.some((message) => message.type === 'music-importer:get-all-libraries')
+    && !harness.$('#extensionImportBtn').disabled
+  ), 'provider scan completion');
+
+  assert.equal(harness.$('#extensionStatus').textContent, '');
+  assert.equal(harness.$('#toast').textContent, '');
+  assert.match(harness.cards.find((card) => card.dataset.provider === 'zvuk').status.textContent, /Ошибка чтения коллекции/);
+  assert.match(harness.cards.find((card) => card.dataset.provider === 'yandex-music').status.textContent, /Войдите в аккаунт/);
+  assert.match(harness.cards.find((card) => card.dataset.provider === 'apple-music').status.textContent, /Не удалось прочитать плейлист/);
+});
