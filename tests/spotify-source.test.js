@@ -326,6 +326,39 @@ test('Spotify source reader completes liked tracks before it starts reading play
     && /Лайки Spotify сверены: 0\. Читаем каталог плейлистов/.test(message.message)));
 });
 
+test('Spotify source reader crosses the 1,430 liked-track boundary and confirms the playlist phase', async () => {
+  const total = 1430;
+  const ids = Array.from({ length: total }, (_, index) => `spotify:track:liked-${index + 1}`);
+  const page = makePage(({ url, payload }) => {
+    if (payload?.operationName === 'initialPageRequest') return { payload: { data: {} } };
+    if (payload?.operationName === 'fetchLibraryTracks') {
+      const offset = payload.variables.offset;
+      return { payload: { data: { me: { library: { tracks: {
+        totalCount: total,
+        pagingInfo: { offset },
+        items: ids.slice(offset, offset + payload.variables.limit).map((uri) => ({
+          track: { _uri: uri, data: trackData(uri, uri) },
+        })),
+      } } } } } };
+    }
+    if (payload?.operationName === 'libraryV3') return { payload: { data: { me: { libraryV3: { totalCount: 0, items: [] } } } } };
+    if (url.startsWith('https://api.spotify.com/v1/me/albums?')) return { payload: { items: [], total: 0 } };
+    throw new Error(`Unexpected Spotify operation: ${payload?.operationName || url}`);
+  }, 0.001);
+
+  await page.startScan();
+
+  const offsets = page.requests.filter((request) => request.payload?.operationName === 'fetchLibraryTracks')
+    .map((request) => request.payload.variables.offset);
+  assert.deepEqual(offsets, Array.from({ length: 29 }, (_, index) => index * 50));
+  assert.ok(page.messages.some((message) => message.type === 'scan-progress'
+    && /Собираем Spotify Liked Songs: 1430 из 1430\./.test(message.message)));
+  assert.ok(page.messages.some((message) => message.type === 'scan-progress'
+    && /Лайки Spotify сверены: 1430\. Читаем каталог плейлистов/.test(message.message)));
+  assert.ok(page.messages.some((message) => message.type === 'library-snapshot'
+    && message.payload?.tracks.length === total && message.payload?.completeness?.confirmed === true));
+});
+
 test('Spotify source reader refuses a truncated liked-track page', async () => {
   const page = makePage(({ payload }) => {
     const operation = payload?.operationName;
