@@ -9,7 +9,7 @@
 - After reloading the local app, retried Apple from its own card. Its progress advanced independently through playlist reads, then the card returned to the stale snapshot and offered another per-provider refresh. The service worker's sanitized state showed Apple `ready` for the cached snapshot, while no new snapshot replaced it. No account writes, token/cookie/header reads, or raw service response capture were performed.
 - Added `hasActiveScans` polling so any provider still in `scanning` is polled even when it was not selected for refresh; this keeps its card current, lets the service watchdog produce a terminal error, and releases queued retries. The local Chrome page showed live, separate Yandex and Apple progress; no app console errors or warnings.
 - Targeted per-provider progress/retry tests pass **16/16**. The full Node test suite completed successfully (exit code 0); extension bundle parity, JS syntax, manifest JSON, and `git diff --check` pass. Manifest is now **0.15.5**; reload the unpacked extension in the existing Chrome profile to use the packaged app bundle. The localhost app on `127.0.0.1:8001` uses the updated `demo/` files immediately.
-- The first GitHub CI run exposed one hosting fixture pinned to manifest `0.15.4`; updated it to `0.15.5`. The matching CI test command now passes locally **389/389**; the PR's next GitHub run is pending.
+- The first GitHub CI run exposed one hosting fixture pinned to manifest `0.15.4`; updated it to `0.15.5`. The matching CI test command passes locally **389/389**, and the follow-up GitHub `verify` run passed before PR #42 merged.
 
 ## 2026-10-31 — per-provider progress only
 
