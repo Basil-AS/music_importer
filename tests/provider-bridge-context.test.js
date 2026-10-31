@@ -93,7 +93,7 @@ for (const bridgeCase of cases) {
 
   test(`${bridgeCase.file} answers extension bridge health checks`, () => {
     const bridge = createBridge({ ...bridgeCase, origin: 'https://provider.example', sendMessage() { return Promise.resolve(null); } });
-    assert.ok(bridge.healthCheck().some((response) => response?.ok === true));
+    assert.ok(bridge.healthCheck().some((response) => response?.ok === true && response.bridgeProtocol === 4));
   });
 }
 

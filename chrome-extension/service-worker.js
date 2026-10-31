@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'zvukFavoriteCapture';
 const PROVIDER_STORAGE_KEY = 'providerLibraryBridge';
+const PROVIDER_BRIDGE_PROTOCOL = 4;
 const PROVIDER_SCAN_STALE_AFTER_MS = 2 * 60 * 1000;
 const SPOTIFY_AUTH_REFRESH_STALE_AFTER_MS = 20 * 1000;
 // No complete cheap pulse has been verified for every provider; auto-refresh full snapshots at most twice a day.
@@ -497,14 +498,14 @@ function repairStaleProviderTabs(skipProviders = []) {
     const results = await Promise.all(candidates.map(async (tab) => {
       try {
         const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
-        if (health?.ok === true && health.bridgeProtocol === 3) return { repaired: false, ok: true };
+        if (health?.ok === true && health.bridgeProtocol === PROVIDER_BRIDGE_PROTOCOL) return { repaired: false, ok: true };
       } catch {
         // A stale content script loses its extension context after the worker update.
       }
       try {
         await reloadTabForReader(tab.id);
         const health = await chrome.tabs.sendMessage(tab.id, { type: 'music-importer:bridge-health-check' });
-        return { repaired: true, ok: health?.ok === true && health.bridgeProtocol === 3 };
+        return { repaired: true, ok: health?.ok === true && health.bridgeProtocol === PROVIDER_BRIDGE_PROTOCOL };
       } catch {
         return { repaired: true, ok: false };
       }
@@ -537,10 +538,10 @@ async function ensureCurrentProviderBridge(tabId) {
   try {
     health = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
   } catch { /* The tab may still host scripts from an earlier extension version. */ }
-  if (health?.ok === true && health.bridgeProtocol === 3) return;
+  if (health?.ok === true && health.bridgeProtocol === PROVIDER_BRIDGE_PROTOCOL) return;
   await reloadTabForReader(tabId);
   const reloadedHealth = await chrome.tabs.sendMessage(tabId, { type: 'music-importer:bridge-health-check' });
-  if (reloadedHealth?.ok !== true || reloadedHealth.bridgeProtocol !== 3) {
+  if (reloadedHealth?.ok !== true || reloadedHealth.bridgeProtocol !== PROVIDER_BRIDGE_PROTOCOL) {
     throw new Error('Вкладка музыкального сервиса не подключилась после обновления.');
   }
 }
