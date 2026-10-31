@@ -3,6 +3,7 @@ const test = require('node:test');
 const { createAppHarness } = require('./helpers/app-fixture');
 
 test('app offers only confirmed Yandex likes when playlist discovery failed', async () => {
+  const statuses = { 'yandex-music': { status: 'failed', message: 'Не удалось прочитать один плейлист.' } };
   const partial = {
     service: 'yandex-music',
     partialScope: 'favorites',
@@ -22,7 +23,7 @@ test('app offers only confirmed Yandex likes when playlist discovery failed', as
   const harness = createAppHarness({
     libraries: {},
     partialLibraries: { 'yandex-music': partial },
-    statuses: { 'yandex-music': { status: 'failed', message: 'Не удалось прочитать один плейлист.' } },
+    statuses,
   });
   await harness.waitFor(() => harness.$('#matchCount').textContent === '2 треков', 'partial Yandex likes loaded');
 
@@ -38,13 +39,15 @@ test('app offers only confirmed Yandex likes when playlist discovery failed', as
 });
 
 test('each provider card exposes its own numeric scan progress when the service reports counts', async () => {
+  const statuses = {
+    spotify: { status: 'scanning', phase: 'favorites', message: 'Собираем Spotify Liked Songs: 1000 из 1430.' },
+    'yandex-music': { status: 'scanning', phase: 'favorites', message: 'Лайки: загружено 1275 из 4979.' },
+    'apple-music': { status: 'scanning', phase: 'playlist-items', message: 'Плейлист 1 из 12: 400 из 1320.' },
+  };
+  setTimeout(() => Object.values(statuses).forEach((status) => { status.status = 'failed'; }), 50);
   const harness = createAppHarness({
     libraries: {},
-    statuses: {
-      spotify: { status: 'scanning', phase: 'favorites', message: 'Собираем Spotify Liked Songs: 1000 из 1430.' },
-      'yandex-music': { status: 'scanning', phase: 'favorites', message: 'Лайки: загружено 1275 из 4979.' },
-      'apple-music': { status: 'scanning', phase: 'playlist-items', message: 'Плейлист 1 из 12: 400 из 1320.' },
-    },
+    statuses,
     handler: async () => ({ ok: true }),
   });
   const spotify = harness.cards.find((card) => card.dataset.provider === 'spotify').progress;
@@ -99,6 +102,13 @@ test('provider watchdog status keeps the last confirmed phase for diagnosis', as
 
 test('active library progress is shown on each provider card without a shared toolbar status', async () => {
   let pendingRequests = 0;
+  const statuses = {
+    zvuk: { status: 'scanning', phase: 'favorites', message: 'Сбер.Звук: страница 1.' },
+    spotify: { status: 'scanning', phase: 'favorites', message: 'Собираем Spotify Liked Songs: 1 из 3.' },
+    'yandex-music': { status: 'scanning', phase: 'favorites', message: 'Лайки: загружено 2 из 5.' },
+    'apple-music': { status: 'scanning', phase: 'playlist-items', message: 'Плейлист 1 из 2.' },
+  };
+  setTimeout(() => Object.values(statuses).forEach((status) => { status.status = 'failed'; }), 50);
   const snapshot = {
     service: 'spotify',
     snapshotCachedAt: new Date().toISOString(),
@@ -112,12 +122,7 @@ test('active library progress is shown on each provider card without a shared to
   };
   const harness = createAppHarness({
     libraries: { spotify: snapshot },
-    statuses: {
-      zvuk: { status: 'scanning', phase: 'favorites', message: 'Сбер.Звук: страница 1.' },
-      spotify: { status: 'scanning', phase: 'favorites', message: 'Собираем Spotify Liked Songs: 1 из 3.' },
-      'yandex-music': { status: 'scanning', phase: 'favorites', message: 'Лайки: загружено 2 из 5.' },
-      'apple-music': { status: 'scanning', phase: 'playlist-items', message: 'Плейлист 1 из 2.' },
-    },
+    statuses,
     pending: () => pendingRequests++ === 0,
     handler: async () => ({ ok: true }),
   });

@@ -1949,7 +1949,7 @@
       } else {
         response = await requestAllLibraries(true, providersBeingRefreshed);
       }
-      while (response.pending && Date.now() < deadline) {
+      while ((response.pending || window.MusicProviderConnectionFlow.hasActiveScans(response.statuses)) && Date.now() < deadline) {
         applyLibraryResponse(response);
         renderSourceAvailability(response.statuses || {});
         button.textContent = 'Обновить библиотеки';
