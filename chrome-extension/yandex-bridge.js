@@ -17,7 +17,7 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== 'music-importer:bridge-health-check') return false;
-    sendResponse({ ok: true, provider: 'yandex-music', bridgeProtocol: 3 });
+    sendResponse({ ok: true, provider: 'yandex-music', bridgeProtocol: 4 });
     return false;
   });
 

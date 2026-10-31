@@ -119,7 +119,7 @@ function bootWorker(storageState, tabs = [], options = {}) {
         }
         if (options.missingReceiverOnce?.includes(tabId) && !reloadedTabs.has(tabId)) throw new Error('Receiving end does not exist');
         if (message.type === 'music-importer:bridge-health-check') {
-          return { ok: true, bridgeProtocol: options.oldBridgeTabIds?.includes(tabId) && !reloadedTabs.has(tabId) ? 2 : 3 };
+          return { ok: true, bridgeProtocol: options.oldBridgeTabIds?.includes(tabId) && !reloadedTabs.has(tabId) ? 3 : 4 };
         }
         return { ok: true };
       },
@@ -206,7 +206,7 @@ test('extension update opens the importer app when it is not already open', asyn
   assert.deepEqual(JSON.parse(JSON.stringify(worker.createdTabs)), [{ url: 'chrome-extension://fixture-extension/app/index.html' }]);
 });
 
-test('extension update reloads provider tabs with an old bridge protocol', async () => {
+test('extension update reloads provider tabs with protocol 3 and keeps protocol 4 tabs', async () => {
   const worker = bootWorker({}, [
     { id: 41, url: 'https://music.apple.com/us/home', status: 'complete' },
     { id: 42, url: 'https://open.spotify.com/collection/tracks', status: 'complete' },
