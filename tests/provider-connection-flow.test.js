@@ -68,6 +68,35 @@ test('Spotify retry explains that an explicit read may refresh its tab', () => {
   });
 });
 
+test('failed and stale cached provider cards always expose a separate provider retry action', () => {
+  const { refreshAction } = loadFlow();
+  assert.deepEqual(JSON.parse(JSON.stringify(refreshAction({
+    extensionAvailable: true,
+    status: { status: 'failed', message: 'Spotify не сообщил о прогрессе.' },
+  }))), {
+    visible: true, disabled: false, label: 'Повторить чтение', title: 'Spotify не сообщил о прогрессе.',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(refreshAction({
+    extensionAvailable: true,
+    status: { status: 'stale', message: 'Снимок устарел.' },
+  }))), {
+    visible: true, disabled: false, label: 'Обновить сейчас', title: 'Снимок устарел.',
+  });
+  assert.equal(refreshAction({ extensionAvailable: true, status: { status: 'scanning' } }).visible, false);
+  assert.equal(refreshAction({ extensionAvailable: false, status: { status: 'failed' } }).visible, false);
+  assert.equal(refreshAction({
+    extensionAvailable: true, status: { status: 'failed' }, queued: true,
+  }).disabled, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(loadFlow().sourceAction({
+    extensionAvailable: true,
+    status: { status: 'failed', message: 'Повтор Spotify поставлен в очередь.' },
+    providerName: 'Spotify',
+    queued: true,
+  }))), {
+    action: 'queued', disabled: true, label: 'Повтор в очереди', title: 'Повтор Spotify поставлен в очередь.',
+  });
+});
+
 test('a provider opened for login stays queued for refresh when the app regains focus', () => {
   const { providersForFocusRefresh } = loadFlow();
   const providers = ['zvuk', 'spotify', 'yandex-music', 'apple-music'];
@@ -101,6 +130,24 @@ test('failed provider cards retry only that provider instead of reopening its lo
   const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
   assert.match(app, /const status = state\.libraryStatuses\[provider\]/);
   assert.match(app, /action\.action === 'retry'[\s\S]*?scanOpenAccounts\(false, \[provider\]\)/);
+});
+
+test('each provider card has its own progress indicator and visible retry control', () => {
+  const html = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
+  const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
+  const cards = [...html.matchAll(/<article class="source"[^>]*data-provider="([^"]+)"[\s\S]*?<\/article>/g)];
+  assert.deepEqual(cards.map(([, provider]) => provider), ['zvuk', 'spotify', 'yandex-music', 'apple-music']);
+  for (const [card] of cards) {
+    assert.match(card, /class="source-status" role="status" aria-live="polite"/);
+    assert.match(card, /<progress class="source-progress"[^>]*hidden><\/progress>/);
+    assert.match(card, /class="source-retry"[^>]*hidden>/);
+  }
+  assert.match(html, /class="library-scan-toolbar"[\s\S]*?id="extensionImportBtn"/);
+  assert.match(app, /status\.message \|\| `Обновляем \$\{sourceLabels\[provider\]\}/);
+  assert.match(app, /Подробный статус показан в карточке каждого сервиса/);
+  assert.doesNotMatch(app, /running\[0\]|running\.join\(' · '\)/);
+  assert.match(app, /requestAllLibraries\(false, providersBeingRefreshed\)/);
+  assert.match(app, /pendingProviderRetries\.add\(provider\)/);
 });
 
 test('account-first copy names likes and playlists and presents CSV/JSON as an alternative', () => {

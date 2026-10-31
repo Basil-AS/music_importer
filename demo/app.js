@@ -17,6 +17,7 @@
   let albumPage = 0;
   let extensionCheckInProgress = false;
   let accountScanInProgress = false;
+  const pendingProviderRetries = new Set();
   let focusScanQueued = false;
   let focusScanTimer = null;
   let lastFocusScanAt = 0;
@@ -451,10 +452,38 @@
       const partial = state.partialLibraries[provider];
       const status = state.libraryStatuses[provider];
       const label = card.querySelector('.source-status');
+      const progress = card.querySelector('.source-progress');
       const collections = card.querySelector('.source-collections');
       const button = card.querySelector('.connect');
+      const retryButton = card.querySelector('.source-retry');
+      const scanning = status?.status === 'scanning';
+      label.classList.remove('partial', 'connected', 'failed', 'stale');
+      card.toggleAttribute('aria-busy', scanning);
+      progress.hidden = !scanning;
+      progress.setAttribute('aria-label', `Сбор библиотеки ${sourceLabels[provider] || provider}`);
+      const progressCounts = scanning ? String(status.message || '').match(/(\d+)\s+из\s+(\d+)/i) : null;
+      const progressValue = progressCounts ? Number(progressCounts[1]) : 0;
+      const progressMax = progressCounts ? Number(progressCounts[2]) : 0;
+      if (progressMax > 0) {
+        progress.setAttribute('max', String(progressMax));
+        progress.setAttribute('value', String(Math.min(progressValue, progressMax)));
+        progress.setAttribute('aria-valuetext', `${Math.min(progressValue, progressMax)} из ${progressMax}`);
+      } else {
+        progress.removeAttribute('max');
+        progress.removeAttribute('value');
+        progress.removeAttribute('aria-valuetext');
+      }
+      card.dataset.scanPhase = scanning ? String(status.phase || 'reading') : '';
+      const refreshAction = window.MusicProviderConnectionFlow.refreshAction({
+        extensionAvailable: state.extensionAvailable,
+        status,
+        queued: pendingProviderRetries.has(provider),
+      });
+      retryButton.hidden = !(snapshot || partial) || !refreshAction.visible;
+      retryButton.disabled = refreshAction.disabled;
+      retryButton.textContent = refreshAction.label;
+      retryButton.title = refreshAction.title;
       if (snapshot) {
-        label.classList.remove('partial');
         const count = window.MusicAccountCatalog.snapshotSummary(snapshot);
         const albumInfo = window.MusicAlbumMatcher.extractSourceAlbums(snapshot);
         const collectionParts = [`Лайки: ${snapshot.tracks?.length || 0}`];
@@ -463,43 +492,44 @@
         collectionParts.push(`Плейлисты: ${snapshot.playlists?.length || 0}`);
         collections.textContent = collectionParts.join(' · ');
         collections.hidden = false;
-        if (status?.status === 'scanning' && status.cached) {
-          label.textContent = `Обновляем · предыдущий снимок: ${count}${status.cacheAge ? ` · ${status.cacheAge}` : ''}`;
+        if (scanning) {
+          label.textContent = status.message || `Обновляем ${sourceLabels[provider]}…`;
         } else if (status?.status === 'stale' || status?.status === 'unavailable') {
-          label.textContent = `Последний полный снимок · ${count}${status.cacheAge ? ` · ${status.cacheAge}` : ''}`;
+          label.textContent = `${status.message || 'Последний полный снимок'} · ${count}${status.cacheAge ? ` · ${status.cacheAge}` : ''}`;
           button.title = status.message || 'Аккаунт сейчас не обновлён.';
+        } else if (status?.status === 'failed') {
+          label.textContent = `Обновление не завершилось: ${status.message || 'ошибка чтения'}`;
+          button.title = status.message || '';
         } else {
           const labelPrefix = card.classList.contains('selected') ? 'Выбран' : 'Подключено';
           label.textContent = `${labelPrefix} · ${count}${status?.cacheAge ? ` · ${status.cacheAge}` : ''}`;
           button.title = '';
         }
-        label.classList.add('connected');
+        label.classList.toggle('failed', status?.status === 'failed');
+        label.classList.toggle('stale', status?.status === 'stale' || status?.status === 'unavailable');
+        label.classList.toggle('connected', !['failed', 'stale', 'unavailable'].includes(status?.status));
       } else if (partial) {
         collections.textContent = `Лайки: ${partial.tracks.length} · Плейлисты: не подтверждены`;
         collections.hidden = false;
-        label.textContent = status?.status === 'scanning'
-          ? `Лайки подтверждены · читаем остальную библиотеку…`
-          : `Подтверждены только лайки · ${partial.tracks.length}. Можно выбрать и перенести их отдельно.`;
+        label.textContent = scanning
+          ? status.message || `Читаем библиотеку ${sourceLabels[provider]}…`
+          : `Подтверждены только лайки · ${partial.tracks.length}. Можно выбрать и перенести их отдельно.${status?.status === 'failed' && status.message ? ` Ошибка: ${status.message}` : ''}`;
         label.classList.add('partial');
-        label.classList.remove('connected');
+        label.classList.toggle('failed', status?.status === 'failed');
+        label.classList.toggle('stale', status?.status === 'stale' || status?.status === 'unavailable');
         button.title = status?.message || 'Каталог или содержимое плейлистов не подтверждено.';
       } else if (status?.status === 'scanning') {
-        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = status.message || 'Сканируем открытую сессию…';
-        label.classList.remove('connected');
       } else if (status?.status === 'unavailable') {
-        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = status.message || 'Войдите в аккаунт и вернитесь сюда';
-        label.classList.remove('connected');
+        label.classList.add('stale');
       } else if (status?.status === 'failed') {
-        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = status.message || 'Не удалось прочитать библиотеку';
-        label.classList.remove('connected');
+        label.classList.add('failed');
       } else {
-        label.classList.remove('partial', 'connected');
         collections.hidden = true;
         label.textContent = state.extensionAvailable
           ? 'Войдите в аккаунт, чтобы загрузить библиотеку'
@@ -513,6 +543,7 @@
         providerName: sourceLabels[provider],
         selected: card.classList.contains('selected'),
         opening: state.openingProviderTabs.has(provider),
+      queued: pendingProviderRetries.has(provider),
       });
       button.disabled = action.disabled;
       button.textContent = action.label;
@@ -1126,7 +1157,7 @@
     } else if (targetSnapshot) {
       statusElement.textContent = `Библиотека ${label} считана. Перед записью потребуется активная вкладка этого сервиса.`;
     } else if (state.extensionAvailable) {
-      statusElement.textContent = `Аккаунт ${label} не найден среди открытых библиотек. Войдите в сервис и нажмите «Обновить открытые аккаунты».`;
+      statusElement.textContent = `Аккаунт ${label} не найден среди открытых библиотек. Войдите в сервис и нажмите «Обновить библиотеки».`;
     } else if (state.loaded && state.sourceSnapshot?.completeness?.confirmed !== true) {
       statusElement.textContent = 'Демо и CSV подходят для предпросмотра; для записи нужен полный снимок и открытый целевой аккаунт.';
     } else {
@@ -1688,6 +1719,18 @@
     toast('Сверка сохранена; можно подготовить следующий перенос');
   });
 
+  function queueProviderRetry(provider) {
+    if (!provider) return;
+    pendingProviderRetries.add(provider);
+    state.libraryStatuses[provider] = {
+      ...state.libraryStatuses[provider],
+      status: state.libraryStatuses[provider]?.status === 'stale' ? 'stale' : 'failed',
+      message: `Повтор ${sourceLabels[provider]} поставлен в очередь после текущего сбора.`,
+    };
+    renderSourceAvailability();
+    toast(`Повтор ${sourceLabels[provider]} запустится после текущего сбора.`);
+  }
+
   $$('.source .connect').forEach((button) => button.addEventListener('click', () => {
     if (state.searching || state.tracks.some((track) => track.searching)) {
       toast('Остановите поиск перед сменой источника.');
@@ -1702,6 +1745,7 @@
       providerName: sourceLabels[provider],
       selected: card.classList.contains('selected'),
       opening: state.openingProviderTabs.has(provider),
+      queued: pendingProviderRetries.has(provider),
     });
     if (provider && sourceSnapshotForProvider(provider)) {
       selectProviderSnapshot(provider);
@@ -1709,13 +1753,23 @@
     }
     if (action.action === 'retry') {
       if (accountScanInProgress) {
-        toast('Дождитесь завершения текущего сбора библиотек.');
+        queueProviderRetry(provider);
         return;
       }
       void scanOpenAccounts(false, [provider]);
       return;
     }
     void openProviderLogin(provider);
+  }));
+
+  $$('.source .source-retry').forEach((button) => button.addEventListener('click', () => {
+    const provider = button.closest('.source')?.dataset.provider;
+    if (!provider || button.disabled || state.searching || state.tracks.some((track) => track.searching)) return;
+    if (accountScanInProgress) {
+      queueProviderRetry(provider);
+      return;
+    }
+    void scanOpenAccounts(false, [provider]);
   }));
 
   $('#loadBtn').addEventListener('click', () => loadTracks(demoTracks, 'Демо-данные', { provider: 'file' }));
@@ -1872,11 +1926,12 @@
     accountScanInProgress = true;
     updatePrivacyControls();
     button.disabled = true;
-    button.textContent = 'Сканируем аккаунты…';
+    button.textContent = 'Обновить библиотеки';
     $('#extensionStatus').textContent = automatic
       ? 'Проверяю локальные снимки библиотек и обновляю устаревшие аккаунты…'
       : 'Обновляю библиотеки; недостающие страницы сервисов откроются в фоне…';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
+    let providersBeingRefreshed = refreshProviders;
     try {
       let response;
       if (automatic && refreshProviders === null) {
@@ -1892,18 +1947,23 @@
           return window.MusicLibraryCache.evaluate({ cachedSnapshot: snapshot, lastCheckedAt: snapshot.snapshotCachedAt || snapshot.exportedAt }) !== 'fresh';
         });
         const automaticProviders = window.MusicProviderConnectionFlow.providersForAutomaticRefresh(providersToRefresh, state.pendingLoginProviders);
-        if (automaticProviders.length) response = await requestAllLibraries(true, automaticProviders);
+        if (automaticProviders.length) {
+          providersBeingRefreshed = automaticProviders;
+          response = await requestAllLibraries(true, providersBeingRefreshed);
+        }
       } else {
-        response = await requestAllLibraries(true, refreshProviders);
+        response = await requestAllLibraries(true, providersBeingRefreshed);
       }
       while (response.pending && Date.now() < deadline) {
         applyLibraryResponse(response);
         renderSourceAvailability(response.statuses || {});
-        const running = Object.values(response.statuses || {}).filter((status) => status.status === 'scanning').map((status) => status.message);
-        button.textContent = running[0] || 'Сканируем библиотеки…';
-        $('#extensionStatus').textContent = running.length ? running.join(' · ') : 'Читаем оставшиеся сессии сервисов…';
+        const running = Object.entries(response.statuses || {}).filter(([, status]) => status.status === 'scanning');
+        button.textContent = 'Обновить библиотеки';
+        $('#extensionStatus').textContent = running.length
+          ? `Идёт сбор для ${running.length} ${running.length === 1 ? 'сервиса' : 'сервисов'}. Подробный статус показан в карточке каждого сервиса.`
+          : 'Проверяем состояние выбранных сервисов…';
         await new Promise((resolve) => setTimeout(resolve, 2000));
-        response = await requestAllLibraries(false);
+        response = await requestAllLibraries(false, providersBeingRefreshed);
       }
       if (response.pending) throw new Error('Сбор ещё выполняется. Библиотеки можно будет выбрать после завершения.');
       if (response.error) throw new Error(response.error);
@@ -1941,8 +2001,13 @@
     } finally {
       accountScanInProgress = false;
       button.disabled = false;
-      button.textContent = 'Обновить открытые аккаунты';
+      button.textContent = 'Обновить библиотеки';
       updatePrivacyControls();
+      const nextRetry = pendingProviderRetries.values().next().value;
+      if (nextRetry) {
+        pendingProviderRetries.delete(nextRetry);
+        setTimeout(() => { void scanOpenAccounts(false, [nextRetry]); }, 0);
+      }
       if (focusScanQueued) {
         focusScanQueued = false;
         scheduleFocusRefresh();
@@ -2236,7 +2301,7 @@
       toast('Сначала завершите перенос или подтвердите сверку незавершённого задания.');
       return;
     }
-    if (!window.confirm('Удалить сохранённые снимки лайков и плейлистов из профиля Chrome? Аккаунты музыкальных сервисов не изменятся. Для нового переноса запустите «Обновить открытые аккаунты».')) return;
+    if (!window.confirm('Удалить сохранённые снимки лайков и плейлистов из профиля Chrome? Аккаунты музыкальных сервисов не изменятся. Для нового переноса запустите «Обновить библиотеки».')) return;
     const button = $('#clearLibrarySnapshots');
     button.disabled = true;
     try {
@@ -2261,7 +2326,7 @@
       updateCounts();
       $('#extensionStatus').textContent = 'Локальные снимки удалены. Можно заново просканировать открытые аккаунты.';
       $('#extensionImportBtn').disabled = false;
-      $('#extensionImportBtn').textContent = 'Обновить открытые аккаунты';
+      $('#extensionImportBtn').textContent = 'Обновить библиотеки';
       toast('Локальные снимки библиотек удалены; музыкальные аккаунты не менялись.');
     } catch (error) {
       toast(error.message || 'Не удалось удалить снимки библиотек.');

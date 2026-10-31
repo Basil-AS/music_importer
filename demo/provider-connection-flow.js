@@ -11,8 +11,9 @@
     return [...new Set(providers)].filter((provider) => provider !== 'spotify' || queued.has(provider));
   };
 
-  const sourceAction = ({ extensionAvailable, snapshot, status, providerName, selected, opening }) => {
+  const sourceAction = ({ extensionAvailable, snapshot, status, providerName, selected, opening, queued = false }) => {
     if (opening) return { action: 'opening', disabled: true, label: 'Открываем…', title: '' };
+    if (queued) return { action: 'queued', disabled: true, label: 'Повтор в очереди', title: status?.message || '' };
     if (status?.status === 'scanning') return { action: 'none', disabled: true, label: 'Сканируем…', title: status.message || '' };
     if (snapshot) return {
       action: 'select',
@@ -38,5 +39,16 @@
     return { action: 'login', disabled: false, label: 'Войти / открыть', title: `Откроется страница входа в ${providerName || 'музыкальный сервис'}.` };
   };
 
-  root.MusicProviderConnectionFlow = Object.freeze({ providersForAutomaticRefresh, providersForFocusRefresh, sourceAction });
+  const refreshAction = ({ extensionAvailable, status, queued = false }) => {
+    if (!extensionAvailable || status?.status === 'scanning') return { visible: false, disabled: true, label: '', title: '' };
+    if (!['failed', 'stale'].includes(status?.status)) return { visible: false, disabled: true, label: '', title: '' };
+    return {
+      visible: true,
+      disabled: queued,
+      label: queued ? 'Повтор в очереди' : status.status === 'stale' ? 'Обновить сейчас' : 'Повторить чтение',
+      title: status.message || '',
+    };
+  };
+
+  root.MusicProviderConnectionFlow = Object.freeze({ providersForAutomaticRefresh, providersForFocusRefresh, refreshAction, sourceAction });
 })(globalThis);

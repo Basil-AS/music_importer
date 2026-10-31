@@ -554,13 +554,16 @@ test('selective library refresh rejects unknown provider IDs', async () => {
   assert.deepEqual(app.updates, []);
 });
 
-test('a provider scan with no progress for two minutes stops blocking the other libraries', async () => {
+test('a provider scan with no progress times out without blocking independently monitored services', async () => {
   const tabs = [{ id: 2, url: 'https://open.spotify.com/collection/tracks' }];
   const startedAt = new Date(Date.now() - 3 * 60 * 1000).toISOString();
   const app = bootWorker({
     [PROVIDER_KEY]: {
       snapshots: {},
-      scans: { spotify: { status: 'reading', message: 'Old progress', updatedAt: startedAt } },
+      scans: {
+        spotify: { status: 'reading', message: 'Old progress', updatedAt: startedAt },
+        'yandex-music': { status: 'reading', phase: 'playlists', message: 'Яндекс читает плейлисты', updatedAt: new Date().toISOString() },
+      },
       previousSnapshots: {},
     },
     [ZVUK_KEY]: makeZvukState(),
@@ -573,8 +576,35 @@ test('a provider scan with no progress for two minutes stops blocking the other 
   assert.equal(response.pending, false);
   assert.equal(response.statuses.spotify.status, 'failed');
   assert.match(response.statuses.spotify.message, /не сообщал о прогрессе 2 минуты/i);
+  assert.match(response.statuses.spotify.message, /кнопкой на карточке Spotify/);
+  assert.equal(response.statuses['yandex-music'].status, 'scanning');
   assert.equal(response.statuses['apple-music'].status, 'unavailable');
   assert.deepEqual(app.messages, []);
+});
+
+test('selected provider refresh waits only for that provider while reporting other active scans', async () => {
+  const startedAt = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+  const app = bootWorker({
+    [PROVIDER_KEY]: {
+      snapshots: {},
+      scans: {
+        spotify: { status: 'reading', message: 'Stalled Spotify', updatedAt: startedAt },
+        'yandex-music': { status: 'reading', phase: 'playlists', message: 'Яндекс читает плейлисты', updatedAt: new Date().toISOString() },
+      },
+      previousSnapshots: {},
+    },
+    [ZVUK_KEY]: makeZvukState(),
+  }, [{ id: 2, url: 'https://open.spotify.com/collection/tracks' }]);
+
+  const response = await app.call({
+    type: 'music-importer:get-all-libraries', refresh: true, refreshProviders: ['spotify'],
+  });
+
+  assert.equal(response.pending, false);
+  assert.equal(response.statuses.spotify.status, 'failed');
+  assert.equal(response.statuses['yandex-music'].status, 'scanning');
+  assert.match(response.statuses['yandex-music'].message, /Яндекс читает плейлисты/);
+  assert.equal(response.statuses['yandex-music'].phase, 'playlists');
 });
 
 test('Spotify auth-refresh scans fail promptly with a session-specific message', async () => {
@@ -1013,6 +1043,7 @@ test('Zvuk stops a scan with no progress after two minutes', async () => {
   const result = await app.call({ type: 'music-importer:get-all-libraries', refresh: false });
 
   assert.match(result.statuses.zvuk.message, /не сообщал о прогрессе 2 минуты/i);
+  assert.match(result.statuses.zvuk.message, /Повторить сбор.*карточке Сбер\.Звука/i);
   assert.equal(storage[ZVUK_KEY].scan.active, false);
   assert.equal(storage[ZVUK_KEY].captureEnabled, false);
 });

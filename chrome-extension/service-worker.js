@@ -575,9 +575,13 @@ async function requestProviderLibrary(provider, refresh) {
   let lastGoodSnapshot = [state.snapshots[provider], state.previousSnapshots[provider]]
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
   if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > staleAfterMs) {
+    const providerName = provider === 'spotify' ? 'Spotify' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс.Музыка';
+    const retryAction = provider === 'spotify'
+      ? 'повторите чтение кнопкой на карточке Spotify'
+      : `нажмите «Повторить сбор» на карточке ${providerName}`;
     const staleMessage = provider === 'spotify' && scan.phase === 'auth-refresh'
       ? 'Spotify не обновил сессию после HTTP 401 за 20 секунд. Войдите в Spotify и повторите сканирование.'
-      : 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.';
+      : `${providerName} не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; ${retryAction}.`;
     const update = await mutateProviderState((current) => {
       const latest = current.scans[provider];
       const latestAt = Date.parse(latest?.updatedAt || latest?.startedAt || '');
@@ -639,9 +643,9 @@ async function requestProviderLibrary(provider, refresh) {
       if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: failed.result.message };
       return { error: failed.result.message, status: 'failed', partialPayload: lastGoodPartial };
     }
-    return { pending: true, progress: state.scans[provider].message, payload: lastGoodSnapshot, partialPayload: lastGoodPartial, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+    return { pending: true, progress: state.scans[provider].message, phase: state.scans[provider].phase || 'reading', payload: lastGoodSnapshot, partialPayload: lastGoodPartial, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   }
-  if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, payload: lastGoodSnapshot, partialPayload: lastGoodPartial, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
+  if (scan?.status === 'reading') return { pending: true, progress: scan.message || `Читаем ${provider}…`, phase: scan.phase || 'reading', payload: lastGoodSnapshot, partialPayload: lastGoodPartial, cached: Boolean(lastGoodSnapshot), stale: Boolean(lastGoodSnapshot) };
   if (scan?.status === 'failed') {
     if (lastGoodSnapshot) return { payload: lastGoodSnapshot, cached: true, stale: true, message: scan.message || `Обновление ${provider} не завершилось.` };
     return { error: scan.message || `Не удалось прочитать ${provider}.`, status: 'failed', partialPayload: lastGoodPartial };
@@ -668,7 +672,7 @@ async function requestZvukLibrary(refresh) {
   if (state.scan?.active) {
     const lastActivity = Date.parse(state.updatedAt || state.scan.startedAt || '');
     if (Number.isFinite(lastActivity) && Date.now() - lastActivity > PROVIDER_SCAN_STALE_AFTER_MS) {
-      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Сбер.Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; повторите сканирование.' };
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Сбер.Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Повторить сбор» на карточке Сбер.Звука.' };
       state.captureEnabled = false;
       state.automation = { ...state.automation, active: false };
       state.error = state.scan.error;
@@ -679,6 +683,7 @@ async function requestZvukLibrary(refresh) {
     return {
       pending: true,
       progress: state.scan.message || `Сбер.Звук: ${state.scan.phase || 'сбор библиотеки'}.`,
+      phase: state.scan.phase || 'reading',
       payload: state.previousCompleteSnapshot || null,
       cached: Boolean(state.previousCompleteSnapshot),
       stale: Boolean(state.previousCompleteSnapshot),
@@ -703,6 +708,7 @@ async function requestZvukLibrary(refresh) {
   return {
     pending: true,
     progress: 'Сбер.Звук: собираем лайки, каталог и содержимое плейлистов.',
+    phase: state.scan?.phase || 'reading',
     payload: lastGoodSnapshot?.completeness?.confirmed === true ? lastGoodSnapshot : null,
     cached: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
     stale: Boolean(lastGoodSnapshot?.completeness?.confirmed === true),
@@ -735,15 +741,17 @@ async function requestAllLibraries(refresh, refreshProviders = null) {
   const libraries = {};
   const partialLibraries = {};
   const statuses = {};
+  const monitoredProviders = Array.isArray(refreshProviders) ? new Set(refreshProviders) : new Set(providers);
   let pending = false;
   for (const [provider, result] of outcomes) {
     if (isConfirmedFavoritesPartial(result.partialPayload, provider)) partialLibraries[provider] = result.partialPayload;
     if (result.pending) {
-      pending = true;
+      if (monitoredProviders.has(provider)) pending = true;
       if (result.payload?.completeness?.confirmed === true && result.payload.service === provider) libraries[provider] = result.payload;
       statuses[provider] = {
         status: 'scanning',
         message: String(result.progress || `Сканируем ${provider}…`),
+        phase: String(result.phase || 'reading'),
         cached: result.cached === true,
         ...(partialLibraries[provider] ? { partialScope: 'favorites', partialTrackCount: partialLibraries[provider].tracks.length } : {}),
       };
