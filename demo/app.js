@@ -357,7 +357,7 @@
     updateCounts();
   }
 
-  function loadTracks(list, label, metadata = {}) {
+  function loadTracks(list, label, metadata = {}, silentToast = false) {
     trackPage = 0;
     albumPage = 0;
     const sourceAlbums = metadata.albums || null;
@@ -409,7 +409,7 @@
     renderTracks();
     setStep(2);
     $('#reviewCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    toast(`Загружено треков: ${list.length}${state.albums.length ? `, альбомов: ${state.albums.length}` : ''}`);
+    if (!silentToast) toast(`Загружено треков: ${list.length}${state.albums.length ? `, альбомов: ${state.albums.length}` : ''}`);
   }
 
   const sourceLabels = { zvuk: 'Сбер.Звук', spotify: 'Spotify', 'yandex-music': 'Яндекс.Музыка', 'apple-music': 'Apple Music' };
@@ -581,7 +581,7 @@
     if (!onePlaylist) $('#targetPlaylistName').value = '';
   }
 
-  function selectProviderSnapshot(provider, collectionScope = null) {
+  function selectProviderSnapshot(provider, collectionScope = null, options = {}) {
     const originalPayload = sourceSnapshotForProvider(provider);
     const favoritesOnly = originalPayload?.partialScope === 'favorites';
     const scope = collectionScope || (state.sourceProvider === provider ? state.sourceCollectionScope : favoritesOnly ? 'favorites' : 'all');
@@ -644,7 +644,7 @@
       playlists: payload.playlists,
       albums: albumScope.albums,
       albumsSkipped: albumScope.skipped,
-    });
+    }, options.silentToast === true);
     $('#targetPlaylistName').value = '';
     $('#targetPlaylistName').hidden = !state.sourceCollectionScope.startsWith('playlist:');
     $('#targetPlaylistNameLabel').hidden = !state.sourceCollectionScope.startsWith('playlist:');
@@ -1971,22 +1971,12 @@
         || response.partialLibraries?.[provider]
         || ['ready', 'stale'].includes(response.statuses?.[provider]?.status));
       if (!connected.length) {
-        const details = Object.entries(response.statuses || {}).map(([provider, status]) => `${sourceLabels[provider]}: ${status.message || 'недоступен'}`).join(' · ');
-        throw new Error(details || 'Не нашёл открытых библиотек. Войдите в музыкальные сервисы в Chrome и повторите.');
+        if (!automatic) toast('Библиотеки не загружены. Проверьте статусы сервисов.');
+        return;
       }
       const selectedProvider = connected.includes(state.sourceProvider) ? state.sourceProvider : connected[0];
-      selectProviderSnapshot(selectedProvider);
-      const unavailable = Object.values(response.statuses || {}).filter((status) => status.status === 'unavailable').length;
-      const failed = Object.values(response.statuses || {}).filter((status) => status.status === 'failed').length;
-      const stale = Object.values(response.statuses || {}).filter((status) => status.status === 'stale').length;
-      const partialCount = connected.filter((provider) => state.partialLibraries[provider] && !state.librarySnapshots[provider]).length;
-      $('#extensionStatus').textContent = `${connected.length} из 4${partialCount ? ` · частичный снимок: ${partialCount}` : ''}${stale ? ` · устарел: ${stale}` : ''}${failed ? ` · ошибка: ${failed}` : ''}${unavailable ? ` · нет сессии: ${unavailable}` : ''}`;
-      if (!automatic || connected.length) {
-        if (stale) toast(`Доступно библиотек: ${connected.length}; часть снимков не обновилась`);
-        else if (failed) toast(`Загружено библиотек: ${connected.length}; часть сервисов не смогла прочитать аккаунт`);
-        else if (unavailable) toast(`Загружено библиотек: ${connected.length}; часть сервисов не подключена`);
-        else toast(`Загружены библиотеки всех ${connected.length} аккаунтов`);
-      }
+      selectProviderSnapshot(selectedProvider, null, { silentToast: true });
+      $('#extensionStatus').textContent = '';
     } catch (error) {
       $('#extensionStatus').textContent = error.message || 'Не удалось загрузить открытые библиотеки.';
       if (!automatic) toast(error.message || 'Не удалось получить данные из расширения.');

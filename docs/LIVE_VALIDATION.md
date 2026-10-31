@@ -357,3 +357,11 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - These values are a point-in-time observation, not successful completion. Spotify still needs investigation; this UI cleanup does not claim all live reads work.
 - Chrome DevTools MCP rejected navigation to `chrome://extensions/` with `Navigating to chrome: URLs is not allowed.` Therefore the current unpacked extension could not be reloaded through the requested browser tool; no alternate browser control or separate profile was used.
 - Final verification: `node --test --test-concurrency=1 --test-reporter=dot` passed **384/384**; focused copy/progress/hosting checks passed **12/12**; extension app bundle regenerated and `git diff --check` passed.
+
+## 2026-10-31 — remove the post-scan aggregate summary
+
+- A settled live snapshot showed that `scanOpenAccounts` still put a multi-service count/error summary into the shared toolbar and emitted a combined success/failure toast after choosing a source. Those aggregate updates are removed; a zero-library scan now leaves the provider-specific card errors visible and reports only a short generic toast for a manual refresh.
+- Loading a source automatically after scanning no longer emits a second toast. The regression fixture confirms individual provider errors remain in their cards while the shared toolbar and toast stay empty after a partial scan.
+- Desktop and mobile screenshots were inspected through Chrome DevTools MCP. The mobile viewport had no horizontal overflow. The scan toolbar outline/padding was removed so the primary refresh button does not sit in an empty status panel.
+- The currently installed extension still reports the older Zvuk error text, Spotify times out after two minutes, and Yandex continues its existing likes scan before playlist validation. No complete four-service live refresh is proven; the updated reader scripts still require an extension reload and another live read.
+- Focused app/progress/accessibility checks pass **20/20**. Chrome DevTools MCP Lighthouse snapshot scored **100/100** for accessibility, best practices, SEO, and agentic browsing on both desktop and mobile (31/31 audits each). The built bundle full suite passes **385/385**.
