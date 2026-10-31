@@ -461,7 +461,9 @@
       card.toggleAttribute('aria-busy', scanning);
       progress.hidden = !scanning;
       progress.setAttribute('aria-label', `Сбор библиотеки ${sourceLabels[provider] || provider}`);
-      const progressCounts = scanning ? String(status.message || '').match(/(\d+)\s+из\s+(\d+)/i) : null;
+      const progressCounts = scanning
+        ? [...String(status.message || '').matchAll(/(\d+)\s+из\s+(\d+)/gi)].at(-1) || null
+        : null;
       const progressValue = progressCounts ? Number(progressCounts[1]) : 0;
       const progressMax = progressCounts ? Number(progressCounts[2]) : 0;
       if (progressMax > 0) {

@@ -1,5 +1,10 @@
 # Live validation log
 
+## 2026-10-31 — detailed progress in nested phases
+
+- After PR #29 merged, reloaded the existing local app tab through Chrome DevTools MCP. Its per-provider progress bars updated independently with Yandex at 275/4,979 and Apple reading a playlist with 400/1,320 tracks. For Apple's message “playlist 1 of 12: 400 of 1,320”, the UI initially chose the first pair and displayed 1/12.
+- Updated the progress parser to use the last reported count pair, so nested phases display the detailed track count. A regression fixture covers Spotify, Yandex, and Apple's nested playlist count. The full suite passes **377/377**, and the bundle check passes. The local Chrome page was not reloaded again after this small code change; verification is from the fixture and bundle build. No account writes were made.
+
 ## 2026-10-31 — provider-specific scan status UX
 
 - Used only the user's existing Chrome through `chrome-devtools`: `list_pages` first, then inspected the existing local app tab (`http://127.0.0.1:8001/`). No new browser/profile was started. The page displayed a distinct status and progress indicator per provider, plus provider-specific retry/update buttons. The console had no warnings or errors.
