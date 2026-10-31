@@ -79,3 +79,41 @@ test('legacy watchdog text is shown as a concise provider status', async () => {
 
   assert.equal(spotify.status.textContent, 'Spotify: нет прогресса 2 минуты. Снимок не сохранён.');
 });
+
+test('active library progress is shown on each provider card without a shared toolbar status', async () => {
+  let pendingRequests = 0;
+  const snapshot = {
+    service: 'spotify',
+    snapshotCachedAt: new Date().toISOString(),
+    collection: { type: 'library', name: 'Library' },
+    completeness: {
+      confirmed: true, favoritesConfirmed: true, favoritesCount: 1,
+      catalogConfirmed: true, playlistItemsConfirmed: true, playlistItemsTotal: 0,
+    },
+    tracks: [{ id: 'spotify:track:one', title: 'One', artists: ['Artist'] }],
+    playlists: [],
+  };
+  const harness = createAppHarness({
+    libraries: { spotify: snapshot },
+    statuses: {
+      zvuk: { status: 'scanning', phase: 'favorites', message: 'Сбер.Звук: страница 1.' },
+      spotify: { status: 'scanning', phase: 'favorites', message: 'Собираем Spotify Liked Songs: 1 из 3.' },
+      'yandex-music': { status: 'scanning', phase: 'favorites', message: 'Лайки: загружено 2 из 5.' },
+      'apple-music': { status: 'scanning', phase: 'playlist-items', message: 'Плейлист 1 из 2.' },
+    },
+    pending: () => pendingRequests++ === 0,
+    handler: async () => ({ ok: true }),
+  });
+  const spotify = harness.cards.find((card) => card.dataset.provider === 'spotify');
+  const yandex = harness.cards.find((card) => card.dataset.provider === 'yandex-music');
+  await harness.waitFor(() => (
+    spotify.progress.getAttribute('value') === '1'
+    && yandex.progress.getAttribute('value') === '2'
+    && harness.$('#extensionStatus').textContent === ''
+  ), 'independent progress without a shared status');
+
+  assert.match(spotify.status.textContent, /Spotify Liked Songs: 1 из 3/);
+  assert.match(yandex.status.textContent, /Лайки: загружено 2 из 5/);
+  assert.equal(spotify.progress.getAttribute('max'), '3');
+  assert.equal(yandex.progress.getAttribute('max'), '5');
+});

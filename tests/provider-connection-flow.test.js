@@ -144,7 +144,8 @@ test('each provider card has its own progress indicator and visible retry contro
   }
   assert.match(html, /class="library-scan-toolbar"[\s\S]*?id="extensionImportBtn"/);
   assert.match(app, /status\.message \|\| `Обновляем \$\{sourceLabels\[provider\]\}/);
-  assert.match(app, /`Сбор: \$\{running\.length\}/);
+  assert.doesNotMatch(app, /`Сбор: \$\{running\.length\}|Идёт сбор для/);
+  assert.match(app, /\$\('#extensionStatus'\)\.textContent = ''/);
   assert.doesNotMatch(app, /running\[0\]|running\.join\(' · '\)/);
   assert.match(app, /requestAllLibraries\(false, providersBeingRefreshed\)/);
   assert.match(app, /pendingProviderRetries\.add\(provider\)/);

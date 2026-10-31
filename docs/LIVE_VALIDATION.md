@@ -1,5 +1,11 @@
 # Live validation log
 
+## 2026-10-31 — per-provider progress only
+
+- Removed the active-scan aggregate from the toolbar; the toolbar stays blank while scans run, and each service card shows its own progress/status. The completion summary remains after the scan ends.
+- In the existing Chrome tab (`127.0.0.1:8001`), live collection showed separate Zvuk, Yandex, and Apple card states while Spotify retained its timeout error. The toolbar status was blank; the local app console had no warnings/errors. Read-only scan only.
+- A regression test simulates concurrent scans, verifies separate counts/messages, and asserts no shared toolbar status. The full suite passes **379/379**; the extension app bundle matches `demo/`, and `git diff --check` passes.
+
 ## 2026-10-31 — concise app copy
 
 - Removed the generic connector/test disclaimer, repeated onboarding paragraph, long connection setup text, and sidebar privacy paragraph from the main app. Kept the live provider errors/progress, transfer recovery actions, cache controls, and a short extension-recovery hint. Legacy stored watchdog text is normalized when displayed.

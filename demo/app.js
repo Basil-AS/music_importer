@@ -99,7 +99,7 @@
       state.extensionAvailable = true;
       updateSourceCount();
       $('#openServicesBtn').disabled = false;
-      status.textContent = 'Проверяю сервисы…';
+      status.textContent = '';
       button.textContent = 'Обновить библиотеки';
       button.disabled = false;
       void chrome.runtime.sendMessage({ type: 'music-importer:repair-provider-bridges', skipProviders: ['spotify'] })
@@ -1937,9 +1937,7 @@
     updatePrivacyControls();
     button.disabled = true;
     button.textContent = 'Обновить библиотеки';
-    $('#extensionStatus').textContent = automatic
-      ? 'Проверяю библиотеки…'
-      : 'Обновляю библиотеки…';
+    $('#extensionStatus').textContent = '';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
     let providersBeingRefreshed = refreshProviders;
     try {
@@ -1967,11 +1965,8 @@
       while (response.pending && Date.now() < deadline) {
         applyLibraryResponse(response);
         renderSourceAvailability(response.statuses || {});
-        const running = Object.entries(response.statuses || {}).filter(([, status]) => status.status === 'scanning');
         button.textContent = 'Обновить библиотеки';
-        $('#extensionStatus').textContent = running.length
-          ? `Сбор: ${running.length} ${running.length === 1 ? 'сервис' : 'сервисов'}`
-          : 'Проверка…';
+        $('#extensionStatus').textContent = '';
         await new Promise((resolve) => setTimeout(resolve, 2000));
         response = await requestAllLibraries(false, providersBeingRefreshed);
       }
