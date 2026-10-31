@@ -114,6 +114,15 @@ test('automatic refresh skips Spotify unless the user opened it for a login or e
   assert.deepEqual(JSON.parse(JSON.stringify(providersForAutomaticRefresh(providers, new Set(['spotify'])))), providers);
 });
 
+test('active provider scans keep status polling alive even when they were not selected for refresh', () => {
+  const { hasActiveScans } = loadFlow();
+  assert.equal(hasActiveScans({ spotify: { status: 'failed' }, 'yandex-music': { status: 'scanning' } }), true);
+  assert.equal(hasActiveScans({ spotify: { status: 'failed' }, 'yandex-music': { status: 'ready' } }), false);
+  assert.equal(hasActiveScans(null), false);
+  const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
+  assert.match(app, /while \(\(response\.pending \|\| window\.MusicProviderConnectionFlow\.hasActiveScans\(response\.statuses\)\)/);
+});
+
 test('account cards call the selected-provider opener and focus refresh includes its pending queue', () => {
   const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
   assert.match(app, /repair-provider-bridges', skipProviders: \['spotify'\]/);

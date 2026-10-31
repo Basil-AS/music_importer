@@ -57,7 +57,7 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   for (const iconPath of Object.values(manifest.icons)) {
     assert.ok(fs.existsSync(require.resolve(`../chrome-extension/${iconPath}`)), `missing extension icon ${iconPath}`);
   }
-  assert.equal(manifest.version, '0.15.4');
+  assert.equal(manifest.version, '0.15.5');
 
   const appHtml = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
   assert.match(appHtml, /<h1>Перенос музыки<\/h1>/);

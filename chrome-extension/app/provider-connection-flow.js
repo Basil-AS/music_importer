@@ -11,6 +11,8 @@
     return [...new Set(providers)].filter((provider) => provider !== 'spotify' || queued.has(provider));
   };
 
+  const hasActiveScans = (statuses = {}) => Object.values(statuses || {}).some((status) => status?.status === 'scanning');
+
   const sourceAction = ({ extensionAvailable, snapshot, status, providerName, selected, opening, queued = false }) => {
     if (opening) return { action: 'opening', disabled: true, label: 'Открываем…', title: '' };
     if (queued) return { action: 'queued', disabled: true, label: 'Повтор в очереди', title: status?.message || '' };
@@ -50,5 +52,5 @@
     };
   };
 
-  root.MusicProviderConnectionFlow = Object.freeze({ providersForAutomaticRefresh, providersForFocusRefresh, refreshAction, sourceAction });
+  root.MusicProviderConnectionFlow = Object.freeze({ providersForAutomaticRefresh, providersForFocusRefresh, hasActiveScans, refreshAction, sourceAction });
 })(globalThis);
