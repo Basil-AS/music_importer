@@ -137,6 +137,7 @@ test('each provider card has its own progress indicator and visible retry contro
   const app = fs.readFileSync(require.resolve('../demo/app.js'), 'utf8');
   const cards = [...html.matchAll(/<article class="source"[^>]*data-provider="([^"]+)"[\s\S]*?<\/article>/g)];
   assert.deepEqual(cards.map(([, provider]) => provider), ['zvuk', 'spotify', 'yandex-music', 'apple-music']);
+  assert.doesNotMatch(html, /<span class="count">Проверяем…<\/span>/);
   for (const [card] of cards) {
     assert.match(card, /class="source-status" role="status" aria-live="polite"/);
     assert.match(card, /<progress class="source-progress"[^>]*hidden><\/progress>/);
@@ -144,6 +145,11 @@ test('each provider card has its own progress indicator and visible retry contro
   }
   assert.match(html, /class="library-scan-toolbar"[\s\S]*?id="extensionImportBtn"/);
   assert.match(app, /status\.message \|\| `Обновляем \$\{sourceLabels\[provider\]\}/);
+  assert.match(app, /const progressCounts = scanning[\s\S]*?matchAll\(/);
+  assert.match(app, /progress\.setAttribute\('max', String\(progressMax\)\)/);
+  assert.match(app, /progress\.setAttribute\('value', String\(Math\.min\(progressValue, progressMax\)\)\)/);
+  assert.match(app, /progress\.setAttribute\('aria-valuetext', `\$\{Math\.min\(progressValue, progressMax\)\} из \$\{progressMax\}`\)/);
+  assert.doesNotMatch(app, /updateSourceCount/);
   assert.doesNotMatch(app, /`Сбор: \$\{running\.length\}|Идёт сбор для/);
   assert.match(app, /\$\('#extensionStatus'\)\.textContent = ''/);
   assert.doesNotMatch(app, /running\[0\]|running\.join\(' · '\)/);
@@ -153,10 +159,10 @@ test('each provider card has its own progress indicator and visible retry contro
 
 test('account-first copy keeps only concise actions and statuses', () => {
   const html = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
-  assert.match(html, /Перенос лайков и плейлистов/);
-  assert.match(html, /Лайки и плейлисты из аккаунта/);
   assert.match(html, /Импорт CSV\/JSON/);
-  assert.match(html, /<summary>Не подключается\?<\/summary>/);
+  assert.doesNotMatch(html, /extension-help|Не подключается\?/);
+  assert.doesNotMatch(html, /Лайки и плейлисты из аккаунта|Можно исключить любой трек/);
+  assert.doesNotMatch(html, /Сначала проверим совпадения — вы решаете, что переносить/);
   assert.doesNotMatch(html, /Подготовлены коннекторы четырёх сервисов|Доступность зависит от входа|onboarding-note|Вы управляете переносом|Сессионные API-заголовки/);
   assert.doesNotMatch(html, /checkout проекта|localhost-страница|CSV\/JSON можно загрузить как альтернативный источник/);
   assert.doesNotMatch(html, /доступны как источники и цели/);

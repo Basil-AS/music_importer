@@ -59,6 +59,22 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   }
   assert.equal(manifest.version, '0.15.3');
 
+  const appHtml = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
+  assert.match(appHtml, /<meta name="description" content="[^"]+">/);
+  const popupHtml = fs.readFileSync(require.resolve('../chrome-extension/popup.html'), 'utf8');
+  for (const copy of [
+    'Вы управляете переносом',
+    'Библиотеки остаются в вашем профиле Chrome',
+    'Сессионные API-заголовки Apple Music/Spotify используются только в памяти',
+    'Подготовлены коннекторы четырёх сервисов',
+    'После подключения приложения авторизованные страницы будут просканированы автоматически',
+  ]) {
+    assert.doesNotMatch(appHtml, new RegExp(copy));
+    assert.doesNotMatch(popupHtml, new RegExp(copy));
+  }
+  assert.doesNotMatch(appHtml, /Если его нет, загрузите папку `chrome-extension`/);
+  assert.doesNotMatch(popupHtml, /Расширение пройдёт избранное, каталог плейлистов/);
+
   const workflow = fs.readFileSync(require.resolve('../.github/workflows/deploy-pages.yml'), 'utf8');
   assert.match(workflow, /branches:\s*\[master\]/);
   assert.match(workflow, /path:\s*demo/);

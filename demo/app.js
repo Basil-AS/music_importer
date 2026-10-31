@@ -75,14 +75,6 @@
     toast.timer = setTimeout(() => element.classList.remove('show'), 3000);
   }
 
-  function updateSourceCount() {
-    const count = $('[aria-labelledby="source-heading"] .count');
-    if (!count) return;
-    count.textContent = state.extensionAvailable
-      ? `${new Set([...Object.keys(state.librarySnapshots), ...Object.keys(state.partialLibraries)]).size} из ${$$('.source').length}`
-      : 'Подключите расширение';
-  }
-
   function sourceSnapshotForProvider(provider) {
     return state.librarySnapshots[provider] || state.partialLibraries[provider] || null;
   }
@@ -97,7 +89,6 @@
     const status = $('#extensionStatus');
     if (extensionApp) {
       state.extensionAvailable = true;
-      updateSourceCount();
       $('#openServicesBtn').disabled = false;
       status.textContent = '';
       button.textContent = 'Обновить библиотеки';
@@ -125,10 +116,8 @@
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
       status.textContent = 'Откройте Music Importer из панели Chrome.';
-      updateSourceCount();
       button.textContent = 'Повторить проверку';
       button.disabled = false;
-      $('#extensionHelp').open = true;
     }, 1200);
     const onMessage = (event) => {
       if (event.source !== window || event.origin !== location.origin
@@ -139,7 +128,6 @@
       clearTimeout(timeout);
       window.removeEventListener('message', onMessage);
       state.extensionAvailable = true;
-      updateSourceCount();
       $('#openServicesBtn').disabled = false;
       status.textContent = `Подключено · ${String(event.data.version || 'неизвестна')}`;
       button.textContent = 'Обновить библиотеки';
@@ -559,7 +547,6 @@
       button.textContent = action.label;
       button.title = action.title;
     });
-    updateSourceCount();
     updateTargetLabel();
   }
 
@@ -2324,7 +2311,6 @@
       state.loaded = false;
       state.report = null;
       $$('.source').forEach((card) => card.classList.remove('selected'));
-      $('[aria-labelledby="source-heading"] .count').textContent = `0 из ${$$('.source').length}`;
       $('#report').classList.remove('show');
       renderSourceAvailability({});
       renderTracks();

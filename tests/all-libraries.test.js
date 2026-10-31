@@ -423,6 +423,19 @@ test('Zvuk reader error is shown with safe operation and HTTP status metadata', 
   assert.equal(storage[ZVUK_KEY].captureEnabled, false);
 });
 
+test('Zvuk reader error shows an allowlisted GraphQL code without provider payload details', async () => {
+  const storage = { [ZVUK_KEY]: { ...makeZvukState(), captureEnabled: true, scan: { active: true, phase: 'catalog', tabId: 1 } } };
+  const worker = bootWorker(storage, [{ id: 1, url: 'https://zvuk.com/collection', status: 'complete' }]);
+  await worker.pageMessage({
+    type: 'zvuk:read-error', operation: 'getPaginatedCollectionAll', graphqlError: true,
+    graphqlErrorCode: 'DOWNSTREAM_SERVICE_ERROR', section: 'playlists', pageOrdinal: 2,
+    providerMessage: 'private detail', accessToken: 'private token',
+  }, 1);
+  assert.match(storage[ZVUK_KEY].error, /DOWNSTREAM_SERVICE_ERROR.*раздел «плейлисты», страница 2/);
+  assert.ok(!storage[ZVUK_KEY].error.includes('private detail'));
+  assert.ok(!storage[ZVUK_KEY].error.includes('private token'));
+});
+
 test('Zvuk pagination stall is not mislabeled as a rejected HTTP response', async () => {
   const storage = { [ZVUK_KEY]: { ...makeZvukState(), captureEnabled: true, scan: { active: true, phase: 'catalog', tabId: 1 } } };
   const worker = bootWorker(storage, [{ id: 1, url: 'https://zvuk.com/collection', status: 'complete' }]);

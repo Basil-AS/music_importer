@@ -349,3 +349,11 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - Spotify now stops before creating or appending any playlist when a requested favorite is missing from the immediate read-back. The partial report preserves favorite counts and leaves `playlists` empty so the user can retry safely without extra writes.
 - A mixed-plan fixture makes the favorite write appear successful while the subsequent library read omits it, then asserts no playlist creation, append, or read request occurs.
 - Focused Spotify target tests pass **10/10**; the full suite passes **365/365**. `git diff --check` passes. This is fixture verification only; no live Spotify account write was performed.
+
+## 2026-10-31 — concise UI and provider-specific progress
+
+- Removed repeated privacy/onboarding paragraphs, the installation walkthrough, marketing copy, and duplicate library descriptions from the importer and extension popup. Kept account errors, per-service state, retry actions, and the dedicated privacy page.
+- Reloaded the existing app tab through Chrome DevTools MCP. The accessibility snapshot showed separate service cards with their own phase and numeric progress for Yandex and Apple Music; Zvuk showed its own collection-read phase. Spotify independently showed its two-minute no-progress failure and retry action. The shared toolbar status was empty; no transfer or target-account write was run. Account-specific counts are omitted.
+- These values are a point-in-time observation, not successful completion. Spotify still needs investigation; this UI cleanup does not claim all live reads work.
+- Chrome DevTools MCP rejected navigation to `chrome://extensions/` with `Navigating to chrome: URLs is not allowed.` Therefore the current unpacked extension could not be reloaded through the requested browser tool; no alternate browser control or separate profile was used.
+- Final verification: `node --test --test-concurrency=1 --test-reporter=dot` passed **384/384**; focused copy/progress/hosting checks passed **12/12**; extension app bundle regenerated and `git diff --check` passed.

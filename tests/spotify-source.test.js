@@ -310,7 +310,7 @@ test('Spotify source reader times out when an HTTP response body stalls after he
   assert.match(page.messages.find((message) => message.type === 'scan-error')?.error || '', /Spotify не ответил за 45 с/);
 });
 
-test('Spotify source reader spaces concurrent likes and playlist requests instead of bursting', async () => {
+test('Spotify source reader completes liked tracks before it starts reading playlists', async () => {
   const page = makePage(({ payload }) => {
     if (payload.operationName === 'initialPageRequest') return { payload: { data: {} } };
     if (payload.operationName === 'fetchLibraryTracks') return { payload: { data: { me: { library: { tracks: { totalCount: 0, items: [] } } } } } };
@@ -320,9 +320,10 @@ test('Spotify source reader spaces concurrent likes and playlist requests instea
 
   await page.startScan();
   const starts = page.requests.filter((request) => request.url === endpoint && request.payload?.operationName !== 'initialPageRequest')
-    .map((request) => request.startedAt);
-  assert.equal(starts.length, 2);
-  assert.ok(starts[1] - starts[0] >= 250, `Spotify requests started ${starts[1] - starts[0]} ms apart`);
+    .map((request) => request.payload.operationName);
+  assert.deepEqual(starts, ['fetchLibraryTracks', 'libraryV3']);
+  assert.ok(page.messages.some((message) => message.type === 'scan-progress'
+    && /Лайки Spotify сверены: 0\. Читаем каталог плейлистов/.test(message.message)));
 });
 
 test('Spotify source reader refuses a truncated liked-track page', async () => {
