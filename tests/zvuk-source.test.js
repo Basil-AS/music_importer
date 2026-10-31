@@ -504,6 +504,40 @@ test('Zvuk retries a transient downstream GraphQL cursor error without exposing 
   assert.ok(!JSON.stringify(page.messages).includes('private-trace'));
 });
 
+test('Zvuk keeps a page-2 catalog error incomplete after exhausting downstream retries', async () => {
+  let cursorAttempts = 0;
+  const page = makePage('/collection', ({ payload }) => {
+    const cursor = payload.variables?.after || null;
+    if (!cursor) return { data: { paginatedCollection: { playlists: {
+      items: [{ id: 'playlist-first', title: 'First', trackCount: 0 }],
+      page: { endCursor: 'playlist-next', hasNextPage: true },
+    } } } };
+    cursorAttempts += 1;
+    return { errors: [{
+      message: 'private downstream detail',
+      extensions: { code: 'DOWNSTREAM_SERVICE_ERROR', traceId: 'private-trace', accessToken: 'private-token' },
+    }] };
+  }, 0.001);
+
+  await page.request('getPaginatedCollectionAll', { first: 100, after: null, withPlaylists: true });
+  const error = await page.waitForMessage('read-error');
+
+  assert.equal(cursorAttempts, 3);
+  assert.equal(error.operation, 'getPaginatedCollectionAll');
+  assert.equal(error.graphqlError, true);
+  assert.equal(error.graphqlErrorCode, 'DOWNSTREAM_SERVICE_ERROR');
+  assert.equal(error.section, 'playlists');
+  assert.equal(error.pageOrdinal, 2);
+  assert.equal(error.cursorPresent, true);
+  assert.equal(error.cursorRepeated, false);
+  assert.deepEqual(page.messages.filter((message) => message.type === 'playlist-list-page')
+    .flatMap((message) => message.playlists.map((playlist) => playlist.id)), ['playlist-first']);
+  assert.equal(page.messages.some((message) => message.type === 'collection-scroll-end'), false);
+  assert.ok(!JSON.stringify(error).includes('private downstream detail'));
+  assert.ok(!JSON.stringify(error).includes('private-trace'));
+  assert.ok(!JSON.stringify(error).includes('private-token'));
+});
+
 test('Zvuk leaves an unsupported GraphQL cursor error incomplete with a sanitized code', async () => {
   let cursorAttempts = 0;
   const page = makePage('/collection', ({ payload }) => {
