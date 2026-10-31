@@ -43,12 +43,14 @@ test('each provider card exposes its own numeric scan progress when the service 
     statuses: {
       spotify: { status: 'scanning', phase: 'favorites', message: 'Собираем Spotify Liked Songs: 1000 из 1430.' },
       'yandex-music': { status: 'scanning', phase: 'favorites', message: 'Лайки: загружено 1275 из 4979.' },
+      'apple-music': { status: 'scanning', phase: 'playlist-items', message: 'Плейлист 1 из 12: 400 из 1320.' },
     },
     handler: async () => ({ ok: true }),
   });
   const spotify = harness.cards.find((card) => card.dataset.provider === 'spotify').progress;
   const yandex = harness.cards.find((card) => card.dataset.provider === 'yandex-music').progress;
-  await harness.waitFor(() => spotify.getAttribute('value') !== null && yandex.getAttribute('value') !== null, 'numeric per-provider progress');
+  const apple = harness.cards.find((card) => card.dataset.provider === 'apple-music').progress;
+  await harness.waitFor(() => spotify.getAttribute('value') !== null && yandex.getAttribute('value') !== null && apple.getAttribute('value') !== null, 'numeric per-provider progress');
 
   assert.equal(spotify.getAttribute('max'), '1430');
   assert.equal(spotify.getAttribute('value'), '1000');
@@ -56,4 +58,7 @@ test('each provider card exposes its own numeric scan progress when the service 
   assert.equal(yandex.getAttribute('max'), '4979');
   assert.equal(yandex.getAttribute('value'), '1275');
   assert.equal(yandex.getAttribute('aria-valuetext'), '1275 из 4979');
+  assert.equal(apple.getAttribute('max'), '1320');
+  assert.equal(apple.getAttribute('value'), '400');
+  assert.equal(apple.getAttribute('aria-valuetext'), '400 из 1320');
 });
