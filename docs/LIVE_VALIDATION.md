@@ -1,5 +1,12 @@
 # Live validation log
 
+## 2026-10-31 — concise app copy
+
+- Removed the generic connector/test disclaimer, repeated onboarding paragraph, long connection setup text, and sidebar privacy paragraph from the main app. Kept the live provider errors/progress, transfer recovery actions, cache controls, and a short extension-recovery hint. Legacy stored watchdog text is normalized when displayed.
+- Reduced default empty/loading copy and cache notices to concise labels. The detailed privacy document remains available separately from the app's “Приватность” link.
+- Reloaded the existing local app tab through Chrome DevTools MCP. No legacy copy remained on screen; the saved Spotify watchdog appeared as “Spotify: нет прогресса 2 минуты. Снимок не сохранён.” Yandex and Apple showed their own independent counters. The local page console had no warnings/errors. This refresh only read libraries; it made no account changes.
+- Focused app/worker/UI tests pass **80/80**, the full suite passes **378/378**, the extension bundle matches `demo/`, and `git diff --check` passes.
+
 ## 2026-10-31 — detailed progress in nested phases
 
 - After PR #29 merged, reloaded the existing local app tab through Chrome DevTools MCP. Its per-provider progress bars updated independently with Yandex at 275/4,979 and Apple reading a playlist with 400/1,320 tracks. For Apple's message “playlist 1 of 12: 400 of 1,320”, the UI initially chose the first pair and displayed 1/12.

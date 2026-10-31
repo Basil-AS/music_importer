@@ -62,3 +62,20 @@ test('each provider card exposes its own numeric scan progress when the service 
   assert.equal(apple.getAttribute('value'), '400');
   assert.equal(apple.getAttribute('aria-valuetext'), '400 из 1320');
 });
+
+test('legacy watchdog text is shown as a concise provider status', async () => {
+  const harness = createAppHarness({
+    libraries: {},
+    statuses: {
+      spotify: {
+        status: 'failed',
+        message: 'Сбор не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Обновить открытые аккаунты», чтобы повторить.',
+      },
+    },
+    handler: async () => ({ ok: true }),
+  });
+  const spotify = harness.cards.find((card) => card.dataset.provider === 'spotify');
+  await harness.waitFor(() => /нет прогресса 2 минуты/.test(spotify.status.textContent), 'concise watchdog status');
+
+  assert.equal(spotify.status.textContent, 'Spotify: нет прогресса 2 минуты. Снимок не сохранён.');
+});

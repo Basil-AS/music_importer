@@ -575,8 +575,8 @@ test('a provider scan with no progress times out without blocking independently 
 
   assert.equal(response.pending, false);
   assert.equal(response.statuses.spotify.status, 'failed');
-  assert.match(response.statuses.spotify.message, /не сообщал о прогрессе 2 минуты/i);
-  assert.match(response.statuses.spotify.message, /кнопкой на карточке Spotify/);
+  assert.match(response.statuses.spotify.message, /нет прогресса 2 минуты/i);
+  assert.doesNotMatch(response.statuses.spotify.message, /кнопкой|карточке/);
   assert.equal(response.statuses['yandex-music'].status, 'scanning');
   assert.equal(response.statuses['apple-music'].status, 'unavailable');
   assert.deepEqual(app.messages, []);
@@ -625,7 +625,7 @@ test('Spotify auth-refresh scans fail promptly with a session-specific message',
 
   assert.equal(response.pending, false);
   assert.equal(response.statuses.spotify.status, 'failed');
-  assert.match(response.statuses.spotify.message, /HTTP 401 за 20 секунд.*Войдите в Spotify/i);
+  assert.match(response.statuses.spotify.message, /не обновил сессию после HTTP 401\. Проверьте вход/i);
   assert.deepEqual(app.messages, []);
 });
 
@@ -1042,8 +1042,8 @@ test('Zvuk stops a scan with no progress after two minutes', async () => {
   const app = bootWorker(storage);
   const result = await app.call({ type: 'music-importer:get-all-libraries', refresh: false });
 
-  assert.match(result.statuses.zvuk.message, /не сообщал о прогрессе 2 минуты/i);
-  assert.match(result.statuses.zvuk.message, /Повторить сбор.*карточке Сбер\.Звука/i);
+  assert.match(result.statuses.zvuk.message, /нет прогресса 2 минуты/i);
+  assert.doesNotMatch(result.statuses.zvuk.message, /Повторить сбор|карточке/);
   assert.equal(storage[ZVUK_KEY].scan.active, false);
   assert.equal(storage[ZVUK_KEY].captureEnabled, false);
 });

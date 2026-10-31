@@ -99,8 +99,8 @@
       state.extensionAvailable = true;
       updateSourceCount();
       $('#openServicesBtn').disabled = false;
-      status.textContent = 'Проверяю подключение к открытым сервисам и аккаунтам…';
-      button.textContent = 'Подключаем аккаунты…';
+      status.textContent = 'Проверяю сервисы…';
+      button.textContent = 'Обновить библиотеки';
       button.disabled = false;
       void chrome.runtime.sendMessage({ type: 'music-importer:repair-provider-bridges', skipProviders: ['spotify'] })
         .catch(() => null)
@@ -109,7 +109,7 @@
     }
     if (extensionCheckInProgress || state.extensionAvailable) return;
     if (!window.crypto?.randomUUID) {
-      status.textContent = 'Этот браузер не поддерживает проверку локального расширения. Используйте Chrome.';
+      status.textContent = 'Откройте приложение в Chrome.';
       button.textContent = 'Откройте в Chrome';
       button.disabled = true;
       return;
@@ -117,14 +117,14 @@
     extensionCheckInProgress = true;
     button.disabled = true;
     button.textContent = 'Проверяем расширение…';
-    status.textContent = 'Проверяем связь с расширением Music Importer…';
+    status.textContent = 'Проверка связи…';
     const requestId = window.crypto.randomUUID();
     let answered = false;
     const timeout = setTimeout(() => {
       if (answered) return;
       window.removeEventListener('message', onMessage);
       extensionCheckInProgress = false;
-      status.textContent = 'Расширение не подключено к этой странице. Если страница открыта во встроенном окне (например, Codex) или другом браузере, Chrome-расширение её не увидит. Откройте Music Importer значком в панели обычного Chrome: приложение внутри расширения просканирует открытые аккаунты. Эта localhost-страница — запасной режим.';
+      status.textContent = 'Откройте Music Importer из панели Chrome.';
       updateSourceCount();
       button.textContent = 'Повторить проверку';
       button.disabled = false;
@@ -141,8 +141,8 @@
       state.extensionAvailable = true;
       updateSourceCount();
       $('#openServicesBtn').disabled = false;
-      status.textContent = `Локальное расширение Chrome подключено · версия ${String(event.data.version || 'неизвестна')}. Начинаю сбор открытых аккаунтов.`;
-      button.textContent = 'Подключаем аккаунты…';
+      status.textContent = `Подключено · ${String(event.data.version || 'неизвестна')}`;
+      button.textContent = 'Обновить библиотеки';
       button.disabled = false;
       void scanOpenAccounts(true);
     };
@@ -192,7 +192,7 @@
     lastSnapshotUsageSignature = signature;
     const getBytesInUse = chrome.storage?.local?.getBytesInUse;
     if (!extensionApp || typeof getBytesInUse !== 'function') {
-      status.textContent = 'Размер снимков можно посмотреть внутри приложения расширения.';
+      status.textContent = 'Недоступно';
       return;
     }
     const request = ++snapshotUsageRequest;
@@ -201,10 +201,10 @@
       if (request !== snapshotUsageRequest) return;
       const accountCount = Object.keys(snapshots).length;
       status.textContent = accountCount
-        ? `Данные коннекторов занимают примерно ${formatStorageBytes(bytes)} · аккаунтов: ${accountCount}. Оценка включает служебное состояние.`
-        : 'Сохранённых снимков библиотек нет.';
+        ? `Снимки: ${accountCount} · ${formatStorageBytes(bytes)}`
+        : 'Нет снимков';
     } catch {
-      if (request === snapshotUsageRequest) status.textContent = 'Не удалось определить размер локальных данных.';
+      if (request === snapshotUsageRequest) status.textContent = 'Размер недоступен';
     }
   }
 
@@ -443,6 +443,14 @@
           ...(status.status === 'ready' && freshness !== 'fresh'
             ? { status: 'stale', message: 'Сохранённый снимок старше шести часов; обновите библиотеку.' }
             : {}),
+        };
+      }
+    }
+    for (const [provider, status] of Object.entries(state.libraryStatuses)) {
+      if (/не сообщал о прогрессе 2 минуты|неполный снимок не сохранён/i.test(String(status.message || ''))) {
+        state.libraryStatuses[provider] = {
+          ...status,
+          message: `${sourceLabels[provider] || provider}: нет прогресса 2 минуты. Снимок не сохранён.`,
         };
       }
     }
@@ -1147,23 +1155,23 @@
     const targetStatus = state.libraryStatuses[state.targetProvider];
     const targetSnapshot = state.librarySnapshots[state.targetProvider];
     if (!state.targetProvider) {
-      statusElement.textContent = 'Выберите целевой сервис после подключения нужных аккаунтов.';
+      statusElement.textContent = 'Выберите сервис назначения.';
     } else if (targetStatus?.status === 'ready' && targetSnapshot) {
       statusElement.textContent = `Аккаунт ${label} доступен · ${targetStatus.trackCount ?? targetSnapshot.tracks?.length ?? 0} лайков · ${targetStatus.playlistCount ?? targetSnapshot.playlists?.length ?? 0} плейлистов.`;
     } else if (targetStatus?.status === 'scanning') {
       statusElement.textContent = targetStatus.message || `Проверяю аккаунт ${label}…`;
     } else if (targetStatus?.status === 'stale') {
-      statusElement.textContent = `Снимок ${label} сохранён, но текущая сессия не обновилась. Проверьте вкладку и повторите сканирование.`;
+      statusElement.textContent = `Снимок ${label} сохранён; обновление не завершено.`;
     } else if (targetStatus?.status === 'unavailable') {
-      statusElement.textContent = `${label}: ${targetStatus.message || 'аккаунт не подключён'}. Откройте сервис и войдите в Chrome.`;
+      statusElement.textContent = `${label}: ${targetStatus.message || 'нет подключения'}`;
     } else if (targetSnapshot) {
-      statusElement.textContent = `Библиотека ${label} считана. Перед записью потребуется активная вкладка этого сервиса.`;
+      statusElement.textContent = `Библиотека ${label} считана.`;
     } else if (state.extensionAvailable) {
-      statusElement.textContent = `Аккаунт ${label} не найден среди открытых библиотек. Войдите в сервис и нажмите «Обновить библиотеки».`;
+      statusElement.textContent = `${label} не найден. Обновите библиотеки.`;
     } else if (state.loaded && state.sourceSnapshot?.completeness?.confirmed !== true) {
-      statusElement.textContent = 'Демо и CSV подходят для предпросмотра; для записи нужен полный снимок и открытый целевой аккаунт.';
+      statusElement.textContent = 'Для переноса нужен полный снимок и целевой аккаунт.';
     } else {
-      statusElement.textContent = `Для поиска по аккаунту и записи откройте ${label} в Chrome и войдите в него.`;
+      statusElement.textContent = `Войдите в ${label} в Chrome.`;
     }
   }
 
@@ -1236,7 +1244,7 @@
     const status = $('#matchCacheStatus');
     if (!status || !window.MusicMatchCache) return;
     const count = await window.MusicMatchCache.count();
-    status.textContent = `На этом устройстве сохранено результатов поиска и решений: ${count.toLocaleString('ru-RU')}. Результаты хранятся до 30 дней (пустые — 7), решения — до 180 дней.`;
+    status.textContent = `Кэш поиска: ${count.toLocaleString('ru-RU')}`;
   }
 
   async function searchOne(track) {
@@ -1877,8 +1885,8 @@
       if (!response?.ok) throw new Error(response?.error || `Не удалось открыть ${sourceLabels[provider]}.`);
       const opened = (response.opened || []).includes(provider);
       $('#extensionStatus').textContent = opened
-        ? `Открыл ${sourceLabels[provider]}. Войдите в аккаунт на этой вкладке, затем вернитесь сюда — библиотека загрузится автоматически.`
-        : `Переключился на вкладку ${sourceLabels[provider]}. Войдите в аккаунт, затем вернитесь сюда — библиотека загрузится автоматически.`;
+        ? `Открыл ${sourceLabels[provider]}. Войдите и вернитесь.`
+        : `${sourceLabels[provider]} уже открыт. Войдите и вернитесь.`;
       toast(opened ? `Открыт ${sourceLabels[provider]} для входа` : `${sourceLabels[provider]} уже открыт`);
     } catch (error) {
       state.pendingLoginProviders.delete(provider);
@@ -1904,8 +1912,8 @@
       const opened = (response.opened || []).map((id) => names[id] || id);
       const alreadyOpen = (response.alreadyOpen || []).map((id) => names[id] || id);
       $('#extensionStatus').textContent = opened.length
-        ? `Открыты вкладки нужных сервисов: ${opened.join(', ')}. Войдите в эти аккаунты и вернитесь в Music Importer — он проверит их автоматически. Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
-        : `Вкладки выбранных сервисов уже открыты: ${alreadyOpen.join(', ') || 'нет'}. Войдите в аккаунты и вернитесь в Music Importer — он проверит их автоматически.`;
+        ? `Открыты: ${opened.join(', ')}. Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`
+        : `Уже открыты: ${alreadyOpen.join(', ') || 'нет'}.`;
       toast(opened.length ? `Открыто вкладок для входа: ${opened.length}` : 'Все вкладки сервисов уже открыты');
     } catch (error) {
       $('#extensionStatus').textContent = error.message || 'Не удалось открыть сервисы.';
@@ -1930,8 +1938,8 @@
     button.disabled = true;
     button.textContent = 'Обновить библиотеки';
     $('#extensionStatus').textContent = automatic
-      ? 'Проверяю локальные снимки библиотек и обновляю устаревшие аккаунты…'
-      : 'Обновляю библиотеки; недостающие страницы сервисов откроются в фоне…';
+      ? 'Проверяю библиотеки…'
+      : 'Обновляю библиотеки…';
     const deadline = Date.now() + 2 * 60 * 60 * 1000;
     let providersBeingRefreshed = refreshProviders;
     try {
@@ -1962,8 +1970,8 @@
         const running = Object.entries(response.statuses || {}).filter(([, status]) => status.status === 'scanning');
         button.textContent = 'Обновить библиотеки';
         $('#extensionStatus').textContent = running.length
-          ? `Идёт сбор для ${running.length} ${running.length === 1 ? 'сервиса' : 'сервисов'}. Подробный статус показан в карточке каждого сервиса.`
-          : 'Проверяем состояние выбранных сервисов…';
+          ? `Сбор: ${running.length} ${running.length === 1 ? 'сервис' : 'сервисов'}`
+          : 'Проверка…';
         await new Promise((resolve) => setTimeout(resolve, 2000));
         response = await requestAllLibraries(false, providersBeingRefreshed);
       }
@@ -1990,7 +1998,7 @@
       const failed = Object.values(response.statuses || {}).filter((status) => status.status === 'failed').length;
       const stale = Object.values(response.statuses || {}).filter((status) => status.status === 'stale').length;
       const partialCount = connected.filter((provider) => state.partialLibraries[provider] && !state.librarySnapshots[provider]).length;
-      $('#extensionStatus').textContent = `Данные доступны: ${connected.length} из 4${partialCount ? ` · только лайки подтверждены: ${partialCount}` : ''}${stale ? ` · не обновились: ${stale}` : ''}${failed ? ` · ошибка чтения: ${failed}` : ''}${unavailable ? ` · нет сессии: ${unavailable}` : ''}. Выберите источник выше.`;
+      $('#extensionStatus').textContent = `${connected.length} из 4${partialCount ? ` · частичный снимок: ${partialCount}` : ''}${stale ? ` · устарел: ${stale}` : ''}${failed ? ` · ошибка: ${failed}` : ''}${unavailable ? ` · нет сессии: ${unavailable}` : ''}`;
       if (!automatic || connected.length) {
         if (stale) toast(`Доступно библиотек: ${connected.length}; часть снимков не обновилась`);
         else if (failed) toast(`Загружено библиотек: ${connected.length}; часть сервисов не смогла прочитать аккаунт`);
@@ -2286,7 +2294,7 @@
   $('#clearMatchCache').addEventListener('click', async () => {
     await window.MusicMatchCache?.clear();
     await updateMatchCacheStatus();
-    toast('Локальные результаты и решения очищены');
+    toast('Кэш поиска очищен');
   });
 
   $('#clearLibrarySnapshots')?.addEventListener('click', async () => {
@@ -2326,10 +2334,10 @@
       renderSourceAvailability({});
       renderTracks();
       updateCounts();
-      $('#extensionStatus').textContent = 'Локальные снимки удалены. Можно заново просканировать открытые аккаунты.';
+      $('#extensionStatus').textContent = 'Снимки удалены';
       $('#extensionImportBtn').disabled = false;
       $('#extensionImportBtn').textContent = 'Обновить библиотеки';
-      toast('Локальные снимки библиотек удалены; музыкальные аккаунты не менялись.');
+      toast('Снимки удалены');
     } catch (error) {
       toast(error.message || 'Не удалось удалить снимки библиотек.');
     } finally {
