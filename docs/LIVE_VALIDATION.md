@@ -391,3 +391,4 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 
 - Read the installed version through the existing app's `music-importer-local-app` extension ping; Chrome returned **0.15.2**, while the current `develop` manifest is **0.15.4**. No tokens, cookies, or account data were read.
 - This confirms the live Spotify/Zvuk/Yandex retries so far used an older extension build and cannot validate current provider readers. The user was asked to reload the Music Importer extension in the existing Chrome profile. Chrome DevTools MCP refuses navigation to both `chrome://extensions/` and `chrome-extension://…/popup.html`, so I cannot perform that reload through the required MCP.
+- Port `8001` is still served by Python's static `http.server` (PID `67763`) from `/Users/basil/Code/music_importer/demo`; the open app is the unified checkout, not the older `music_importer-mvp` tree, and no backend process is running.
