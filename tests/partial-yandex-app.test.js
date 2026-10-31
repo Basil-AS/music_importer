@@ -80,6 +80,23 @@ test('legacy watchdog text is shown as a concise provider status', async () => {
   assert.equal(spotify.status.textContent, 'Spotify: нет прогресса 2 минуты. Снимок не сохранён.');
 });
 
+test('provider watchdog status keeps the last confirmed phase for diagnosis', async () => {
+  const harness = createAppHarness({
+    libraries: {},
+    statuses: {
+      spotify: {
+        status: 'failed',
+        phase: 'favorites',
+        message: 'Spotify: нет прогресса 2 минуты. Последний этап — чтение лайков. Снимок не сохранён.',
+      },
+    },
+    handler: async () => ({ ok: true }),
+  });
+  const spotify = harness.cards.find((card) => card.dataset.provider === 'spotify');
+  await harness.waitFor(() => /Последний этап/.test(spotify.status.textContent), 'watchdog last phase');
+  assert.equal(spotify.status.textContent, 'Spotify: нет прогресса 2 минуты. Последний этап — чтение лайков. Снимок не сохранён.');
+});
+
 test('active library progress is shown on each provider card without a shared toolbar status', async () => {
   let pendingRequests = 0;
   const snapshot = {
