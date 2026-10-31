@@ -576,12 +576,9 @@ async function requestProviderLibrary(provider, refresh) {
     .find((snapshot) => snapshot?.completeness?.confirmed === true);
   if (scan?.status === 'reading' && Number.isFinite(lastUpdate) && Date.now() - lastUpdate > staleAfterMs) {
     const providerName = provider === 'spotify' ? 'Spotify' : provider === 'apple-music' ? 'Apple Music' : 'Яндекс.Музыка';
-    const retryAction = provider === 'spotify'
-      ? 'повторите чтение кнопкой на карточке Spotify'
-      : `нажмите «Повторить сбор» на карточке ${providerName}`;
     const staleMessage = provider === 'spotify' && scan.phase === 'auth-refresh'
-      ? 'Spotify не обновил сессию после HTTP 401 за 20 секунд. Войдите в Spotify и повторите сканирование.'
-      : `${providerName} не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; ${retryAction}.`;
+      ? 'Spotify не обновил сессию после HTTP 401. Проверьте вход.'
+      : `${providerName}: нет прогресса 2 минуты. Снимок не сохранён.`;
     const update = await mutateProviderState((current) => {
       const latest = current.scans[provider];
       const latestAt = Date.parse(latest?.updatedAt || latest?.startedAt || '');
@@ -672,7 +669,7 @@ async function requestZvukLibrary(refresh) {
   if (state.scan?.active) {
     const lastActivity = Date.parse(state.updatedAt || state.scan.startedAt || '');
     if (Number.isFinite(lastActivity) && Date.now() - lastActivity > PROVIDER_SCAN_STALE_AFTER_MS) {
-      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Сбер.Звук не сообщал о прогрессе 2 минуты. Неполный снимок не сохранён; нажмите «Повторить сбор» на карточке Сбер.Звука.' };
+      state.scan = { ...state.scan, active: false, phase: 'needs_review', error: 'Сбер.Звук: нет прогресса 2 минуты. Снимок не сохранён.' };
       state.captureEnabled = false;
       state.automation = { ...state.automation, active: false };
       state.error = state.scan.error;

@@ -198,27 +198,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   color:var(--green)
 }
 
-.notice {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding:13px 16px;
-  border:1px solid #dfbb6640;
-  background:#f2c8790b;
-  border-radius:13px;
-  color:#e5d5b0;
-  font-size:13px;
-  margin-bottom:22px
-}
-
-.notice strong {
-  color:#f4deb0
-}
-
-.notice .info {
-  font-size:16px
-}
-
 .layout {
   display:grid;
   grid-template-columns:minmax(0,1fr) 300px;
@@ -992,11 +971,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     display:none
   }
 
-  .notice {
-    align-items:flex-start;
-    font-size:12px
-  }
-
   .layout {
     grid-template-columns:minmax(0,1fr);
     gap:13px
@@ -1426,16 +1400,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   color:#fff
 }
 
-:root[data-theme="light"] .notice {
-  background:#f0b83b12;
-  color:#66501f;
-  border-color:#b7831f40
-}
-
-:root[data-theme="light"] .notice strong {
-  color:#57410f
-}
-
 :root[data-theme="light"] .match select,:root[data-theme="light"] .match input,:root[data-theme="light"] .track-query,:root[data-theme="light"] .catalog-tools select {
   background-color:#fff;
   border-color:#c9c9d2;
@@ -1505,11 +1469,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .catalog-select { max-width:100%; background:var(--control-bg); border:1px solid var(--control-border); color:var(--text); border-radius:8px; padding:9px }
 .source-collection-tools { margin-top:12px }
 .extension-status { margin-top:10px }
-.onboarding-note { margin-top:6px }
 .stat-review { color:var(--amber) }
 .stat-missing { color:var(--red) }
-.transfer-note { margin:8px 0 0 }
-.report-breakdown,.report-note { margin-top:10px }
+.report-breakdown { margin-top:10px }
 .report-download { margin-top:12px }
 .source { display:grid; grid-template-rows:auto minmax(34px,auto) 4px minmax(30px,auto) auto auto; align-content:start }
 .source-progress { display:block; width:100%; height:4px; margin:4px 0 0; accent-color:var(--green) }

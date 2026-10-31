@@ -144,18 +144,20 @@ test('each provider card has its own progress indicator and visible retry contro
   }
   assert.match(html, /class="library-scan-toolbar"[\s\S]*?id="extensionImportBtn"/);
   assert.match(app, /status\.message \|\| `Обновляем \$\{sourceLabels\[provider\]\}/);
-  assert.match(app, /Подробный статус показан в карточке каждого сервиса/);
+  assert.match(app, /`Сбор: \$\{running\.length\}/);
   assert.doesNotMatch(app, /running\[0\]|running\.join\(' · '\)/);
   assert.match(app, /requestAllLibraries\(false, providersBeingRefreshed\)/);
   assert.match(app, /pendingProviderRetries\.add\(provider\)/);
 });
 
-test('account-first copy names likes and playlists and presents CSV/JSON as an alternative', () => {
+test('account-first copy keeps only concise actions and statuses', () => {
   const html = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
   assert.match(html, /Перенос лайков и плейлистов/);
   assert.match(html, /Лайки и плейлисты из аккаунта/);
-  assert.match(html, /CSV\/JSON можно загрузить как альтернативный источник/);
-  assert.match(html, /Доступность зависит от входа и текущей работы сервиса/);
+  assert.match(html, /Импорт CSV\/JSON/);
+  assert.match(html, /<summary>Не подключается\?<\/summary>/);
+  assert.doesNotMatch(html, /Подготовлены коннекторы четырёх сервисов|Доступность зависит от входа|onboarding-note|Вы управляете переносом|Сессионные API-заголовки/);
+  assert.doesNotMatch(html, /checkout проекта|localhost-страница|CSV\/JSON можно загрузить как альтернативный источник/);
   assert.doesNotMatch(html, /доступны как источники и цели/);
   assert.match(html, /src="provider-connection-flow\.js"/);
 });
