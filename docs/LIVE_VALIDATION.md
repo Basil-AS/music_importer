@@ -371,3 +371,11 @@ Static review found that source scanning fetched and buffered a Spotify CDN bund
 - The worker now includes the last confirmed safe phase in a two-minute provider watchdog error (for example, Spotify likes versus playlist catalog). It does not include a track or playlist name. This distinguishes an idle phase without claiming that phase caused the stall.
 - Worker fixture verifies the last phase remains visible in the status; app fixture verifies the card displays it. Focused worker/app tests pass **66/66**; the full suite passes **386/386**.
 - In the currently installed Chrome extension, Spotify and Zvuk still show older error text. Chrome DevTools MCP again refused `chrome://extensions/`; this diagnostic code needs the unpacked extension reloaded before it can help the live diagnosis.
+
+## 2026-10-31 — compact importer header and browser console cleanup
+
+- Removed the promotional hero and duplicated app name. The header now has one concise page heading; the service workflow and per-provider card status remain visible.
+- Added a hosting fixture that checks all four provider cards have their own live status and progress element.
+- Added the app favicon after Chrome DevTools MCP showed a 404 for `/favicon.ico`. Reloading the app then produced no console errors or warnings.
+- Reloading the app through Chrome DevTools MCP triggered read-only background library refreshes. Progress appeared inside each provider card; the shared status stayed empty. Yandex advanced through liked-track pages, then confirmed likes but rejected the full snapshot because a playlist page was empty. Apple Music completed one refresh, then advanced through a second read's playlist items. Spotify still reported its prior two-minute timeout; Zvuk again failed on GraphQL playlist page 2. No account writes were started.
+- Full suite passed **386/386** after the header change. After adding the favicon asset, focused hosting, provider-progress, and accessibility checks passed **18/18**, the extension app bundle check passed, and `git diff --check` passed. Chrome DevTools MCP still refuses `chrome://extensions/`, so the separate extension-reload blocker remains.

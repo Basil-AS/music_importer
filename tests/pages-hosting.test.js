@@ -60,6 +60,16 @@ test('extension and deployment are scoped to the project Pages URL', () => {
   assert.equal(manifest.version, '0.15.3');
 
   const appHtml = fs.readFileSync(require.resolve('../demo/index.html'), 'utf8');
+  assert.match(appHtml, /<h1>Перенос музыки<\/h1>/);
+  assert.match(appHtml, /<link rel="icon" href="assets\/favicon\.svg" type="image\/svg\+xml">/);
+  assert.ok(fs.existsSync(require.resolve('../demo/assets/favicon.svg')));
+  assert.doesNotMatch(appHtml, /Соберите свою библиотеку|class="hero"|library без границ/i);
+  for (const provider of ['zvuk', 'spotify', 'yandex-music', 'apple-music']) {
+    const card = appHtml.match(new RegExp(`<article class="source"[^>]*data-provider="${provider}"[\\s\\S]*?<\\/article>`))?.[0];
+    assert.ok(card, `missing ${provider} library card`);
+    assert.match(card, /class="source-status"[^>]*role="status"/);
+    assert.match(card, /class="source-progress"/);
+  }
   assert.match(appHtml, /<meta name="description" content="[^"]+">/);
   const popupHtml = fs.readFileSync(require.resolve('../chrome-extension/popup.html'), 'utf8');
   for (const copy of [
