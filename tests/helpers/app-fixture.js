@@ -21,6 +21,12 @@ function makeElement(selector, registry) {
     addEventListener(type, handler) { (listeners[type] ||= []).push(handler); },
     removeEventListener() {},
     click() { element.clickCount += 1; },
+    toggleAttribute(name, force) {
+      const enabled = force === undefined ? !attributes.has(name) : Boolean(force);
+      if (enabled) attributes.set(name, '');
+      else attributes.delete(name);
+      return enabled;
+    },
     setAttribute(name, value) { attributes.set(name, String(value)); },
     removeAttribute(name) { attributes.delete(name); },
     getAttribute(name) { return attributes.get(name) ?? null; },
@@ -43,7 +49,18 @@ function createAppHarness({ libraries, partialLibraries = {}, handler, statuses 
     card.dataset.provider = provider;
     card.connect = registry.get(`.source[data-provider="${provider}"] .connect`);
     card.connect.closest = () => card;
-    card.querySelector = (child) => (child === '.connect' ? card.connect : registry.get(`${provider} ${child}`));
+    card.status = registry.get(`.source[data-provider="${provider}"] .source-status`);
+    card.progress = registry.get(`.source[data-provider="${provider}"] .source-progress`);
+    card.collections = registry.get(`.source[data-provider="${provider}"] .source-collections`);
+    card.retry = registry.get(`.source[data-provider="${provider}"] .source-retry`);
+    card.retry.closest = () => card;
+    card.querySelector = (child) => ({
+      '.connect': card.connect,
+      '.source-status': card.status,
+      '.source-progress': card.progress,
+      '.source-collections': card.collections,
+      '.source-retry': card.retry,
+    })[child] || registry.get(`${provider} ${child}`);
     return card;
   });
   const steps = Array.from({ length: 5 }, (_, index) => registry.get(`.step[data-step="${index + 1}"]`));
@@ -56,7 +73,8 @@ function createAppHarness({ libraries, partialLibraries = {}, handler, statuses 
   const progressPorts = [];
   const document = {
     querySelector: (selector) => registry.get(selector),
-    querySelectorAll: (selector) => (selector === '.source' ? cards : selector === '.source .connect' ? cards.map((card) => card.connect) : selector === '.step' ? steps : []),
+    querySelectorAll: (selector) => (selector === '.source' ? cards : selector === '.source .connect' ? cards.map((card) => card.connect)
+      : selector === '.source .source-retry' ? cards.map((card) => card.retry) : selector === '.step' ? steps : []),
     addEventListener() {},
     createElement: (tag) => makeElement(`<${tag}>`, registry),
     visibilityState: 'visible',
